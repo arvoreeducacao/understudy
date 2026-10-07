@@ -15,6 +15,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
 COPY --from=build --chown=node:node /repo/apps/web/dist ./apps/web/dist
 COPY --from=build --chown=node:node /repo/apps/web/drizzle ./apps/web/drizzle
 COPY --from=build --chown=node:node /repo/apps/extension/dist ./apps/extension/dist
