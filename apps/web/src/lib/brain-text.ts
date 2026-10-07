@@ -1,6 +1,10 @@
 export const brainText = {
   testContext: "This is a test run requested by the owner. Ask for approval before every step that cannot be undone.",
   expiredNote: "timed out",
+  ownerSlackMissing:
+    "Your owner got the message in the panel chat, but not on Slack: the panel could not find their Slack account. Do not look them up by name or email; they can connect their Slack account in Settings in the panel.",
+  ownerSlackOff: "Your owner got the message in the panel chat. Slack is not connected to the panel, so nothing went to Slack.",
+  ownerSlackFailed: (error: string) => `Your owner got the message in the panel chat, but Slack refused the direct message (${error}).`,
   stoppedNote: "your owner stopped what you were doing, so this step was not done. Do not try it again unless your owner asks",
   runInput: (trigger: string, input: string) =>
     trigger === "watch"

@@ -287,3 +287,41 @@ test("when Slack cannot stream, the final answer is posted once as a normal mess
     streamsWork = true;
   }
 });
+
+test("an owner whose Slack email differs from the panel email links their Slack account once and is then reached and recognized", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { linkSlackUser, readSlackLinkToken, unlinkSlackUser } = await import("./slack-link");
+  const hub = createHub();
+  try {
+    assert.deepEqual(await hub.notifyOwner(ids.ana, "Before the link"), { slack: false, error: "user_not_found" });
+
+    const mention = { type: "app_mention", user: "ULINKED01", text: "<@UBOT> Ana, hello", channel: "C7", ts: "300.1" };
+    await signed("/api/slack/events", JSON.stringify({ type: "event_callback", event_id: "EvLink1", event: mention }), "application/json");
+    await settle();
+    const publicReply = slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "C7").at(-1);
+    assert.ok(publicReply);
+    assert.doesNotMatch(JSON.stringify(publicReply.body), /settings\?slack=/);
+
+    const dm = { type: "message", channel_type: "im", user: "ULINKED01", text: "Ana, hello", channel: "D7", ts: "300.2" };
+    await signed("/api/slack/events", JSON.stringify({ type: "event_callback", event_id: "EvLink2", event: dm }), "application/json");
+    await settle();
+    assert.equal(deliveredText("hello").length, 0);
+    const privateReply = slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "D7").at(-1);
+    const link = JSON.stringify(privateReply?.body.blocks).match(/https:\/\/panel\.example\.com\/settings\?slack=([^#)\\"]+)#slack/);
+    assert.ok(link, "the private reply carries a link to connect the Slack account");
+    assert.equal(readSlackLinkToken(decodeURIComponent(link[1])), "ULINKED01");
+
+    await linkSlackUser(ids.owner, "ULINKED01");
+    assert.deepEqual(await hub.notifyOwner(ids.ana, "After the link"), { slack: true });
+    const notified = slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "ULINKED01").at(-1);
+    assert.equal(notified?.body.text, "After the link");
+
+    const linkedDm = { ...dm, text: "Ana, check the linked inbox", ts: "300.3" };
+    await signed("/api/slack/events", JSON.stringify({ type: "event_callback", event_id: "EvLink3", event: linkedDm }), "application/json");
+    await settle();
+    const [delivered] = deliveredText("check the linked inbox");
+    assert.equal(delivered?.agentId, ids.ana);
+  } finally {
+    await unlinkSlackUser(ids.owner);
+  }
+});
