@@ -9,8 +9,9 @@ import { requireAdmin } from "@/lib/session";
 import { forgetServer, slugify, testConnection } from "@/server/upstream";
 import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
+import { beginSignIn, oauthCallbackUrl, oauthSupport } from "@/server/connector-oauth";
 
-export type AddServerState = { ok: boolean; message: string; id?: string } | null;
+export type AddServerState = { ok: boolean; message: string; id?: string; signIn?: { needsClient: boolean; returnAddress: string } } | null;
 
 export async function addMcpServer(_: AddServerState, form: FormData): Promise<AddServerState> {
   const admin = await requireAdmin();
@@ -37,6 +38,10 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     allowedEmails: null,
   };
   const test = await testConnection(row);
+  if (!test.ok && test.problem === "unauthorized" && !headerValue) {
+    const support = await oauthSupport(url);
+    if (support.supported) return { ok: false, message: "", signIn: { needsClient: !support.registers, returnAddress: oauthCallbackUrl() } };
+  }
   if (!test.ok) return { ok: false, message: messages.admin.serverProblem[test.problem] };
   await db.insert(schema.mcpServers).values(row);
   revalidatePath("/admin", "layout");
@@ -85,4 +90,57 @@ export async function setServerAccess(id: string, everyone: boolean, emails: str
 export async function searchConnectorCatalog(query: string) {
   await requireAdmin();
   return searchCatalog(String(query ?? ""));
+}
+
+export type SignInState = { ok: false; message: string } | { ok: true; to: string } | null;
+
+export async function startConnectorSignIn(_: SignInState, form: FormData): Promise<SignInState> {
+  const admin = await requireAdmin();
+  const name = String(form.get("name") ?? "").trim().slice(0, 60);
+  const url = String(form.get("url") ?? "").trim();
+  const clientId = String(form.get("clientId") ?? "").trim().slice(0, 500);
+  const clientSecret = String(form.get("clientSecret") ?? "").trim().slice(0, 2000);
+  if (!name || !/^https:\/\//i.test(url)) return { ok: false, message: messages.admin.serverBadInput };
+  const db = getDb();
+  let slug = slugify(name);
+  const taken = await db.select({ slug: schema.mcpServers.slug }).from(schema.mcpServers);
+  if (taken.some((t) => t.slug === slug)) slug = `${slug}_${taken.length + 1}`;
+  const row = {
+    id: newId("mcp"),
+    name,
+    slug,
+    url,
+    headerName: null,
+    headerValue: null,
+    oauthClient: seal(JSON.stringify(clientId ? { client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) } : null)),
+    oauthTokens: null,
+    oauthState: null,
+    oauthVerifier: null,
+    createdBy: admin.id,
+    createdAt: new Date(),
+    askAll: false,
+    askTools: [] as string[],
+    allowedEmails: null,
+  };
+  await db.insert(schema.mcpServers).values(row);
+  try {
+    return { ok: true, to: await beginSignIn(row) };
+  } catch (error) {
+    console.error(JSON.stringify({ event: "connector_sign_in_failed", url, error: String(error) }));
+    await db.delete(schema.mcpServers).where(eq(schema.mcpServers.id, row.id));
+    return { ok: false, message: clientId ? messages.admin.signInRefusedClient : messages.admin.signInFailed };
+  }
+}
+
+export async function signInConnectorAgain(id: string): Promise<SignInState> {
+  await requireAdmin();
+  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
+  if (!server) return { ok: false, message: messages.common.notFound };
+  try {
+    forgetServer(id);
+    return { ok: true, to: await beginSignIn(server) };
+  } catch (error) {
+    console.error(JSON.stringify({ event: "connector_sign_in_failed", url: server.url, error: String(error) }));
+    return { ok: false, message: messages.admin.signInFailed };
+  }
 }

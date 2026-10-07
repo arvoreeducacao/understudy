@@ -3,12 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc } from "drizzle-orm";
 import { ConnectForm, ConnectorLogo, ManualConnectForm } from "@/components/approvals/ConnectorShowcase";
-import { ConnectedActions, ConnectorActionsList, ConnectorSettings } from "@/components/approvals/ServersAdmin";
+import { ConnectedActions, ConnectorActionsList, ConnectorSettings, SignInAgain } from "@/components/approvals/ServersAdmin";
 import { CUSTOM_CONNECTOR, featuredById, featuredFor, fromCatalog, publisherLine, sameAddress, type Connector } from "@/lib/connector-showcase";
 import { getDb, schema } from "@/lib/db";
 import { messages } from "@/lib/messages";
 import { requireAdmin } from "@/lib/session";
 import { searchCatalog } from "@/server/connector-catalog";
+import { oauthCallbackUrl, usesOAuth } from "@/server/connector-oauth";
 import { listUpstreamTools } from "@/server/upstream";
 
 const t = messages.admin;
@@ -39,7 +40,7 @@ function Back() {
   );
 }
 
-export default async function ConnectorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ id?: string; q?: string }> }) {
+export default async function ConnectorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ id?: string; q?: string; signin?: string }> }) {
   await requireAdmin();
   const { id } = await params;
   const query = await searchParams;
@@ -93,6 +94,10 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
                 <h2 className="m-0 text-[15px] font-semibold flex-1">{t.connectorWhat}</h2>
                 <ConnectedActions id={server.id} />
               </div>
+              {query.signin === "done" && tools && <p className="m-0 text-[13px] text-green">{t.signInDone}</p>}
+              {query.signin === "failed" && <p role="alert" className="m-0 text-[13px] text-coral">{t.signInDidNotFinish}</p>}
+              {query.signin === "refused" && <p role="alert" className="m-0 text-[13px] text-coral">{t.signInCancelled}</p>}
+              {usesOAuth(server) && !tools && <SignInAgain id={server.id} />}
               {tools && tools.length > 0 ? <ConnectorActionsList tools={tools} /> : <p className="m-0 text-[13px] text-smoke">{tools ? t.connectorNoActions : t.connectorDownHint}</p>}
             </section>
             <section className="card conn-panel">
@@ -103,7 +108,7 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
             </section>
           </>
         ) : (
-          <ConnectForm connector={connector} />
+          <ConnectForm connector={connector} returnAddress={oauthCallbackUrl()} />
         )}
       </div>
     </div>

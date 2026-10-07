@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { open } from "@/lib/secret-box";
+import { StoredOAuthProvider, usesOAuth } from "./connector-oauth";
 import { safeFetch } from "./safe-fetch";
 
 export type UpstreamServer = typeof schema.mcpServers.$inferSelect;
@@ -20,7 +21,8 @@ async function connect(server: UpstreamServer) {
   const headers: Record<string, string> = {};
   if (server.headerName && server.headerValue) headers[server.headerName] = open(server.headerValue);
   const client = new Client({ name: "understudy-gatekeeper", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers, redirect: "error" }, fetch: safeFetch });
+  const authProvider = usesOAuth(server) ? new StoredOAuthProvider(server) : undefined;
+  const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers, redirect: "error" }, fetch: safeFetch, authProvider });
   await client.connect(transport);
   return client;
 }
