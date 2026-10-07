@@ -29,6 +29,17 @@ export const ptBR: Messages = {
     installBody: "Coloque o painel na tela inicial do celular para abrir com um toque, como qualquer outro app.",
     installIphone: "iPhone: toque em Compartilhar e depois em Adicionar à Tela de Início.",
     installAndroid: "Android: abra o menu do navegador e toque em Instalar app.",
+    slackTitle: "Slack",
+    slackBody: "Seus agentes falam com você no Slack: aprovações, avisos e o resumo da manhã.",
+    slackLinked: (name: string) => `Conectado à conta do Slack ${name}.`,
+    slackByEmail:
+      "Seus agentes te acham no Slack pelo e-mail com que você entra aqui. Se o seu Slack usa outro e-mail, mande qualquer mensagem direta para o app do Slack e abra o link que ele responder.",
+    slackConfirm: (name: string) =>
+      `Conectar a conta do Slack ${name} à sua conta do painel? Seus agentes vão falar com você por lá, e o que você escrever para o app do Slack vai valer como você.`,
+    slackConnect: "Conectar",
+    slackDisconnect: "Desconectar",
+    slackDisconnectConfirm: "Desconectar esta conta do Slack? Seus agentes voltam a te procurar pelo seu e-mail.",
+    slackExpired: "Esse link venceu ou não é válido. Mande uma nova mensagem direta para o app do Slack para receber outro.",
   },
   push: {
     approvalTitle: (name: string) => `${name} precisa da sua aprovação`,
@@ -48,7 +59,10 @@ export const ptBR: Messages = {
     fromPanel: (author: string, text: string) => `**${author}** (pelo painel): ${text}`,
     starting: "Ligando meu computador. Respondo aqui em instantes.",
     gaveUp: "Meu computador não voltou em 30 minutos, então não consegui ler isto. Mande de novo, por favor.",
-    unknownUser: (url: string) => `Ainda não te conheço. Entre em ${url} com o mesmo e-mail que você usa no Slack.`,
+    unknownUser: (url: string) => `Ainda não te conheço. Entre em ${url} com o mesmo e-mail que você usa no Slack, ou me mande uma mensagem direta para conectar esta conta do Slack.`,
+    unknownUserLink: (url: string, connect: string) =>
+      `Ainda não te conheço. Entre em ${url} com o mesmo e-mail que você usa no Slack. Se você entra com outro e-mail, ${connect} com a sessão aberta. O link vale por uma hora; não compartilhe.`,
+    connectLabel: "conecte esta conta do Slack",
     noAgents: (url: string) => `Você ainda não tem agentes. Crie um em ${url}.`,
     whichAgent: (names: string[]) => `Qual agente? Comece a mensagem pelo nome dele: ${names.join(", ")}.`,
     sayWhat: "Sim? Diga o que precisa na mesma mensagem.",
