@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { catalogExtras, FEATURED_CONNECTORS, featuredFor, filterFeatured, monogram, sameAddress, withPrefix } from "./connector-showcase";
+import { catalogExtras, FEATURED_CONNECTORS, featuredFor, filterFeatured, logoSources, monogram, sameAddress, withPrefix } from "./connector-showcase";
 import type { CatalogEntry } from "./mcp-registry";
 
 const entry = (id: string, url: string, extra: Partial<CatalogEntry> = {}): CatalogEntry => ({ id, name: id, description: "", url, publisher: { kind: "github", label: "someone" }, ...extra });
@@ -70,5 +70,28 @@ describe("helpers", () => {
     assert.equal(monogram("Mercado Pago"), "MP");
     assert.equal(monogram("linear"), "Li");
     assert.equal(monogram(""), "?");
+  });
+});
+
+describe("logoSources", () => {
+  it("keeps the catalog icon first and falls back to the publisher's own picture", () => {
+    assert.deepEqual(logoSources({ icon: "https://example.com/icon.png", publisher: { kind: "github", label: "someone" }, url: "https://mcp.example.dev/mcp" }), [
+      "https://example.com/icon.png",
+      "https://github.com/someone.png?size=96",
+      "https://mcp.example.dev/favicon.ico",
+      "https://example.dev/favicon.ico",
+    ]);
+  });
+
+  it("tries the publisher domain before the address of the server", () => {
+    assert.deepEqual(logoSources({ publisher: { kind: "domain", label: "example.com" }, url: "https://mcp.example.com/mcp" }), [
+      "https://example.com/favicon.ico",
+      "https://mcp.example.com/favicon.ico",
+    ]);
+  });
+
+  it("never builds an address from a label that is not a plain name", () => {
+    assert.deepEqual(logoSources({ publisher: { kind: "github", label: "../evil" }, url: "not a url" }), []);
+    assert.deepEqual(logoSources({ publisher: { kind: "domain", label: "evil.com/x?" }, url: "https://raw.githubusercontent.com/a" }), []);
   });
 });

@@ -5,19 +5,22 @@ import { ArrowUpRight, Check, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addMcpServer, searchConnectorCatalog, type AddServerState } from "@/app/actions/servers";
-import { catalogExtras, connectorHref, publisherLine, CUSTOM_CONNECTOR, filterFeatured, monogram, sameAddress, SHOWCASE_CATEGORIES, tintOf, withPrefix, type Connector, type ShowcaseCategory } from "@/lib/connector-showcase";
+import { catalogExtras, connectorHref, publisherLine, CUSTOM_CONNECTOR, filterFeatured, logoSources, monogram, sameAddress, SHOWCASE_CATEGORIES, tintOf, withPrefix, type Connector, type ShowcaseCategory } from "@/lib/connector-showcase";
 import type { CatalogEntry } from "@/lib/mcp-registry";
 import { messages } from "@/lib/messages";
 import { Field, Input } from "@/components/ui/controls";
 import { Segmented } from "@/components/ui/Segmented";
 
-export function ConnectorLogo({ name, icon, size = 40 }: { name: string; icon?: string; size?: number }) {
-  const [broken, setBroken] = useState(false);
+export function ConnectorLogo({ connector, size = 40 }: { connector: Pick<Connector, "name" | "icon" | "publisher" | "url">; size?: number }) {
+  const sources = logoSources(connector);
+  const [failed, setFailed] = useState(0);
+  const name = connector.name;
   const style = { "--logo-tint": tintOf(name), width: size, height: size } as CSSProperties;
-  if (icon && !broken)
+  const source = sources[failed];
+  if (source)
     return (
       <span className="conn-logo has-img" style={style} aria-hidden>
-        <img src={icon} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => setBroken(true)} />
+        <img key={source} src={source} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => setFailed((count) => count + 1)} />
       </span>
     );
   return (
@@ -33,7 +36,7 @@ function ConnectorTile({ connector, blurb, connected, query }: { connector: Conn
     <li>
       <Link href={connectorHref(connector, query)} className="conn-tile" aria-label={connected ? `${connector.name}, ${t.showcaseConnected}` : t.showcaseOpen(connector.name)}>
         <span className="flex items-center gap-3 min-w-0">
-          <ConnectorLogo name={connector.name} icon={connector.icon} />
+          <ConnectorLogo connector={connector} />
           <span className="min-w-0 flex-1">
             <span className="conn-name">{connector.name}</span>
             <span className="conn-by">{publisherLine(connector)}</span>
