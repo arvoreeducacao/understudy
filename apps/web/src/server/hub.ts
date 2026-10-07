@@ -359,6 +359,14 @@ export class Hub {
     return this.approvals.answer(id, approved, note, userId);
   }
 
+  cancelApprovals(agentId: string, userId: string | null) {
+    return this.approvals.cancelPending(agentId, userId);
+  }
+
+  approvalStatus(id: string) {
+    return this.approvals.status(id);
+  }
+
   pendingApprovalsFor(agentIds: string[]) {
     return this.approvals.pendingFor(agentIds);
   }

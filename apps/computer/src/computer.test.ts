@@ -1019,3 +1019,99 @@ test("the browser guard hands a rule block to the computer before it answers the
   await notifyGuardSocket(join(tmpdir(), "no-such-guard.sock"), { event: "resumed" });
   assert.ok(Date.now() - started < 1000);
 });
+
+test("stopping a chat turn that waits on an approval ends it and ignores what the dying brain still says", async () => {
+  const home = mkdtempSync(join(tmpdir(), "stop-"));
+  const sent: ComputerToServer[] = [];
+  const turns: string[] = [];
+  let release: () => void = () => {};
+  const agent = createAgent({
+    config: { home, workDir: home, serverUrl: "http://x", token: "t" },
+    memory: createMemory(home),
+    settingsFile: join(home, "settings.json"),
+    send: (message) => (sent.push(message), true),
+    runTurn: (_config, request) => {
+      turns.push(request.prompt);
+      if (turns.length > 1) return { cancel() {}, done: Promise.resolve({ ok: true, sessionId: "s2", text: "ok" }) };
+      const stopped = new Promise<void>((resolve) => (release = resolve));
+      return {
+        cancel: () => release(),
+        done: (async () => {
+          request.onEvent({ kind: "session", sessionId: "s1" });
+          request.onEvent({ kind: "tool", name: "mcp__gatekeeper__slack_join_channel", input: { channel: "#general" } });
+          await stopped;
+          request.onEvent({ kind: "tool_result", name: "mcp__gatekeeper__wait_for_approval", text: "Interrupted by user", isError: true } as BrainEvent);
+          request.onEvent({ kind: "thinking" } as BrainEvent);
+          request.onEvent({ kind: "text", text: "The request was rejected." });
+          return { ok: false, sessionId: "s1", text: "", error: "interrupted" };
+        })(),
+      };
+    },
+  });
+  const states = () => sent.filter((message) => message.type === "state").map((message) => (message as Extract<ComputerToServer, { type: "state" }>).state);
+  agent.enqueue({ kind: "chat", text: "join the channel", from: "Owner" });
+  for (let i = 0; i < 50 && !states().includes("working"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(agent.state(), "working");
+  agent.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(agent.state(), "calm");
+  assert.equal(states().at(-1), "calm");
+  assert.ok(!sent.some((message) => message.type === "chat" && message.text.includes("rejected")));
+  agent.guardEvent({ event: "waiting", summary: "Slack: join #general" });
+  assert.equal(agent.state(), "calm");
+  agent.enqueue({ kind: "chat", text: "hello again", from: "Owner" });
+  for (let i = 0; i < 50 && turns.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(turns.length, 2);
+});
+
+test("cancelling a brain finishes the turn even when a leftover child keeps its output open", async () => {
+  const { spawn } = await import("node:child_process");
+  const { cancelChild } = await import("./brain.ts");
+  const script = `process.on("SIGINT", () => {}); const child = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" }); process.stdout.write(child.pid + "\\n"); setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ["-e", script], { stdio: ["pipe", "pipe", "pipe"] });
+  const grandchild = await new Promise<number>((resolve) => child.stdout!.once("data", (chunk: Buffer) => resolve(Number(chunk.toString().trim()))));
+  const closed = new Promise<void>((resolve) => child.on("close", () => resolve()));
+  const started = Date.now();
+  cancelChild(child, 100)();
+  try {
+    await Promise.race([closed, new Promise((_, reject) => setTimeout(() => reject(new Error("the turn never finished")), 3000))]);
+    assert.ok(Date.now() - started < 3000);
+  } finally {
+    try {
+      process.kill(grandchild, "SIGKILL");
+    } catch {}
+  }
+});
+
+test("stopping a recipe run cancels its brain", async () => {
+  const home = mkdtempSync(join(tmpdir(), "stop-run-"));
+  const sent: ComputerToServer[] = [];
+  let cancelled = 0;
+  let release: () => void = () => {};
+  const agent = createAgent({
+    config: { home, workDir: home, serverUrl: "http://x", token: "t" },
+    memory: createMemory(home),
+    settingsFile: join(home, "settings.json"),
+    send: (message) => (sent.push(message), true),
+    runTurn: (_config, request) => {
+      const stopped = new Promise<void>((resolve) => (release = resolve));
+      return {
+        cancel: () => {
+          cancelled++;
+          release();
+        },
+        done: (async () => {
+          request.onEvent({ kind: "tool", name: "mcp__gatekeeper__request_approval", input: { summary: "Send" } });
+          await stopped;
+          return { ok: false, sessionId: null, text: "", error: "interrupted" };
+        })(),
+      };
+    },
+  });
+  agent.enqueue({ kind: "run", runId: "r-stop", recipe: { title: "Report", trigger: "x", steps: [{ id: "s1", text: "Send", mode: "ask" }], questions: [], askFirstRuns: 3 }, approvalsRequired: true });
+  for (let i = 0; i < 50 && agent.state() !== "waiting_you"; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  agent.stop();
+  for (let i = 0; i < 50 && !sent.some((message) => message.type === "run_finished"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(cancelled, 1);
+  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "r-stop", ok: false, summary: "Stopped by the owner." });
+});

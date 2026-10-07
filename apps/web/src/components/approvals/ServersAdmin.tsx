@@ -167,7 +167,7 @@ function ConnectedCard({ server }: { server: ServerRow }) {
   return (
     <li>
       <Link href={`/admin/connectors/${known?.id ?? server.id}`} className="conn-card conn-card-link">
-        <ConnectorLogo name={known?.name ?? server.name} icon={known?.icon} />
+        <ConnectorLogo connector={known ?? { name: server.name, url: server.url, publisher: { kind: "domain", label: host } }} />
         <span className="min-w-0 flex-1">
           <span className="conn-name">{server.name}</span>
           <span className="conn-by">{host}</span>

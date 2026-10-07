@@ -267,7 +267,7 @@ export const runs = pgTable(
   ],
 );
 
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 
 export const approvals = pgTable(
   "approvals",

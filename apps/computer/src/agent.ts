@@ -240,7 +240,7 @@ export function createAgent(options: {
     const streams = chatty && !runId ? streamer((message) => options.send(message.type === "chat_delta" && roomId ? { ...message, roomId } : message)) : null;
     const onEvent = (event: BrainEvent) => {
       if (transcript && event.kind !== "text_delta" && event.kind !== "text_start") appendFileSync(transcript, `${JSON.stringify({ at: Date.now(), ...event })}\n`);
-      if (quiet) return;
+      if (quiet || cancelled()) return;
       input.observe?.(event);
       if (event.kind === "thinking") setState("thinking");
       if (event.kind === "text_start") streams?.start();
@@ -263,7 +263,10 @@ export function createAgent(options: {
     const jobModel = "model" in input.job ? input.job.model : undefined;
     const model = validModel(jobModel) ?? persisted.model;
     const started = run(options.config, { brain: persisted.brain, ...(model ? { model } : {}), prompt: input.prompt, system: systemPrompt(options.rulesFile ? readRules(options.rulesFile) : []), resume: input.resume, onEvent });
-    if (current?.job === input.job) current.turn = started;
+    if (current) {
+      current.turn = started;
+      if (current.cancelled) started.cancel();
+    }
     return started.done;
   };
 
@@ -412,7 +415,8 @@ export function createAgent(options: {
         current.cancelled = true;
         current.turn?.cancel();
       }
-      setState("calm");
+      state = "calm";
+      options.send({ type: "state", state: "calm" });
     },
     setBrain(brain) {
       persisted.brain = brain;
@@ -428,6 +432,7 @@ export function createAgent(options: {
     model: () => persisted.model,
     state: () => state,
     guardEvent(event) {
+      if ((event.event === "waiting" || event.event === "resumed") && (!current || current.cancelled)) return;
       if (event.event === "waiting") setState("waiting_you", `Asking for approval: ${String(event.summary ?? "").slice(0, 200)}`);
       if (event.event === "resumed" && state === "waiting_you") setState("working");
       if (event.event === "rule_blocked" && event.ruleId) {

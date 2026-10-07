@@ -209,6 +209,32 @@ export function monogram(name: string) {
   return (words[0] ?? "?").slice(0, 2).replace(/^./, (c) => c.toUpperCase());
 }
 
+function hostOf(url?: string) {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function parentOf(host: string) {
+  const labels = host.split(".");
+  return labels.length > 2 ? labels.slice(1).join(".") : undefined;
+}
+
+export function logoSources(connector: Pick<Connector, "icon" | "publisher" | "url">) {
+  const sources: string[] = connector.icon ? [connector.icon] : [];
+  const { kind, label } = connector.publisher;
+  if (kind === "github" && /^[a-z0-9-]{1,39}$/i.test(label)) sources.push(`https://github.com/${label}.png?size=96`);
+  const domain = kind === "domain" && /^[a-z0-9.-]+$/i.test(label) ? label.toLowerCase() : undefined;
+  const address = hostOf(connector.url);
+  for (const host of [domain, address, address && parentOf(address)]) {
+    if (host && !host.endsWith("github.com") && !host.endsWith("githubusercontent.com")) sources.push(`https://${host}/favicon.ico`);
+  }
+  return [...new Set(sources)];
+}
+
 export function tintOf(name: string) {
   let hash = 0;
   for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;

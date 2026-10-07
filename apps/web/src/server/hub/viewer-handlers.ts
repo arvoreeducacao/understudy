@@ -80,8 +80,9 @@ export const viewerHandlers: Handlers = {
     hub.sendToComputer(agentId, { type: "set_brain", brain: message.brain });
   },
 
-  stop({ hub, agentId }) {
+  async stop({ hub, agentId, userId }) {
     hub.sendToComputer(agentId, { type: "stop" });
+    await hub.cancelApprovals(agentId, userId);
   },
 
   memory_write({ hub, agentId, offline }, message) {

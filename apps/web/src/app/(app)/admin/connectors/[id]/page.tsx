@@ -76,7 +76,7 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
       <div className="conn-page">
         <Back />
         <header className="conn-hero">
-          <ConnectorLogo name={connector.name} icon={connector.icon} size={72} />
+          <ConnectorLogo connector={connector} size={72} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1>{connector.name}</h1>
