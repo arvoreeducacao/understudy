@@ -21,6 +21,7 @@ export type FileAnswer = { base64?: string; error?: string };
 
 export type SlackToolDeps = {
   agent: { id: string; name: string; iconUrl: string };
+  owner?: () => Promise<string | null>;
   mode: SlackMode;
   api: SlackApi;
   guard: (input: GuardInput) => Promise<GuardResult>;
@@ -99,6 +100,11 @@ export function outboxPath(path: string) {
 
 const CHANNEL_ID = /^[CGD][A-Z0-9]{6,}$/;
 const USER_ID = /^[UW][A-Z0-9]{6,}$/;
+const OWNER_WORDS = new Set(["owner", "my owner", "your owner", "the owner"]);
+
+export function meansOwner(wanted: string) {
+  return OWNER_WORDS.has(fold(wanted.replace(/^@/, "")));
+}
 
 type Channel = { id: string; name: string; is_private?: boolean; is_member?: boolean; is_archived?: boolean; num_members?: number; topic?: { value?: string }; purpose?: { value?: string } };
 type Member = { id: string; name?: string; deleted?: boolean; is_bot?: boolean; real_name?: string; profile?: { real_name?: string; display_name?: string; email?: string } };
@@ -181,8 +187,13 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
     return { id: hit.id, label: `#${hit.name}`, channel: hit };
   };
 
-  const resolvePerson = async (wanted: string): Promise<{ id: string; label: string } | { error: string }> => {
+  const resolvePerson = async (wanted: string): Promise<{ id: string; label: string; owner?: boolean } | { error: string }> => {
     const value = wanted.trim();
+    if (meansOwner(value)) {
+      const id = deps.owner ? await deps.owner() : null;
+      if (!id) return { error: "the panel could not find your owner's Slack account; use notify_owner instead (it reaches them in the panel chat), and do not look them up by name or email" };
+      return { id, label: "your owner", owner: true };
+    }
     if (USER_ID.test(value)) return { id: value, label: value };
     if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
       const data = await api.call("users.lookupByEmail", { email: value.toLowerCase() });
@@ -281,7 +292,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
     },
     {
       name: "slack_send_dm",
-      description: `Send a direct message on Slack to anyone in the workspace, found by their name or work email. It goes out with your own name and face. If a name matches several people you get the list back; call again with the email.${ask ? " Your owner approves the exact text first." : ""}`,
+      description: `Send a direct message on Slack to anyone in the workspace, found by their name or work email. To message your owner, pass person "owner": never guess your owner's Slack name or email. It goes out with your own name and face. If a name matches several people you get the list back; call again with the email.${ask ? " Your owner approves the exact text first, except for messages to your owner." : ""}`,
       schema: z.object({ person: z.string().min(1).max(200), text: z.string().min(1).max(11000) }),
       run: (async (args: { person: string; text: string }, extra?: unknown) => {
         if (!readAllowed()) return readRefused();
@@ -292,7 +303,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
           { label: "To", value: who.label },
           { label: "Message", value: args.text },
         ];
-        const allowed = await deps.guard({ target: "slack:send_dm", summary: `Slack: message ${who.label}`, fields, args, ask, extra });
+        const allowed = await deps.guard({ target: "slack:send_dm", summary: `Slack: message ${who.label}`, fields, args, ask: ask && !who.owner, extra });
         if (!allowed.ok) return reply(allowed.text, true);
         const data = await post(who.id, args.text);
         if (!data.ok) return failed("sending", data.error);

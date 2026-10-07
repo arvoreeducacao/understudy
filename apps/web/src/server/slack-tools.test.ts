@@ -163,6 +163,34 @@ test("a DM finds a person by email or by an unambiguous name and asks on ambigui
   assert.match(missing.text, /nobody in this Slack workspace/);
 });
 
+test("a DM to the owner goes to the owner's Slack account without guessing a name or asking for approval", async () => {
+  const { run, calls, guarded } = setup({ owner: async () => "U0OWNER001" });
+  const result = await run("slack_send_dm", { person: "owner", text: "The report is ready" });
+  assert.equal(result.error, false);
+  assert.equal(posts(calls)[0].params.channel, "U0OWNER001");
+  assert.equal(calls.some((c) => c.method === "users.list" || c.method === "users.lookupByEmail"), false);
+  assert.equal(guarded.length, 1);
+  assert.equal(guarded[0].ask, false);
+  assert.equal(guarded[0].fields[0].value, "your owner");
+  await run("slack_send_dm", { person: "@My Owner", text: "hi" });
+  assert.equal(posts(calls).at(-1)?.params.channel, "U0OWNER001");
+});
+
+test("when the owner's Slack account is unknown, the DM points to notify_owner instead of a name search", async () => {
+  const { run, calls } = setup({ owner: async () => null });
+  const result = await run("slack_send_dm", { person: "owner", text: "hi" });
+  assert.equal(result.error, true);
+  assert.match(result.text, /notify_owner/);
+  assert.equal(calls.length, 0);
+});
+
+test("a rule can still block a DM to the owner", async () => {
+  const { run, calls } = setup({ owner: async () => "U0OWNER001", verdict: () => ({ ok: false, text: "not done: blocked by your owner's rule" }) });
+  const result = await run("slack_send_dm", { person: "owner", text: "hi" });
+  assert.equal(result.error, true);
+  assert.equal(posts(calls).length, 0);
+});
+
 test("bots are never picked as a DM target", () => {
   const picked = pickMember([{ id: "U0BOT", is_bot: true, profile: { real_name: "Bruno Bot" } }], "Bruno Bot");
   assert.ok("candidates" in picked && picked.candidates.length === 0);

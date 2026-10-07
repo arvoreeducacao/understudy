@@ -8,6 +8,7 @@ import type { Hub } from "./hub";
 import { RateLimiter } from "./rate-limit";
 import { pickAgent, stripMentions, verifySlackSignature } from "./slack-app";
 import { agentIdentity, escapeSlack, slackConfig, slackUserEmail } from "./slack";
+import { linkedPanelUser, slackLinkUrl } from "./slack-link";
 import { agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -68,10 +69,22 @@ function firstSeen(eventId: string | undefined) {
 
 async function panelUser(slackUserId: string | undefined) {
   if (!slackUserId) return null;
-  const email = await slackUserEmail(slackUserId);
-  if (!email) return null;
-  const [user] = await getDb().select().from(schema.user).where(eq(schema.user.email, email));
+  const linkedId = await linkedPanelUser(slackUserId);
+  const email = linkedId ? null : await slackUserEmail(slackUserId);
+  if (!linkedId && !email) return null;
+  const [user] = await getDb()
+    .select()
+    .from(schema.user)
+    .where(linkedId ? eq(schema.user.id, linkedId) : eq(schema.user.email, email as string));
   return user && user.status === "approved" ? user : null;
+}
+
+function unknownUserMarkdown(slackUserId: string) {
+  return copy.slackApp.unknownUserLink(env.publicUrl, `[${copy.slackApp.connectLabel}](${slackLinkUrl(slackUserId)})`);
+}
+
+function unknownUserMrkdwn(slackUserId: string) {
+  return copy.slackApp.unknownUserLink(env.publicUrl, `<${slackLinkUrl(slackUserId)}|${copy.slackApp.connectLabel}>`);
 }
 
 export async function rememberSlackReply(agentId: string, channel: string, threadTs?: string) {
@@ -99,7 +112,7 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   const user = await panelUser(event.user);
   if (!user) {
     log("slack_unknown_user", { dm: isDm });
-    await answer(copy.slackApp.unknownUser(env.publicUrl));
+    await answer(isDm ? unknownUserMarkdown(event.user) : copy.slackApp.unknownUser(env.publicUrl));
     return;
   }
   const agents = await getDb().select({ id: schema.agents.id, name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.ownerId, user.id));
@@ -134,7 +147,8 @@ async function onAssistantThreadStarted(event: SlackEvent) {
   if (!thread?.channel_id || !thread.thread_ts) return;
   const user = await panelUser(thread.user_id);
   if (!user) {
-    await postAgentText({ channel: thread.channel_id, threadTs: thread.thread_ts, text: copy.slackApp.unknownUser(env.publicUrl) });
+    const text = thread.user_id ? unknownUserMarkdown(thread.user_id) : copy.slackApp.unknownUser(env.publicUrl);
+    await postAgentText({ channel: thread.channel_id, threadTs: thread.thread_ts, text });
     return;
   }
   const agents = await getDb().select({ name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.ownerId, user.id));
@@ -202,8 +216,9 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
 
 async function handleCommand(res: ServerResponse, body: string) {
   const form = new URLSearchParams(body);
-  const user = await panelUser(form.get("user_id") ?? undefined);
-  if (!user) return reply(res, 200, { response_type: "ephemeral", text: copy.slackApp.unknownUser(env.publicUrl) });
+  const slackUserId = form.get("user_id") ?? undefined;
+  const user = await panelUser(slackUserId);
+  if (!user) return reply(res, 200, { response_type: "ephemeral", text: slackUserId ? unknownUserMrkdwn(slackUserId) : copy.slackApp.unknownUser(env.publicUrl) });
   const db = getDb();
   const agents = await db.select({ id: schema.agents.id, name: schema.agents.name, state: schema.agents.state }).from(schema.agents).where(eq(schema.agents.ownerId, user.id));
   const pending = agents.length

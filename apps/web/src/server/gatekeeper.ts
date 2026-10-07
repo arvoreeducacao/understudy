@@ -13,7 +13,7 @@ import type { ComputerReply, Hub } from "./hub";
 import { approvalFields, payloadHash, serverAllowedFor } from "./approval-payload";
 import { teamTools } from "./team";
 import { reportRuleBlock } from "./rules";
-import { agentIdentity, slackEnabled } from "./slack";
+import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, listUpstreamTools, loadServers, type UpstreamServer } from "./upstream";
 
@@ -38,6 +38,12 @@ function outcomeText(id: string, outcome: Outcome): ToolResult {
   if (outcome.kind === "unknown") return text("denied: unknown request");
   if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id }));
   return decision(outcome.approved, outcome.note, id);
+}
+
+export function ownerSlackNote(error: string | undefined) {
+  if (error === "user_not_found") return brainText.ownerSlackMissing;
+  if (error === "slack_disabled") return brainText.ownerSlackOff;
+  return brainText.ownerSlackFailed(error ?? "unknown error");
 }
 
 function text(value: unknown, isError = false): ToolResult {
@@ -148,11 +154,13 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   if (enabled.notify_owner) {
     builtins.push({
       name: "notify_owner",
-      description: "Send a short message to your owner (panel chat, and Slack DM when available). Does not wait for an answer.",
+      description:
+        "Send a short message to your owner. It always lands in your chat with them in the panel and, when Slack is on, as a Slack direct message to them. This is how you reach your owner: you never need their Slack name, email or ID. Does not wait for an answer.",
       schema: z.object({ text: z.string().min(1).max(2000) }),
       run: (async (args: { text: string }) => {
         const result = await hub.notifyOwner(agent.id, args.text);
-        return text({ delivered: true, slack: result.slack });
+        if (result.slack) return text({ delivered: true, slack: true });
+        return text({ delivered: true, slack: false, note: ownerSlackNote(result.error) });
       }) as Builtin["run"],
     });
   }
@@ -166,6 +174,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     builtins.push(
       ...(slackTools({
         agent: { id: agent.id, name: agent.name, iconUrl: agentIdentity(agent).iconUrl },
+        owner: () => slackUserIdFor({ id: agent.ownerId, email: ownerEmail }),
         mode: slackMode(agent.tools),
         api: slackApi(),
         guard,
