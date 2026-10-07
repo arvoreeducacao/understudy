@@ -5,11 +5,12 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { messages } from "@/lib/messages";
-import { requireAdmin } from "@/lib/session";
 import { forgetServer, slugify, testConnection } from "@/server/upstream";
 import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
-import { beginSignIn, oauthCallbackUrl, oauthSupport } from "@/server/connector-oauth";
+import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath } from "@/server/connector-oauth";
+import { serverAllowedFor } from "@/server/approval-payload";
+import { requireAdmin, requireUser } from "@/lib/session";
 
 export type AddServerState = { ok: boolean; message: string; id?: string; signIn?: { needsClient: boolean; returnAddress: string } } | null;
 
@@ -49,10 +50,10 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
 }
 
 export async function checkMcpServer(id: string) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
   if (!server) return { ok: false, message: messages.common.notFound };
-  const test = await testConnection(server);
+  const test = await testConnection(server, admin.id);
   revalidatePath("/admin", "layout");
   return test.ok ? { ok: true, message: messages.admin.serverWorks(test.tools.length) } : { ok: false, message: messages.admin.serverProblem[test.problem] };
 }
@@ -113,9 +114,6 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
     headerName: null,
     headerValue: null,
     oauthClient: seal(JSON.stringify(clientId ? { client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) } : null)),
-    oauthTokens: null,
-    oauthState: null,
-    oauthVerifier: null,
     createdBy: admin.id,
     createdAt: new Date(),
     askAll: false,
@@ -124,7 +122,7 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
   };
   await db.insert(schema.mcpServers).values(row);
   try {
-    return { ok: true, to: await beginSignIn(row) };
+    return { ok: true, to: await beginSignIn(row, admin.id, `/admin/connectors/${row.id}`) };
   } catch (error) {
     console.error(JSON.stringify({ event: "connector_sign_in_failed", url, error: String(error) }));
     await db.delete(schema.mcpServers).where(eq(schema.mcpServers.id, row.id));
@@ -132,13 +130,13 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
   }
 }
 
-export async function signInConnectorAgain(id: string): Promise<SignInState> {
-  await requireAdmin();
+export async function signInToConnector(id: string, returnTo: string): Promise<SignInState> {
+  const user = await requireUser();
   const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
-  if (!server) return { ok: false, message: messages.common.notFound };
+  if (!server || !serverAllowedFor(server.allowedEmails, user.email)) return { ok: false, message: messages.common.notFound };
   try {
     forgetServer(id);
-    return { ok: true, to: await beginSignIn(server) };
+    return { ok: true, to: await beginSignIn(server, user.id, safeReturnPath(returnTo) ?? "/") };
   } catch (error) {
     console.error(JSON.stringify({ event: "connector_sign_in_failed", url: server.url, error: String(error) }));
     return { ok: false, message: messages.admin.signInFailed };

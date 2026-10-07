@@ -1,5 +1,5 @@
 {
-  "id": "e0ed6b1a-8aca-4620-a46e-ecda5433a6dc",
+  "id": "5aa27799-8081-4045-9e79-fda4aeea9171",
   "prevId": "753a6fd3-fdd9-44a8-8809-6e2ebb855606",
   "version": "7",
   "dialect": "postgresql",
@@ -1059,6 +1059,105 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.mcp_server_logins": {
+      "name": "mcp_server_logins",
+      "schema": "",
+      "columns": {
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tokens": {
+          "name": "tokens",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verifier": {
+          "name": "verifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "return_to": {
+          "name": "return_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "mcp_server_logins_server_id_mcp_servers_id_fk": {
+          "name": "mcp_server_logins_server_id_mcp_servers_id_fk",
+          "tableFrom": "mcp_server_logins",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_server_logins_user_id_user_id_fk": {
+          "name": "mcp_server_logins_user_id_user_id_fk",
+          "tableFrom": "mcp_server_logins",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "mcp_server_logins_server_id_user_id_pk": {
+          "name": "mcp_server_logins_server_id_user_id_pk",
+          "columns": [
+            "server_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "mcp_server_logins_state_unique": {
+          "name": "mcp_server_logins_state_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "state"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.mcp_servers": {
       "name": "mcp_servers",
       "schema": "",
@@ -1101,24 +1200,6 @@
         },
         "oauth_client": {
           "name": "oauth_client",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "oauth_tokens": {
-          "name": "oauth_tokens",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "oauth_state": {
-          "name": "oauth_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "oauth_verifier": {
-          "name": "oauth_verifier",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1166,13 +1247,6 @@
           "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ]
-        },
-        "mcp_servers_oauth_state_unique": {
-          "name": "mcp_servers_oauth_state_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "oauth_state"
           ]
         }
       },

@@ -22,6 +22,9 @@ const provider = {
   tokenRequests: [] as URLSearchParams[],
 };
 
+const ana = "usr_oauth_ana";
+const bia = "usr_oauth_bia";
+
 let upstream: Server;
 let plain: Server;
 let base = "";
@@ -105,6 +108,14 @@ before(async () => {
   plainBase = `http://127.0.0.1:${(plain.address() as AddressInfo).port}`;
   if (!url) return;
   await (await import("./test-db")).migrateTestDb();
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().delete(schema.user).where(like(schema.user.id, "usr_oauth_%"));
+  await getDb()
+    .insert(schema.user)
+    .values([
+      { id: ana, name: "Ana", email: "oauth-ana@test.local", status: "approved" },
+      { id: bia, name: "Bia", email: "oauth-bia@test.local", status: "approved" },
+    ]);
 });
 
 after(async () => {
@@ -113,6 +124,7 @@ after(async () => {
   if (!url) return;
   const { getDb, getPool, schema } = await import("@/lib/db");
   await getDb().delete(schema.mcpServers).where(like(schema.mcpServers.id, "mcp_oauth_%"));
+  await getDb().delete(schema.user).where(like(schema.user.id, "usr_oauth_%"));
   await getPool().end();
 });
 
@@ -133,6 +145,12 @@ function authorizePage(address: string) {
   return page;
 }
 
+async function signIn(row: Awaited<ReturnType<typeof insert>>, userId: string) {
+  const { beginSignIn, finishSignIn } = await import("./connector-oauth");
+  const page = authorizePage(await beginSignIn(row, userId, "/agents/a1"));
+  return { page, finished: await finishSignIn(page.searchParams.get("state") ?? "", "good-code", userId) };
+}
+
 test("tells a sign-in server apart from one that has none", { skip }, async () => {
   const { oauthSupport } = await import("./connector-oauth");
   provider.registers = true;
@@ -142,74 +160,82 @@ test("tells a sign-in server apart from one that has none", { skip }, async () =
   assert.deepEqual(await oauthSupport(`${plainBase}/mcp`), { supported: false });
 });
 
-test("signs in by registering itself, then the connector works with the token kept sealed", { skip }, async () => {
-  const { beginSignIn, finishSignIn } = await import("./connector-oauth");
+test("a person signs in by registering the app, and only their understudies get their token", { skip }, async () => {
+  const { finishSignIn, loginOf } = await import("./connector-oauth");
   const { listUpstreamTools, forgetServer } = await import("./upstream");
   provider.registers = true;
   const row = await insert("mcp_oauth_dynamic", null);
 
-  const page = authorizePage(await beginSignIn(row));
+  const { page, finished } = await signIn(row, ana);
   assert.equal(page.origin + page.pathname, `${base}/authorize`);
   assert.equal(page.searchParams.get("client_id"), "registered_client");
   assert.equal(page.searchParams.get("redirect_uri"), "https://understudy.test/api/connectors/oauth/callback");
-  const state = page.searchParams.get("state") ?? "";
-  assert.ok(state.length >= 32);
-
-  const finished = await finishSignIn(state, "good-code");
+  assert.ok((page.searchParams.get("state") ?? "").length >= 32);
   assert.ok(finished?.signedIn);
-  assert.equal(finished.server.oauthState, null);
-  assert.equal(finished.server.oauthVerifier, null);
-  assert.ok(finished.server.oauthTokens && !finished.server.oauthTokens.includes("access_"));
+  assert.equal(finished.returnTo, "/agents/a1");
+
+  const login = await loginOf(row.id, ana);
+  assert.equal(login?.state, null);
+  assert.equal(login?.verifier, null);
+  assert.ok(login?.tokens && !login.tokens.includes("access_"));
 
   forgetServer(row.id);
   assert.deepEqual(
-    (await listUpstreamTools(finished.server)).map((tool) => tool.name),
+    (await listUpstreamTools(finished.server, ana)).map((tool) => tool.name),
     ["list_deals"],
   );
-  assert.equal(await finishSignIn(state, "good-code"), null);
+  await assert.rejects(listUpstreamTools(finished.server, bia), /not signed in/);
+  await assert.rejects(listUpstreamTools(finished.server), /not signed in/);
+  assert.equal(await finishSignIn(page.searchParams.get("state") ?? "", "good-code", ana), null);
 });
 
-test("an expired token is renewed on its own and the new one is saved", { skip }, async () => {
-  const { beginSignIn, finishSignIn } = await import("./connector-oauth");
+test("someone else cannot finish a sign-in that another person started", { skip }, async () => {
+  const { beginSignIn, finishSignIn, loginOf } = await import("./connector-oauth");
+  provider.registers = true;
+  const row = await insert("mcp_oauth_hijack", null);
+  const page = authorizePage(await beginSignIn(row, ana, "/"));
+  assert.equal(await finishSignIn(page.searchParams.get("state") ?? "", "good-code", bia), null);
+  assert.equal(await loginOf(row.id, bia), null);
+  assert.equal((await loginOf(row.id, ana))?.tokens, null);
+});
+
+test("an expired token is renewed on its own and the new one is saved for that person", { skip }, async () => {
+  const { loginOf } = await import("./connector-oauth");
   const { listUpstreamTools, forgetServer } = await import("./upstream");
-  const { getDb, schema } = await import("@/lib/db");
   provider.registers = true;
   const row = await insert("mcp_oauth_refresh", null);
-  const page = authorizePage(await beginSignIn(row));
-  const finished = await finishSignIn(page.searchParams.get("state") ?? "", "good-code");
+  const { finished } = await signIn(row, ana);
   assert.ok(finished?.signedIn);
+  const before = (await loginOf(row.id, ana))?.tokens;
 
   provider.validTokens.clear();
   forgetServer(row.id);
   assert.deepEqual(
-    (await listUpstreamTools(finished.server)).map((tool) => tool.name),
+    (await listUpstreamTools(finished.server, ana)).map((tool) => tool.name),
     ["list_deals"],
   );
-  const [saved] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, row.id));
-  assert.notEqual(saved.oauthTokens, finished.server.oauthTokens);
+  assert.notEqual((await loginOf(row.id, ana))?.tokens, before);
   assert.equal(provider.tokenRequests.at(-1)?.get("grant_type"), "refresh_token");
 });
 
 test("a system that needs its own app signs in with that app's id and secret", { skip }, async () => {
-  const { beginSignIn, finishSignIn } = await import("./connector-oauth");
   provider.registers = false;
   const row = await insert("mcp_oauth_app", { client_id: "my-app", client_secret: "app-secret" });
-  const page = authorizePage(await beginSignIn(row));
+  const { page, finished } = await signIn(row, bia);
   assert.equal(page.searchParams.get("client_id"), "my-app");
-  const finished = await finishSignIn(page.searchParams.get("state") ?? "", "good-code");
   assert.ok(finished?.signedIn);
   assert.equal(provider.tokenRequests.at(-1)?.get("client_secret"), "app-secret");
 });
 
 test("a wrong code or an unknown state connects nothing", { skip }, async () => {
-  const { beginSignIn, finishSignIn } = await import("./connector-oauth");
+  const { beginSignIn, finishSignIn, loginOf } = await import("./connector-oauth");
   provider.registers = true;
   const row = await insert("mcp_oauth_wrong", null);
-  const page = authorizePage(await beginSignIn(row));
-  const finished = await finishSignIn(page.searchParams.get("state") ?? "", "stolen-code");
+  const page = authorizePage(await beginSignIn(row, ana, "/"));
+  const finished = await finishSignIn(page.searchParams.get("state") ?? "", "stolen-code", ana);
   assert.equal(finished?.signedIn, false);
-  assert.equal(finished?.server.oauthTokens, null);
-  assert.equal(await finishSignIn("made-up-state", "good-code"), null);
+  assert.equal((await loginOf(row.id, ana))?.tokens, null);
+  assert.equal(await finishSignIn("made-up-state", "good-code", ana), null);
 });
 
 test("a sign-in page that is not a web address is never handed to the browser", { skip }, async () => {
@@ -229,9 +255,19 @@ test("a sign-in page that is not a web address is never handed to the browser", 
     });
   });
   try {
-    await assert.rejects(beginSignIn(row));
+    await assert.rejects(beginSignIn(row, ana, "/"));
   } finally {
     upstream.removeAllListeners("request");
     upstream.on("request", original);
   }
+});
+
+test("only a path inside the app is used to come back after signing in", () => {
+  return import("./connector-oauth").then(({ safeReturnPath }) => {
+    assert.equal(safeReturnPath("/agents/a1?tab=tools"), "/agents/a1?tab=tools");
+    assert.equal(safeReturnPath("//evil.example"), null);
+    assert.equal(safeReturnPath("https://evil.example"), null);
+    assert.equal(safeReturnPath("/\\evil.example"), null);
+    assert.equal(safeReturnPath(undefined), null);
+  });
 });

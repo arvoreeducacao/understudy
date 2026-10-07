@@ -1,13 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { auth, discoverOAuthServerInfo, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { open, seal } from "@/lib/secret-box";
 import { safeFetch } from "./safe-fetch";
 
 type Server = typeof schema.mcpServers.$inferSelect;
+type Login = typeof schema.mcpServerLogins.$inferSelect;
+type LoginPatch = Partial<Pick<Login, "tokens" | "state" | "verifier" | "returnTo">>;
 
 export const OAUTH_CALLBACK_PATH = "/api/connectors/oauth/callback";
 
@@ -15,27 +17,59 @@ export function oauthCallbackUrl() {
   return `${env.publicUrl.replace(/\/$/, "")}${OAUTH_CALLBACK_PATH}`;
 }
 
-export function usesOAuth(server: Pick<Server, "oauthClient" | "oauthTokens">) {
-  return Boolean(server.oauthClient || server.oauthTokens);
+export function usesOAuth(server: Pick<Server, "oauthClient">) {
+  return Boolean(server.oauthClient);
 }
 
-function readSealed<T>(value: string | null): T | undefined {
+export class SignInNeededError extends Error {
+  constructor() {
+    super("Unauthorized: this person has not signed in to the connector yet");
+  }
+}
+
+function readSealed<T>(value: string | null | undefined): T | undefined {
   if (!value) return undefined;
   try {
-    return JSON.parse(open(value)) as T;
+    return (JSON.parse(open(value)) as T) ?? undefined;
   } catch {
     return undefined;
   }
 }
 
+export function safeReturnPath(path: unknown) {
+  const value = typeof path === "string" ? path : "";
+  return value.startsWith("/") && !value.startsWith("//") && !value.includes("\\") ? value.slice(0, 300) : null;
+}
+
+export async function loginOf(serverId: string, userId: string) {
+  const [login] = await getDb()
+    .select()
+    .from(schema.mcpServerLogins)
+    .where(and(eq(schema.mcpServerLogins.serverId, serverId), eq(schema.mcpServerLogins.userId, userId)));
+  return login ?? null;
+}
+
 export class StoredOAuthProvider implements OAuthClientProvider {
   authorizationUrl: URL | null = null;
 
-  constructor(private server: Server) {}
+  constructor(
+    private server: Server,
+    private userId: string,
+    private login: Login | null,
+  ) {}
 
-  private async store(patch: Partial<Pick<Server, "oauthClient" | "oauthTokens" | "oauthState" | "oauthVerifier">>) {
-    this.server = { ...this.server, ...patch };
-    await getDb().update(schema.mcpServers).set(patch).where(eq(schema.mcpServers.id, this.server.id));
+  static async for(server: Server, userId: string) {
+    return new StoredOAuthProvider(server, userId, await loginOf(server.id, userId));
+  }
+
+  async saveLogin(patch: LoginPatch) {
+    const updatedAt = new Date();
+    const [saved] = await getDb()
+      .insert(schema.mcpServerLogins)
+      .values({ serverId: this.server.id, userId: this.userId, updatedAt, ...patch })
+      .onConflictDoUpdate({ target: [schema.mcpServerLogins.serverId, schema.mcpServerLogins.userId], set: { ...patch, updatedAt } })
+      .returning();
+    this.login = saved;
   }
 
   get redirectUrl() {
@@ -44,7 +78,7 @@ export class StoredOAuthProvider implements OAuthClientProvider {
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "Understudy",
+      client_name: env.productName,
       redirect_uris: [oauthCallbackUrl()],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -54,7 +88,7 @@ export class StoredOAuthProvider implements OAuthClientProvider {
 
   async state() {
     const state = randomBytes(24).toString("base64url");
-    await this.store({ oauthState: state });
+    await this.saveLogin({ state });
     return state;
   }
 
@@ -62,16 +96,21 @@ export class StoredOAuthProvider implements OAuthClientProvider {
     return readSealed<OAuthClientInformationMixed>(this.server.oauthClient);
   }
 
+  private async saveClient(sealed: string) {
+    this.server = { ...this.server, oauthClient: sealed };
+    await getDb().update(schema.mcpServers).set({ oauthClient: sealed }).where(eq(schema.mcpServers.id, this.server.id));
+  }
+
   async saveClientInformation(information: OAuthClientInformationMixed) {
-    await this.store({ oauthClient: seal(JSON.stringify(information)) });
+    await this.saveClient(seal(JSON.stringify(information)));
   }
 
   tokens() {
-    return readSealed<OAuthTokens>(this.server.oauthTokens);
+    return readSealed<OAuthTokens>(this.login?.tokens);
   }
 
   async saveTokens(tokens: OAuthTokens) {
-    await this.store({ oauthTokens: seal(JSON.stringify(tokens)) });
+    await this.saveLogin({ tokens: seal(JSON.stringify(tokens)) });
   }
 
   redirectToAuthorization(url: URL) {
@@ -79,21 +118,20 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 
   async saveCodeVerifier(verifier: string) {
-    await this.store({ oauthVerifier: seal(verifier) });
+    await this.saveLogin({ verifier: seal(verifier) });
   }
 
   codeVerifier() {
-    const verifier = this.server.oauthVerifier ? open(this.server.oauthVerifier) : "";
+    const verifier = this.login?.verifier ? open(this.login.verifier) : "";
     if (!verifier) throw new Error("No sign-in is in progress for this connector");
     return verifier;
   }
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery") {
-    if (scope === "all") await this.store({ oauthTokens: null, oauthVerifier: null, oauthState: null });
-    if (scope === "tokens") await this.store({ oauthTokens: null });
-    if (scope === "verifier") await this.store({ oauthVerifier: null, oauthState: null });
-    if (scope === "client" && this.server.oauthClient && !readSealed<OAuthClientInformationMixed>(this.server.oauthClient)?.client_secret)
-      await this.store({ oauthClient: seal("null") });
+    if (scope === "all") await this.saveLogin({ tokens: null, verifier: null, state: null });
+    if (scope === "tokens") await this.saveLogin({ tokens: null });
+    if (scope === "verifier") await this.saveLogin({ verifier: null, state: null });
+    if (scope === "client" && !readSealed<OAuthClientInformationMixed>(this.server.oauthClient)?.client_secret) await this.saveClient(seal("null"));
   }
 }
 
@@ -110,9 +148,9 @@ export async function oauthSupport(url: string): Promise<OAuthSupport> {
   }
 }
 
-export async function beginSignIn(server: Server) {
-  const provider = new StoredOAuthProvider({ ...server, oauthTokens: null });
-  await getDb().update(schema.mcpServers).set({ oauthTokens: null }).where(eq(schema.mcpServers.id, server.id));
+export async function beginSignIn(server: Server, userId: string, returnTo: string) {
+  const provider = new StoredOAuthProvider(server, userId, null);
+  await provider.saveLogin({ tokens: null, returnTo });
   const result = await auth(provider, { serverUrl: server.url, fetchFn: safeFetch });
   const page = provider.authorizationUrl;
   if (result !== "REDIRECT" || !page) throw new Error("The server did not send a sign-in page");
@@ -121,25 +159,41 @@ export async function beginSignIn(server: Server) {
   return page.toString();
 }
 
-export async function finishSignIn(state: string, code: string) {
-  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.oauthState, state));
-  if (!server) return null;
-  const provider = new StoredOAuthProvider(server);
-  let signedIn = true;
-  try {
-    await auth(provider, { serverUrl: server.url, authorizationCode: code, fetchFn: safeFetch });
-  } catch (error) {
-    signedIn = false;
-    console.error(JSON.stringify({ event: "connector_sign_in_exchange_failed", url: server.url, error: String(error) }));
-  }
-  await getDb().update(schema.mcpServers).set({ oauthState: null, oauthVerifier: null }).where(eq(schema.mcpServers.id, server.id));
-  const [fresh] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, server.id));
-  return fresh ? { server: fresh, signedIn } : null;
+async function loginByState(state: string, userId: string) {
+  const [row] = await getDb()
+    .select({ login: schema.mcpServerLogins, server: schema.mcpServers })
+    .from(schema.mcpServerLogins)
+    .innerJoin(schema.mcpServers, eq(schema.mcpServers.id, schema.mcpServerLogins.serverId))
+    .where(and(eq(schema.mcpServerLogins.state, state), eq(schema.mcpServerLogins.userId, userId)));
+  return row ?? null;
 }
 
-export async function abandonSignIn(state: string) {
-  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.oauthState, state));
-  if (!server) return null;
-  await getDb().update(schema.mcpServers).set({ oauthState: null, oauthVerifier: null }).where(eq(schema.mcpServers.id, server.id));
-  return server;
+async function clearAttempt(serverId: string, userId: string) {
+  await getDb()
+    .update(schema.mcpServerLogins)
+    .set({ state: null, verifier: null })
+    .where(and(eq(schema.mcpServerLogins.serverId, serverId), eq(schema.mcpServerLogins.userId, userId)));
+}
+
+export async function finishSignIn(state: string, code: string, userId: string) {
+  const found = await loginByState(state, userId);
+  if (!found) return null;
+  const provider = new StoredOAuthProvider(found.server, userId, found.login);
+  let signedIn = true;
+  try {
+    await auth(provider, { serverUrl: found.server.url, authorizationCode: code, fetchFn: safeFetch });
+  } catch (error) {
+    signedIn = false;
+    console.error(JSON.stringify({ event: "connector_sign_in_exchange_failed", url: found.server.url, error: String(error) }));
+  }
+  await clearAttempt(found.server.id, userId);
+  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, found.server.id));
+  return server ? { server, signedIn, returnTo: found.login.returnTo } : null;
+}
+
+export async function abandonSignIn(state: string, userId: string) {
+  const found = await loginByState(state, userId);
+  if (!found) return null;
+  await clearAttempt(found.server.id, userId);
+  return { server: found.server, returnTo: found.login.returnTo };
 }

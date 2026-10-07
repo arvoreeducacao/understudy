@@ -6,6 +6,7 @@ import { useActionState, useEffect, useState } from "react";
 import type { Brain } from "@understudy/protocol";
 import { createAgent } from "@/app/actions/agents";
 import { AgentFigure } from "@/components/AgentFigure";
+import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
 import type { Look } from "@/lib/look";
@@ -34,6 +35,7 @@ export type ServerOption = {
   name: string;
   askAll?: boolean;
   adminAsk?: string[];
+  signIn?: { signedIn: boolean };
   tools: { name: string; description?: string }[] | null;
 };
 
@@ -74,6 +76,10 @@ function SlackAccess({ available, initial, admin }: { available: boolean; initia
   );
 }
 
+function here() {
+  return typeof window === "undefined" ? "/" : `${window.location.pathname}${window.location.search}`;
+}
+
 function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; initial: AgentTools; admin: boolean }) {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
   const [ask, setAsk] = useState(new Set(initial.askTools ?? []));
@@ -111,8 +117,10 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
               checked={enabled}
               onChange={() => setOn((s) => flip(s, server.id))}
               label={<span className="font-medium">{server.name}</span>}
-              hint={server.tools === null ? t.serverUnreachable : t.serverToolCount(server.tools.length)}
+              hint={server.signIn && !server.signIn.signedIn ? t.serverNeedsYourSignIn(server.name) : server.tools === null ? t.serverUnreachable : t.serverToolCount(server.tools.length)}
             />
+            {server.signIn && !server.signIn.signedIn && <ConnectorSignIn id={server.id} returnTo={here()} label={messages.admin.signInGo(server.name)} />}
+            {server.signIn?.signedIn && <div className="fld-hint">{t.serverSignedInAsYou(server.name)}</div>}
             {enabled && server.askAll && <div className="fld-hint">{t.serverAdminAsksAll}</div>}
             {enabled && !server.askAll && server.tools && server.tools.length > 0 && (
               <div className="flex flex-col">

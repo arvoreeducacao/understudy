@@ -1,10 +1,10 @@
 "use client";
 
-import { ChevronRight, LogIn } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { checkMcpServer, removeMcpServer, setServerAccess, setServerApprovals, signInConnectorAgain } from "@/app/actions/servers";
+import { checkMcpServer, removeMcpServer, setServerAccess, setServerApprovals } from "@/app/actions/servers";
 import { featuredFor } from "@/lib/connector-showcase";
 import { messages } from "@/lib/messages";
 import { Checkbox, Input } from "@/components/ui/controls";
@@ -108,36 +108,6 @@ function CheckAgain({ id }: { id: string }) {
         {pending ? t.serverChecking : t.serverCheck}
       </button>
     </>
-  );
-}
-
-export function SignInAgain({ id }: { id: string }) {
-  const t = messages.admin;
-  const [going, start] = useTransition();
-  const [failure, setFailure] = useState<string | null>(null);
-  return (
-    <div className="flex items-center gap-3 flex-wrap">
-      <button
-        type="button"
-        className="btn pri sm"
-        disabled={going}
-        onClick={() =>
-          start(async () => {
-            const result = await signInConnectorAgain(id);
-            if (result?.ok) window.location.assign(result.to);
-            else setFailure(result?.message ?? t.signInFailed);
-          })
-        }
-      >
-        <LogIn size={13} aria-hidden />
-        {going ? t.signInGoing : t.signInAgain}
-      </button>
-      {failure && (
-        <p role="alert" className="m-0 text-[12.5px] text-coral">
-          {failure}
-        </p>
-      )}
-    </div>
   );
 }
 
