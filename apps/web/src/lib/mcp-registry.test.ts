@@ -1,20 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { publisherOf, registrySearchUrl, toCatalog } from "./mcp-registry";
+import { iconOf, publisherOf, registrySearchUrl, toCatalog } from "./mcp-registry";
 
 const active = (isLatest = true) => ({ "io.modelcontextprotocol.registry/official": { status: "active", isLatest } });
 
 const payload = {
   servers: [
     { server: { name: "io.github.someone/linear-helper", description: "A helper", remotes: [{ type: "streamable-http", url: "https://helper.example.dev/mcp" }] }, _meta: active() },
-    { server: { name: "app.linear/linear", title: "Linear", description: "Issues", websiteUrl: "https://linear.app", remotes: [{ type: "streamable-http", url: "https://mcp.linear.app/mcp" }] }, _meta: active() },
+    {
+      server: { name: "app.linear/linear", title: "Linear", description: "Issues", websiteUrl: "https://linear.app", remotes: [{ type: "streamable-http", url: "https://mcp.linear.app/mcp" }] },
+      _meta: active(),
+    },
     { server: { name: "app.linear/linear", title: "Linear", remotes: [{ type: "streamable-http", url: "https://old.linear.app/mcp" }] }, _meta: active(false) },
     { server: { name: "io.github.x/local-only", description: "Runs on your laptop", packages: [{}] }, _meta: active() },
     { server: { name: "io.github.x/sse-only", remotes: [{ type: "sse", url: "https://sse.example.dev/sse" }] }, _meta: active() },
     { server: { name: "eu.example/templated", remotes: [{ type: "streamable-http", url: "https://example.eu/mcp/{token}", variables: { token: { isSecret: true } } }] }, _meta: active() },
     { server: { name: "com.example/plain-http", remotes: [{ type: "streamable-http", url: "http://example.com/mcp" }] }, _meta: active() },
-    { server: { name: "com.stripe/mcp", description: "Payments", remotes: [{ type: "streamable-http", url: "https://mcp.stripe.com", headers: [{ name: "Authorization", isSecret: true }] }] }, _meta: active() },
-    { server: { name: "io.github.y/deleted", remotes: [{ type: "streamable-http", url: "https://gone.example.dev/mcp" }] }, _meta: { "io.modelcontextprotocol.registry/official": { status: "deleted", isLatest: true } } },
+    {
+      server: { name: "com.stripe/mcp", description: "Payments", remotes: [{ type: "streamable-http", url: "https://mcp.stripe.com", headers: [{ name: "Authorization", isSecret: true }] }] },
+      _meta: active(),
+    },
+    {
+      server: { name: "io.github.y/deleted", remotes: [{ type: "streamable-http", url: "https://gone.example.dev/mcp" }] },
+      _meta: { "io.modelcontextprotocol.registry/official": { status: "deleted", isLatest: true } },
+    },
   ],
 };
 
@@ -50,6 +59,27 @@ describe("toCatalog", () => {
   it("survives junk", () => {
     assert.deepEqual(toCatalog(null), []);
     assert.deepEqual(toCatalog({ servers: [null, { server: {} }] }), []);
+  });
+});
+
+describe("iconOf", () => {
+  it("takes the first https image the panel can show", () => {
+    assert.equal(
+      iconOf([{ src: "http://plain.example/icon.png" }, { src: "https://x.example/icon.ico", mimeType: "image/x-icon" }, { src: "https://x.example/mark.svg", mimeType: "image/svg+xml" }]),
+      "https://x.example/mark.svg",
+    );
+    assert.equal(iconOf([{ src: "https://x.example/a b.png" }]), undefined);
+    assert.equal(iconOf("https://x.example/icon.png"), undefined);
+    assert.equal(iconOf(undefined), undefined);
+  });
+
+  it("is carried into the catalog entry", () => {
+    const withIcon = {
+      servers: [
+        { server: { name: "com.example/mcp", icons: [{ src: "https://example.com/icon.png", mimeType: "image/png" }], remotes: [{ type: "streamable-http", url: "https://example.com/mcp" }] } },
+      ],
+    };
+    assert.equal(toCatalog(withIcon)[0].icon, "https://example.com/icon.png");
   });
 });
 
