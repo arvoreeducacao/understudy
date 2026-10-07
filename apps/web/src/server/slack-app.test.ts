@@ -9,7 +9,7 @@ test("the manifest points every Slack callback at the panel and asks only the ne
   assert.equal(manifest.features.slash_commands[0].url, "https://bot.example.com/api/slack/commands");
   assert.ok(manifest.oauth_config.scopes.bot.includes("chat:write.customize"));
   assert.ok(slackManifestUrl(manifest).startsWith("https://api.slack.com/apps?new_app=1&manifest_json=%7B"));
-  assert.equal(slashCommand("Ajudante da Árvore"), "/ajudante-da-arvore");
+  assert.equal(slashCommand("Ajudante da Estação"), "/ajudante-da-estacao");
 });
 
 test("only fresh requests signed with the signing secret are accepted", () => {

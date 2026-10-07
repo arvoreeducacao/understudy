@@ -21,9 +21,9 @@ test("an agent stays on the host it is bound to", () => {
 });
 
 test("hostName turns machine ids into something a person can read", () => {
-  assert.deepEqual(hostName("ip-10-90-15-63"), { kind: "cloud", ip: "10.90.15.63" });
-  assert.deepEqual(hostName("ip-10-90-15-63.ec2.internal"), { kind: "cloud", ip: "10.90.15.63" });
+  assert.deepEqual(hostName("ip-10-0-1-23"), { kind: "cloud", ip: "10.0.1.23" });
+  assert.deepEqual(hostName("ip-10-0-1-23.ec2.internal"), { kind: "cloud", ip: "10.0.1.23" });
   assert.deepEqual(hostName("understudy-host-1"), { kind: "numbered", n: "1" });
   assert.deepEqual(hostName("host-12"), { kind: "numbered", n: "12" });
-  assert.deepEqual(hostName("joaos-macbook"), { kind: "raw", id: "joaos-macbook" });
+  assert.deepEqual(hostName("sams-laptop"), { kind: "raw", id: "sams-laptop" });
 });
