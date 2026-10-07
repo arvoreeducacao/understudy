@@ -254,19 +254,19 @@ export class Approvals {
     }).catch((error) => log("push_error", { error: String(error) }));
     const as = agentIdentity({ id: agentId, name: owner.name });
     const inThread = await postApprovalInThread(agentId, blocks, text).catch(() => false);
-    const recipients = inThread ? approvers.map((a) => a.email) : [owner.email, ...approvers.map((a) => a.email)];
-    for (const email of recipients) await sendDirectMessage(email, text, blocks, as);
+    const recipients = inThread ? approvers : [owner, ...approvers];
+    for (const person of recipients) await sendDirectMessage(person, text, blocks, as);
   }
 
   async notifyOwner(agentId: string, text: string) {
     const [owner] = await getDb()
-      .select({ email: schema.user.email, name: schema.agents.name })
+      .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
       .from(schema.agents)
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
       .where(eq(schema.agents.id, agentId));
-    if (!owner) return { slack: false };
+    if (!owner) return { slack: false, error: "no_owner" };
     await this.hub.addMessage(agentId, "agent", text);
-    const result = await sendDirectMessage(owner.email, escapeSlack(text), undefined, agentIdentity({ id: agentId, name: owner.name }));
-    return { slack: result.ok };
+    const result = await sendDirectMessage(owner, escapeSlack(text), undefined, agentIdentity({ id: agentId, name: owner.name }));
+    return result.ok ? { slack: true } : { slack: false, error: result.error ?? "unknown" };
   }
 }

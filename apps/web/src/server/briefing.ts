@@ -41,7 +41,7 @@ export async function sendBriefings() {
       return null;
     });
     if (!text) continue;
-    const result = await sendDirectMessage(user.email, text);
+    const result = await sendDirectMessage(user, text);
     console.log(JSON.stringify({ at: new Date().toISOString(), event: "briefing_sent", userId: user.id, ok: result.ok }));
   }
 }

@@ -29,6 +29,17 @@ export const en = {
     installBody: "Put the panel on your phone's home screen so it opens in one tap, like any other app.",
     installIphone: "iPhone: tap Share, then Add to Home Screen.",
     installAndroid: "Android: open the browser menu, then tap Install app.",
+    slackTitle: "Slack",
+    slackBody: "Your understudies message you on Slack: approvals, heads-ups and the morning briefing.",
+    slackLinked: (name: string) => `Connected to the Slack account ${name}.`,
+    slackByEmail:
+      "Your understudies find you on Slack by the email you sign in with here. If your Slack uses another email, send any direct message to the Slack app and open the link it replies with.",
+    slackConfirm: (name: string) =>
+      `Connect the Slack account ${name} to your panel account? Your understudies will message you there, and what you write to the Slack app will count as you.`,
+    slackConnect: "Connect",
+    slackDisconnect: "Disconnect",
+    slackDisconnectConfirm: "Disconnect this Slack account? Your understudies will look for you by your email again.",
+    slackExpired: "That link expired or is not valid. Send a new direct message to the Slack app to get a fresh one.",
   },
   push: {
     approvalTitle: (name: string) => `${name} needs your approval`,
@@ -48,7 +59,10 @@ export const en = {
     fromPanel: (author: string, text: string) => `**${author}** (in the panel): ${text}`,
     starting: "Starting my computer. I'll answer here in a moment.",
     gaveUp: "My computer did not come back within 30 minutes, so I couldn't read this. Please send it again.",
-    unknownUser: (url: string) => `I don't know you yet. Sign in at ${url} with the same email you use in Slack.`,
+    unknownUser: (url: string) => `I don't know you yet. Sign in at ${url} with the same email you use in Slack, or send me a direct message to connect this Slack account.`,
+    unknownUserLink: (url: string, connect: string) =>
+      `I don't know you yet. Sign in at ${url} with the same email you use in Slack. If you sign in with another email, ${connect} while signed in. The link works for one hour; do not share it.`,
+    connectLabel: "connect this Slack account",
     noAgents: (url: string) => `You have no understudies yet. Create one at ${url}.`,
     whichAgent: (names: string[]) => `Which understudy? Start the message with its name: ${names.join(", ")}.`,
     sayWhat: "Yes? Tell me what you need in the same message.",

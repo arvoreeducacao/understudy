@@ -1,5 +1,6 @@
 import { readSetting } from "@/lib/app-settings";
 import { env } from "@/lib/env";
+import { linkedSlackUser } from "./slack-link";
 
 type SlackResponse = { ok: boolean; error?: string; [key: string]: unknown };
 
@@ -75,13 +76,30 @@ async function slackGet(method: string, params: Record<string, string>) {
   return (await res.json()) as SlackResponse;
 }
 
-async function lookupUserId(email: string): Promise<string | null> {
+async function lookupUserId(rawEmail: string): Promise<string | null> {
+  const email = rawEmail.trim().toLowerCase();
   const cachedId = userIdByEmail.get(email);
   if (cachedId) return cachedId;
   const data = (await slackGet("users.lookupByEmail", { email })) as SlackResponse & { user?: { id: string } };
   if (!data.ok || !data.user) return null;
   userIdByEmail.set(email, data.user.id);
   return data.user.id;
+}
+
+export type SlackRecipient = { id: string; email: string };
+
+export async function slackUserIdFor(person: SlackRecipient): Promise<string | null> {
+  const linked = await linkedSlackUser(person.id).catch((error) => {
+    console.error(JSON.stringify({ event: "slack_link_read_failed", error: String(error) }));
+    return null;
+  });
+  return linked ?? (await lookupUserId(person.email));
+}
+
+export async function slackUserName(slackUserId: string): Promise<string | null> {
+  const data = (await slackGet("users.info", { user: slackUserId })) as SlackResponse & { user?: { name?: string; real_name?: string; profile?: { display_name?: string; real_name?: string } } };
+  if (!data.ok || !data.user) return null;
+  return data.user.profile?.display_name || data.user.profile?.real_name || data.user.real_name || data.user.name || null;
 }
 
 export async function slackUserEmail(slackUserId: string): Promise<string | null> {
@@ -113,9 +131,9 @@ function identityFields(as?: SlackIdentity) {
   return as ? { username: as.username, icon_url: as.iconUrl } : {};
 }
 
-export async function sendDirectMessage(email: string, text: string, blocks?: unknown[], as?: SlackIdentity) {
+export async function sendDirectMessage(to: SlackRecipient, text: string, blocks?: unknown[], as?: SlackIdentity) {
   if (!(await slackEnabled())) return { ok: false, error: "slack_disabled" };
-  const userId = await lookupUserId(email);
+  const userId = await slackUserIdFor(to);
   if (!userId) return { ok: false, error: "user_not_found" };
   return slackCall("chat.postMessage", { channel: userId, text, blocks, unfurl_links: false, ...identityFields(as) });
 }
