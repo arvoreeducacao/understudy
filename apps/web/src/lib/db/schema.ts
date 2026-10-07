@@ -289,6 +289,7 @@ export const approvals = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
+    usedAt: timestamp("used_at", { withTimezone: true }),
   },
   (t) => [index("approvals_agent_idx").on(t.agentId, t.status)],
 );

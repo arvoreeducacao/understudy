@@ -169,6 +169,13 @@
       "when": 1791399979072,
       "tag": "0023_chat_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791415872410,
+      "tag": "0024_approval_used_at",
+      "breakpoints": true
     }
   ]
 }

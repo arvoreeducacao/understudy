@@ -245,3 +245,85 @@ test("request_approval tells the brain the step was stopped when the owner stops
   const later = await rpc("wait_for_approval", { requestId: result.match(/requestId: (\S+)\]/)![1] });
   assert.match(later, /^stopped: /);
 });
+
+test("an approved action in a running task run lets exactly that call through once, and nothing else", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const hub = createHub();
+  const runId = "run_gk_action";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "manual", status: "running" });
+  const action = { to: "client@example.com", body: "the summary" };
+  const countApprovals = async () => (await db.select().from(schema.approvals).where(eq(schema.approvals.agentId, ids.agent))).length;
+
+  const asked = rpc("request_approval", { summary: "Send the summary", runId, stepId: "s3", action: { tool: "mcp__gatekeeper__mail__send", args: action } });
+  const step = await pendingApproval();
+  assert.equal(step.runId, runId);
+  assert.deepEqual(step.fields, [
+    { label: "Action", value: "mail__send" },
+    { label: "to", value: "client@example.com" },
+    { label: "body", value: "the summary" },
+  ]);
+  await hub.answerApproval(step.id, true, undefined, ids.owner);
+  assert.match(await asked, /^approved/);
+
+  const before = calls.length;
+  const approvals = await countApprovals();
+  assert.equal(await rpc("mail__send", action), "sent to client@example.com");
+  assert.equal(calls.length, before + 1);
+  assert.equal(await countApprovals(), approvals);
+  const [used] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, step.id));
+  assert.ok(used.usedAt);
+
+  const again = rpc("mail__send", action);
+  const second = await pendingApproval();
+  await hub.answerApproval(second.id, false, undefined, ids.owner);
+  assert.match(await again, /^not called/);
+  assert.equal(calls.length, before + 1);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
+
+test("an approved action does not cover other arguments, a finished run, a stale answer or a chat without a run", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const hub = createHub();
+  const runId = "run_gk_action_limits";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "manual", status: "running" });
+  const approve = async (args: Record<string, unknown>, run?: string) => {
+    const asked = rpc("request_approval", { summary: "Send", ...(run ? { runId: run } : {}), action: { tool: "mail__send", args } });
+    const approval = await pendingApproval();
+    await hub.answerApproval(approval.id, true, undefined, ids.owner);
+    assert.match(await asked, /^approved/);
+    return approval.id;
+  };
+  const stillAsks = async (args: Record<string, unknown>) => {
+    const before = calls.length;
+    const pending = rpc("mail__send", args);
+    const approval = await pendingApproval();
+    await hub.answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(calls.length, before);
+  };
+
+  await approve({ to: "client@example.com", body: "approved text" }, runId);
+  await stillAsks({ to: "client@example.com", body: "different text" });
+  await stillAsks({ to: "other@example.com", body: "approved text" });
+
+  await approve({ to: "client@example.com", body: "no run" });
+  await stillAsks({ to: "client@example.com", body: "no run" });
+
+  const stale = await approve({ to: "client@example.com", body: "stale" }, runId);
+  await db.update(schema.approvals).set({ answeredAt: new Date(Date.now() - 60 * 60 * 1000) }).where(eq(schema.approvals.id, stale));
+  await stillAsks({ to: "client@example.com", body: "stale" });
+
+  await approve({ to: "client@example.com", body: "after the run" }, runId);
+  await db.update(schema.runs).set({ status: "ok", finishedAt: new Date() }).where(eq(schema.runs.id, runId));
+  await stillAsks({ to: "client@example.com", body: "after the run" });
+
+  assert.match(await rpc("request_approval", { summary: "x", runId, action: { tool: "nope__send", args: {} } }), /^not asked: nope__send is not one of your gatekeeper tools/);
+  assert.match(await rpc("request_approval", { summary: "x", runId, action: { tool: "request_approval", args: {} } }), /^not asked/);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});

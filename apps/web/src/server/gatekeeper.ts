@@ -10,7 +10,7 @@ import type { AgentTools } from "@/lib/db/schema";
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
-import { approvalFields, payloadHash, serverAllowedFor } from "./approval-payload";
+import { approvalFields, MAX_APPROVAL_FIELDS, payloadHash, serverAllowedFor } from "./approval-payload";
 import { teamTools } from "./team";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled } from "./slack";
@@ -19,6 +19,7 @@ import { callUpstreamTool, listUpstreamTools, loadServers, type UpstreamServer }
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
 const APPROVAL_CALL_CAP_MS = 30 * 60 * 1000;
+const ACTION_APPROVAL_MAX_AGE_MS = 15 * 60 * 1000;
 const HEARTBEAT_MS = 20_000;
 
 type AgentRow = typeof schema.agents.$inferSelect;
@@ -49,7 +50,16 @@ async function logCall(agentId: string, tool: string, args: unknown, result: unk
   console.log(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call", agentId, tool, ok }));
 }
 
+export function actionToolName(tool: string) {
+  return tool.trim().replace(/^mcp__gatekeeper__/, "");
+}
+
+export function actionHash(tool: string, args: Record<string, unknown>) {
+  return payloadHash(`action:${actionToolName(tool)}`, args);
+}
+
 type Extra = {
+  call?: { name: string };
   signal: AbortSignal;
   sendNotification: (notification: { method: "notifications/message"; params: { level: "info"; data: unknown } }) => Promise<void>;
 };
@@ -107,19 +117,35 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     {
       name: "request_approval",
       description:
-        'Ask your owner to approve a step that cannot be undone, before doing it. Returns "approved" or "denied" (with an optional note from the owner). If it returns {"status":"pending","requestId":...}, the owner has not answered yet: call wait_for_approval with that requestId and keep waiting. Never do the step unless the answer is approved.',
+        'Ask your owner to approve a step that cannot be undone, before doing it. Returns "approved" or "denied" (with an optional note from the owner). If it returns {"status":"pending","requestId":...}, the owner has not answered yet: call wait_for_approval with that requestId and keep waiting. Never do the step unless the answer is approved. When the step is one call to another gatekeeper tool during a task run, pass it as action (tool name and the exact arguments) together with runId: the owner sees exactly that call, and once approved, that one call with exactly those arguments goes through without asking again.',
       schema: z.object({
         summary: z.string().min(1).max(500),
         fields: z.array(z.object({ label: z.string().max(200), value: z.string().max(20000) })).max(50).optional(),
         runId: z.string().optional(),
         stepId: z.string().optional(),
+        action: z.object({ tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()) }).optional(),
       }),
-      run: (async (args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string }, extra: Extra) => {
+      run: (async (
+        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> } },
+        extra: Extra,
+      ) => {
+        let fields = args.fields ?? [];
+        let hash: string | undefined;
+        if (args.action) {
+          const tool = actionToolName(args.action.tool);
+          if (!actionAllowed(tool)) return text(`not asked: ${tool} is not one of your gatekeeper tools; ask without action`, true);
+          const shown = approvalFields(args.action.args);
+          if ("error" in shown) return text(`not asked: an action needs ${shown.error}, so the owner sees exactly what will run`, true);
+          fields = [...fields, { label: "Action", value: tool }, ...shown.fields];
+          if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
+          hash = actionHash(tool, args.action.args);
+        }
         const id = await hub.createApproval(
           agent.id,
-          { summary: args.summary, fields: args.fields ?? [], runId: args.runId || undefined, stepId: args.stepId },
+          { summary: args.summary, fields, runId: args.runId || undefined, stepId: args.stepId },
           "mcp",
           APPROVAL_LIFETIME_SECONDS,
+          hash,
         );
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
@@ -178,6 +204,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   const upstreams = (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail));
   const needsApproval = (upstream: UpstreamServer, toolName: string) =>
     upstream.askAll || (upstream.askTools ?? []).includes(toolName) || askTools.has(`${upstream.id}:${toolName}`);
+  const actionAllowed = (tool: string) =>
+    tool !== "request_approval" && tool !== "wait_for_approval" && (builtins.some((b) => b.name === tool) || upstreams.some((u) => tool.startsWith(`${u.slug}${PROXY_SEPARATOR}`)));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const proxied = await Promise.all(
@@ -207,11 +235,12 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     const builtin = builtins.find((b) => b.name === name);
+    const callExtra = { ...(extra as unknown as Extra), call: { name } };
     try {
       let result: ToolResult;
       if (builtin) {
         const parsed = builtin.schema.safeParse(args);
-        result = parsed.success ? await builtin.run(parsed.data as never, extra as unknown as Extra) : text(parsed.error.message, true);
+        result = parsed.success ? await builtin.run(parsed.data as never, callExtra) : text(parsed.error.message, true);
       } else {
         const [slug, ...rest] = name.split(PROXY_SEPARATOR);
         const toolName = rest.join(PROXY_SEPARATOR);
@@ -219,7 +248,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         if (!upstream || !toolName) {
           result = text(`unknown tool ${name}`, true);
         } else {
-          result = await proxyCall(hub, agent, upstream, toolName, args, needsApproval(upstream, toolName), waitOutcome, extra as unknown as Extra);
+          result = await proxyCall(hub, agent, upstream, toolName, args, needsApproval(upstream, toolName), waitOutcome, callExtra);
         }
       }
       await logCall(agent.id, name, args, result.content[0]?.text?.slice(0, 4000), !result.isError);
@@ -251,6 +280,7 @@ async function guardOutward(
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
   if (!ask) return { ok: true };
+  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true };
   const hash = payloadHash(target, args);
   const id = await hub.createApproval(agent.id, { summary, fields }, "mcp", APPROVAL_LIFETIME_SECONDS, hash);
   let outcome = await waitOutcome(id, extra);

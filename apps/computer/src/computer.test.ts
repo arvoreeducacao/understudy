@@ -143,6 +143,7 @@ test("run prompt gates ask steps and the result line is parsed", () => {
   const recipe: Recipe = { title: "T", trigger: "x", steps: [{ id: "s1", text: "Enviar", mode: "ask" }], questions: [], askFirstRuns: 3 };
   assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /\[ASK FIRST\][\s\S]*paused for the owner's approval automatically[\s\S]*runId "r1"/);
   assert.doesNotMatch(runPrompt({ runId: "r1", recipe, approvalsRequired: false }), /\[ASK FIRST\]/);
+  assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /pass it as action in request_approval[\s\S]*will not ask the owner a second time/);
   assert.deepEqual(parseRunResult('feito\nRESULT {"ok": true, "summary": "Enviei"}'), { ok: true, summary: "Enviei", anomalies: [] });
   const flagged = parseRunResult('RESULT {"ok": true, "summary": "Paid 12 invoices.", "anomalies": ["Invoice 88 is 10x the usual amount"]}');
   assert.equal(flagged && withAnomalies(flagged), "Paid 12 invoices. Unusual: Invoice 88 is 10x the usual amount");

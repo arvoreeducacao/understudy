@@ -173,3 +173,33 @@ test("Slack off removes the tools", { skip }, async () => {
   assert.ok(!(await toolNames()).some((name) => name.startsWith("slack_")));
   assert.match(await call("slack_post_message", { channel: "#general", text: "x" }), /unknown tool/);
 });
+
+test("a task step approved with its exact Slack message sends it to another person without asking twice", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setMode("ask");
+  const runId = "run_sk_action";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "manual", status: "running" });
+  const message = { person: "client@outside.net", text: "Weekly summary: all done." };
+  const asked = call("request_approval", { summary: "Send the summary by Slack DM", runId, action: { tool: "slack_send_dm", args: message } });
+  const step = await pendingApproval();
+  await createHub().answerApproval(step.id, true, undefined, ids.owner);
+  assert.match(await asked, /^approved/);
+
+  const before = posted().length;
+  assert.match(await call("slack_send_dm", message), /"sent":true/);
+  assert.equal(posted().length, before + 1);
+  assert.equal(posted().at(-1)?.params.channel, "U0OUT00001");
+  const pending = (await db.select().from(schema.approvals).where(eq(schema.approvals.agentId, ids.agent))).filter((row) => row.status === "pending");
+  assert.equal(pending.length, 0);
+
+  const again = call("slack_send_dm", message);
+  const second = await pendingApproval();
+  assert.equal(second.summary, "Slack: message Client (client@outside.net)");
+  await createHub().answerApproval(second.id, false, undefined, ids.owner);
+  assert.match(await again, /^not done/);
+  assert.equal(posted().length, before + 1);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
