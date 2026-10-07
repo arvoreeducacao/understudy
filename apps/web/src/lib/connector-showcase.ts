@@ -15,6 +15,7 @@ export type Connector = {
   headerPrefix?: string;
   keyPage?: string;
   icon?: string;
+  signIn?: { needsClient: boolean };
   featured: boolean;
 };
 
@@ -31,6 +32,16 @@ export const FEATURED_CONNECTORS: Connector[] = [
     category: "work",
     ...bearer,
     keyPage: "https://linear.app/settings/account/security",
+    featured: true,
+  },
+  {
+    id: "hubspot",
+    name: "HubSpot",
+    url: "https://mcp.hubspot.com/",
+    publisher: by("hubspot.com"),
+    category: "work",
+    signIn: { needsClient: true },
+    keyPage: "https://developers.hubspot.com/mcp",
     featured: true,
   },
   {

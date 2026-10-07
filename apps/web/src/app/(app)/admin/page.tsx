@@ -33,7 +33,7 @@ export default async function AdminPage() {
       id: server.id,
       name: server.name,
       url: server.url,
-      tools: await listUpstreamTools(server).then((tools) => tools.map((tool) => tool.name), () => null),
+      tools: await listUpstreamTools(server, me.id).then((tools) => tools.map((tool) => tool.name), () => null),
       askAll: server.askAll,
       askTools: server.askTools ?? [],
       allowedEmails: server.allowedEmails ?? null,

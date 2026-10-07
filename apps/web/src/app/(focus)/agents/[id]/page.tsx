@@ -25,7 +25,7 @@ async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promi
       .innerJoin(schema.user, eq(schema.user.id, schema.agentMembers.userId))
       .where(eq(schema.agentMembers.agentId, agent.id)),
     slackEnabled(),
-    serverOptions(email),
+    serverOptions({ id: agent.ownerId, email }),
   ]);
   return {
     files: files.map((f) => ({ path: f.path, size: f.size, updatedAt: f.updatedAt.getTime() })),
