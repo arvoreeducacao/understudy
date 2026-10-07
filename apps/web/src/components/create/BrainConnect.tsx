@@ -22,6 +22,7 @@ export function BrainConnect({
 }) {
   const [connecting, setConnecting] = useState<Brain | null>(null);
   const [code, setCode] = useState("");
+  const [copied, setCopied] = useState(false);
   const prompt = live.loginPrompt;
   const safeUrl = prompt?.url && /^https:\/\//i.test(prompt.url) ? prompt.url : null;
   const result = live.loginResult;
@@ -29,6 +30,7 @@ export function BrainConnect({
   function connect(brain: Brain) {
     setConnecting(brain);
     setCode("");
+    setCopied(false);
     send({ type: "login_start", brain });
   }
 
@@ -96,18 +98,24 @@ export function BrainConnect({
       {prompt && (
         <div className="bg-graphite rounded-[10px] px-3.5 py-3 flex flex-col gap-2.5 text-[13px]">
           <div className="flex justify-between items-center gap-3 flex-wrap">
-            <span>
-              {safeUrl ? (
-                <>
-                  {t.openAndType("")}
-                  <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="underline">
-                    {safeUrl.replace(/^https:\/\//, "")}
-                  </a>
-                </>
-              ) : (
-                prompt.message
-              )}
-            </span>
+            {safeUrl ? (
+              <div className="flex gap-2 flex-wrap">
+                <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="btn pri sm">
+                  {t.openSignIn}
+                </a>
+                <button
+                  type="button"
+                  className="btn sec sm"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(safeUrl).then(() => setCopied(true), () => undefined);
+                  }}
+                >
+                  {copied ? t.linkCopied : t.copyLink}
+                </button>
+              </div>
+            ) : (
+              <span>{prompt.message}</span>
+            )}
             {prompt.code && <b className="font-mono tracking-[.12em] text-[15px]">{prompt.code}</b>}
           </div>
           {safeUrl && prompt.message && <div className="text-smoke text-[12px]">{prompt.message}</div>}
