@@ -28,5 +28,7 @@ export async function answerApproval(approvalId: string, approved: boolean, note
     ok = updated.length > 0;
   }
   revalidatePath("/", "layout");
-  return { ok };
+  if (ok) return { ok, status: approved ? "approved" : "denied" };
+  const [current] = await db.select({ status: schema.approvals.status }).from(schema.approvals).where(eq(schema.approvals.id, approvalId));
+  return { ok, status: current?.status ?? null };
 }

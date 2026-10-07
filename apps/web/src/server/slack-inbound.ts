@@ -197,7 +197,9 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
   const approved = action.action_id === "approve";
   const ok = await hub.answerApproval(approval.id, approved, undefined, user.id);
   log("slack_approval_answered", { approvalId, approved, ok });
-  await respond(ok ? copy.slackApp.answered(escapeSlack(approval.summary), approved, escapeSlack(user.name)) : copy.slackApp.alreadyAnswered(escapeSlack(approval.summary)), true);
+  const status = ok ? null : await hub.approvalStatus(approval.id);
+  const summary = escapeSlack(approval.summary);
+  await respond(ok ? copy.slackApp.answered(summary, approved, escapeSlack(user.name)) : status === "cancelled" ? copy.slackApp.stoppedBeforeAnswer(summary) : copy.slackApp.alreadyAnswered(summary), true);
 }
 
 async function handleCommand(res: ServerResponse, body: string) {

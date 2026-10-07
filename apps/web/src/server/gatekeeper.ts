@@ -25,19 +25,19 @@ type AgentRow = typeof schema.agents.$inferSelect;
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
-function decision(approved: boolean, note: string | undefined, requestId: string): ToolResult {
-  const verdict = approved ? "approved" : "denied";
+function decision(approved: boolean, note: string | undefined, requestId: string, stopped = false): ToolResult {
+  const verdict = approved ? "approved" : stopped ? "stopped" : "denied";
   return text(`${note ? `${verdict}: ${note}` : verdict} [requestId: ${requestId}]`);
 }
 
-type Outcome = { kind: "unknown" } | { kind: "pending" } | { kind: "decided"; approved: boolean; note?: string };
+type Outcome = { kind: "unknown" } | { kind: "pending" } | { kind: "decided"; approved: boolean; note?: string; stopped?: boolean };
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
 function outcomeText(id: string, outcome: Outcome): ToolResult {
   if (outcome.kind === "unknown") return text("denied: unknown request");
   if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id }));
-  return decision(outcome.approved, outcome.note, id);
+  return decision(outcome.approved, outcome.note, id, outcome.stopped);
 }
 
 function text(value: unknown, isError = false): ToolResult {
@@ -91,10 +91,11 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
       const existing = await hub.approvalOutcome(id, agent.id);
       if (!existing) return { kind: "unknown" };
       if (existing.status === "expired") return { kind: "decided", approved: false, note: brainText.expiredNote };
+      if (existing.status === "cancelled") return { kind: "decided", approved: false, note: brainText.stoppedNote, stopped: true };
       if (existing.status !== "pending") return { kind: "decided", approved: existing.status === "approved", note: existing.note ?? undefined };
       const answer = await hub.waitForApproval(id, APPROVAL_CALL_CAP_MS);
       if (!answer) return { kind: "pending" };
-      return { kind: "decided", approved: answer.approved, note: answer.note };
+      return { kind: "decided", approved: answer.approved, note: answer.note, stopped: answer.status === "cancelled" };
     } finally {
       clearInterval(heartbeat);
     }
@@ -253,7 +254,7 @@ async function guardOutward(
   const hash = payloadHash(target, args);
   const id = await hub.createApproval(agent.id, { summary, fields }, "mcp", APPROVAL_LIFETIME_SECONDS, hash);
   let outcome = await waitOutcome(id, extra);
-  while (outcome.kind === "pending") outcome = await waitOutcome(id, extra);
+  while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
   const approvedHash = await hub.approvalPayloadHash(id, agent.id);
   if (!approvedHash || approvedHash !== payloadHash(target, args)) return { ok: false, text: "not done: the arguments differ from what the owner approved" };

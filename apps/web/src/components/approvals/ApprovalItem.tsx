@@ -9,6 +9,7 @@ import { answerApproval } from "@/app/actions/approvals";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalFields } from "@/components/approvals/ApprovalFields";
 import { messages } from "@/lib/messages";
+import { answeredOutcome } from "@/lib/approval-outcome";
 import { Input } from "@/components/ui/controls";
 
 const t = messages.approvals;
@@ -29,8 +30,8 @@ export function ApprovalItem({
 
   function answer(approved: boolean) {
     start(async () => {
-      await answerApproval(approval.id, approved, note);
-      setDone(approved ? "approved" : "denied");
+      const result = await answerApproval(approval.id, approved, note);
+      setDone(answeredOutcome(result, approved));
       router.refresh();
     });
   }
@@ -52,7 +53,10 @@ export function ApprovalItem({
       </div>
       <ApprovalFields fields={approval.fields} />
       {done ? (
-        <span className={`pill self-start ${done === "approved" ? "g" : "c"}`}>{t.status[done]}</span>
+        <div className="flex flex-col gap-1.5">
+          <span className={`pill self-start ${done === "approved" ? "g" : done === "denied" ? "c" : ""}`}>{t.status[done] ?? done}</span>
+          {done === "cancelled" && <span className="text-[12.5px] text-ash">{t.notWaiting}</span>}
+        </div>
       ) : (
         <div className="flex gap-2 flex-wrap items-center">
           <button className="btn ok inline-flex items-center gap-1.5" disabled={pending} onClick={() => answer(true)}>
