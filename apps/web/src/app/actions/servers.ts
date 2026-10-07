@@ -10,7 +10,7 @@ import { forgetServer, slugify, testConnection } from "@/server/upstream";
 import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
 
-export type AddServerState = { ok: boolean; message: string } | null;
+export type AddServerState = { ok: boolean; message: string; id?: string } | null;
 
 export async function addMcpServer(_: AddServerState, form: FormData): Promise<AddServerState> {
   const admin = await requireAdmin();
@@ -39,8 +39,8 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
   const test = await testConnection(row);
   if (!test.ok) return { ok: false, message: messages.admin.serverProblem[test.problem] };
   await db.insert(schema.mcpServers).values(row);
-  revalidatePath("/admin");
-  return { ok: true, message: messages.admin.serverAddedWith(name, test.tools.length) };
+  revalidatePath("/admin", "layout");
+  return { ok: true, message: messages.admin.serverAddedWith(name, test.tools.length), id: row.id };
 }
 
 export async function checkMcpServer(id: string) {
@@ -48,7 +48,7 @@ export async function checkMcpServer(id: string) {
   const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
   if (!server) return { ok: false, message: messages.common.notFound };
   const test = await testConnection(server);
-  revalidatePath("/admin");
+  revalidatePath("/admin", "layout");
   return test.ok ? { ok: true, message: messages.admin.serverWorks(test.tools.length) } : { ok: false, message: messages.admin.serverProblem[test.problem] };
 }
 
@@ -56,7 +56,7 @@ export async function removeMcpServer(id: string) {
   await requireAdmin();
   await getDb().delete(schema.mcpServers).where(eq(schema.mcpServers.id, id));
   forgetServer(id);
-  revalidatePath("/admin");
+  revalidatePath("/admin", "layout");
 }
 
 export async function setServerApprovals(id: string, askAll: boolean, askTools: string[]) {
@@ -65,7 +65,7 @@ export async function setServerApprovals(id: string, askAll: boolean, askTools: 
     .update(schema.mcpServers)
     .set({ askAll, askTools: askTools.map(String).slice(0, 500) })
     .where(eq(schema.mcpServers.id, id));
-  revalidatePath("/admin");
+  revalidatePath("/admin", "layout");
 }
 
 export async function setServerAccess(id: string, everyone: boolean, emails: string) {
@@ -79,7 +79,7 @@ export async function setServerAccess(id: string, everyone: boolean, emails: str
     .update(schema.mcpServers)
     .set({ allowedEmails: everyone ? null : list })
     .where(eq(schema.mcpServers.id, id));
-  revalidatePath("/admin");
+  revalidatePath("/admin", "layout");
 }
 
 export async function searchConnectorCatalog(query: string) {

@@ -616,6 +616,37 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 .conn-name { display: block; font-size: 13.5px; font-weight: 600; color: #fff; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-by { display: block; font-size: 11.5px; color: var(--smoke); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-desc { font-size: 12.5px; line-height: 1.45; color: #aeb0b8; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.conn-tile { text-decoration: none; }
+.conn-card-link { flex-direction: row; align-items: center; gap: 12px; color: var(--mist); text-decoration: none; transition: background .15s, border-color .15s; }
+.conn-card-link:hover { background: rgb(255 255 255 / .07); border-color: var(--line); }
+.conn-custom { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 18px; border: 1px dashed color-mix(in srgb, var(--sky) 75%, transparent); background: linear-gradient(120deg, color-mix(in srgb, var(--sky) 24%, transparent), color-mix(in srgb, var(--green) 14%, transparent)); color: var(--mist); text-decoration: none; transition: background .15s, border-color .15s, transform .2s cubic-bezier(.2,.8,.2,1); }
+.conn-custom:hover { border-style: solid; border-color: var(--sky); transform: translateY(-1px); }
+.conn-custom-icon { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; color: var(--sky); background: color-mix(in srgb, var(--sky) 18%, rgb(255 255 255 / .03)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sky) 35%, transparent); }
+.conn-custom-icon.is-big { width: 72px; height: 72px; border-radius: 20px; }
+.conn-page { display: flex; flex-direction: column; gap: 18px; padding-top: 26px; }
+.conn-back { display: inline-flex; align-items: center; gap: 6px; width: fit-content; font-size: 13px; color: var(--ash); text-decoration: none; }
+.conn-back:hover { color: var(--mist); }
+.conn-hero { display: flex; align-items: flex-start; gap: 20px; padding: 6px 0 8px; }
+.conn-hero .conn-logo { border-radius: 20px; font-size: 24px; }
+.conn-hero .conn-logo.has-img { padding: 12px; }
+.conn-hero h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.03em; color: #fff; }
+.conn-hero p { margin: 6px 0 0; max-width: 60ch; font-size: 14px; line-height: 1.5; color: var(--ash); }
+.conn-hero p.conn-hero-by { margin-top: 2px; font-size: 12.5px; color: var(--smoke); }
+.conn-panel { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+@media (max-width: 560px) {
+  .conn-hero { gap: 14px; }
+  .conn-hero .conn-logo, .conn-hero .conn-custom-icon.is-big { width: 56px !important; height: 56px !important; }
+  .conn-hero h1 { font-size: 22px; }
+  .conn-custom { padding: 14px; }
+}
+.wait-count { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 99px; background: var(--amber); color: #1a1408; font-size: 13px; font-weight: 700; letter-spacing: 0; }
+.wait-clear { display: flex; align-items: center; gap: 16px; padding: 18px 20px; }
+.wait-day { margin: 0; font-size: 12px; font-weight: 500; color: var(--smoke); text-transform: uppercase; letter-spacing: .06em; }
+.wait-row { flex-wrap: nowrap; color: var(--mist); text-decoration: none; transition: background .15s; }
+.wait-row:hover { background: rgb(255 255 255 / .04); }
+.wait-row .row-main { min-width: 0; }
+.wait-summary { font-size: 13.5px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-note { font-size: 12.5px; color: var(--ash); font-style: italic; }
 .conn-search { position: relative; display: flex; align-items: center; }
 .conn-search > svg { position: absolute; left: 13px; color: var(--smoke); pointer-events: none; }
 .conn-search input { padding-left: 36px; }

@@ -1,4 +1,5 @@
 import type { CatalogEntry } from "@/lib/mcp-registry";
+import { messages } from "@/lib/messages";
 
 export const SHOWCASE_CATEGORIES = ["work", "code", "money", "research"] as const;
 export type ShowcaseCategory = (typeof SHOWCASE_CATEGORIES)[number];
@@ -23,6 +24,7 @@ const by = (label: string) => ({ kind: "domain" as const, label });
 export const FEATURED_CONNECTORS: Connector[] = [
   {
     id: "linear",
+    icon: "/connectors/linear.svg",
     name: "Linear",
     url: "https://mcp.linear.app/mcp",
     publisher: by("linear.app"),
@@ -31,9 +33,20 @@ export const FEATURED_CONNECTORS: Connector[] = [
     keyPage: "https://linear.app/settings/account/security",
     featured: true,
   },
-  { id: "zapier", name: "Zapier", url: "https://mcp.zapier.com/api/mcp/mcp", publisher: by("zapier.com"), category: "work", ...bearer, keyPage: "https://mcp.zapier.com", featured: true },
+  {
+    id: "zapier",
+    icon: "/connectors/zapier.svg",
+    name: "Zapier",
+    url: "https://mcp.zapier.com/api/mcp/mcp",
+    publisher: by("zapier.com"),
+    category: "work",
+    ...bearer,
+    keyPage: "https://mcp.zapier.com",
+    featured: true,
+  },
   {
     id: "github",
+    icon: "/connectors/github.svg",
     name: "GitHub",
     url: "https://api.githubcopilot.com/mcp/",
     publisher: by("github.com"),
@@ -44,6 +57,7 @@ export const FEATURED_CONNECTORS: Connector[] = [
   },
   {
     id: "supabase",
+    icon: "/connectors/supabase.svg",
     name: "Supabase",
     url: "https://mcp.supabase.com/mcp",
     publisher: by("supabase.com"),
@@ -52,12 +66,33 @@ export const FEATURED_CONNECTORS: Connector[] = [
     keyPage: "https://supabase.com/dashboard/account/tokens",
     featured: true,
   },
-  { id: "neon", name: "Neon", url: "https://mcp.neon.tech/mcp", publisher: by("neon.tech"), category: "code", ...bearer, keyPage: "https://console.neon.tech/app/settings/api-keys", featured: true },
+  {
+    id: "neon",
+    icon: "/connectors/neon.svg",
+    name: "Neon",
+    url: "https://mcp.neon.tech/mcp",
+    publisher: by("neon.tech"),
+    category: "code",
+    ...bearer,
+    keyPage: "https://console.neon.tech/app/settings/api-keys",
+    featured: true,
+  },
   { id: "deepwiki", name: "DeepWiki", url: "https://mcp.deepwiki.com/mcp", publisher: by("deepwiki.com"), category: "code", featured: true },
-  { id: "context7", name: "Context7", url: "https://mcp.context7.com/mcp", publisher: by("context7.com"), category: "code", featured: true },
-  { id: "stripe", name: "Stripe", url: "https://mcp.stripe.com", publisher: by("stripe.com"), category: "money", ...bearer, keyPage: "https://dashboard.stripe.com/apikeys", featured: true },
+  { id: "context7", icon: "/connectors/context7.png", name: "Context7", url: "https://mcp.context7.com/mcp", publisher: by("context7.com"), category: "code", featured: true },
+  {
+    id: "stripe",
+    icon: "/connectors/stripe.svg",
+    name: "Stripe",
+    url: "https://mcp.stripe.com",
+    publisher: by("stripe.com"),
+    category: "money",
+    ...bearer,
+    keyPage: "https://dashboard.stripe.com/apikeys",
+    featured: true,
+  },
   {
     id: "mercadopago",
+    icon: "/connectors/mercadopago.svg",
     name: "Mercado Pago",
     url: "https://mcp.mercadopago.com/mcp",
     publisher: by("mercadopago.com"),
@@ -68,6 +103,7 @@ export const FEATURED_CONNECTORS: Connector[] = [
   },
   {
     id: "posthog",
+    icon: "/connectors/posthog.svg",
     name: "PostHog",
     url: "https://mcp.posthog.com/mcp",
     publisher: by("posthog.com"),
@@ -76,12 +112,43 @@ export const FEATURED_CONNECTORS: Connector[] = [
     keyPage: "https://app.posthog.com/settings/user-api-keys",
     featured: true,
   },
-  { id: "apify", name: "Apify", url: "https://mcp.apify.com", publisher: by("apify.com"), category: "research", ...bearer, keyPage: "https://console.apify.com/settings/integrations", featured: true },
-  { id: "exa", name: "Exa", url: "https://mcp.exa.ai/mcp", publisher: by("exa.ai"), category: "research", featured: true },
-  { id: "huggingface", name: "Hugging Face", url: "https://huggingface.co/mcp", publisher: by("huggingface.co"), category: "research", featured: true },
-  { id: "mslearn", name: "Microsoft Learn", url: "https://learn.microsoft.com/api/mcp", publisher: by("microsoft.com"), category: "research", featured: true },
-  { id: "cloudflare-docs", name: "Cloudflare Docs", url: "https://docs.mcp.cloudflare.com/mcp", publisher: by("cloudflare.com"), category: "research", featured: true },
+  {
+    id: "apify",
+    icon: "/connectors/apify.svg",
+    name: "Apify",
+    url: "https://mcp.apify.com",
+    publisher: by("apify.com"),
+    category: "research",
+    ...bearer,
+    keyPage: "https://console.apify.com/settings/integrations",
+    featured: true,
+  },
+  { id: "exa", icon: "/connectors/exa.svg", name: "Exa", url: "https://mcp.exa.ai/mcp", publisher: by("exa.ai"), category: "research", featured: true },
+  { id: "huggingface", icon: "/connectors/huggingface.svg", name: "Hugging Face", url: "https://huggingface.co/mcp", publisher: by("huggingface.co"), category: "research", featured: true },
+  { id: "mslearn", icon: "/connectors/mslearn.svg", name: "Microsoft Learn", url: "https://learn.microsoft.com/api/mcp", publisher: by("microsoft.com"), category: "research", featured: true },
+  {
+    id: "cloudflare-docs",
+    icon: "/connectors/cloudflare.svg",
+    name: "Cloudflare Docs",
+    url: "https://docs.mcp.cloudflare.com/mcp",
+    publisher: by("cloudflare.com"),
+    category: "research",
+    featured: true,
+  },
 ];
+
+export const CUSTOM_CONNECTOR = "new";
+
+export function connectorHref(connector: Connector, query?: string) {
+  if (connector.featured) return `/admin/connectors/${connector.id}`;
+  const params = new URLSearchParams({ id: connector.id });
+  if (query?.trim()) params.set("q", query.trim());
+  return `/admin/connectors/catalog?${params}`;
+}
+
+export function featuredById(id: string) {
+  return FEATURED_CONNECTORS.find((connector) => connector.id === id);
+}
 
 export function sameAddress(a: string, b: string) {
   const plain = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
@@ -146,4 +213,9 @@ export function tintOf(name: string) {
   let hash = 0;
   for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
   return `hsl(${hash % 360} 62% 64%)`;
+}
+
+export function publisherLine(connector: Connector) {
+  const t = messages.admin;
+  return connector.publisher.kind === "domain" ? t.catalogVerified(connector.publisher.label) : t.catalogGithub(connector.publisher.label);
 }
