@@ -131,7 +131,7 @@ export const recordings = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     status: text("status").$type<"recording" | "processing" | "done" | "failed">().notNull().default("recording"),
-    source: text("source").$type<"computer" | "browser">().notNull().default("computer"),
+    source: text("source").$type<"computer" | "browser" | "chat">().notNull().default("computer"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     stoppedAt: timestamp("stopped_at", { withTimezone: true }),
   },

@@ -12,6 +12,7 @@ import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
 import { approvalFields, payloadHash, serverAllowedFor } from "./approval-payload";
 import { teamTools } from "./team";
+import { taskTools } from "./task-tools";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
@@ -159,6 +160,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   }
 
   builtins.push(...(teamTools(hub, agent) as Builtin[]));
+  builtins.push(...(taskTools(hub, agent) as Builtin[]));
 
   const guard = (input: GuardInput) =>
     guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask, waitOutcome, input.extra as Extra);

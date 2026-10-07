@@ -721,6 +721,7 @@ export const ptBR: Messages = {
     recipeReady: "Receita pronta",
     openRecipe: "Conferir a receita",
     failed: (error: string) => `Não deu para virar receita: ${error}`,
+    savedFromChat: (title: string, url: string) => `Salvei "${title}" como tarefa. Ela fica pausada até você revisar: ${url}`,
     timedOut: "Está demorando demais para montar a receita. Confira se o cérebro está conectado e tente de novo.",
     noBrain: "Conecte um cérebro antes de ensinar:",
     connectBrain: "configurar",

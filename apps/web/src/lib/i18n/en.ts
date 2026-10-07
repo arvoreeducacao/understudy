@@ -721,6 +721,7 @@ export const en = {
     recipeReady: "Task ready",
     openRecipe: "Review the task",
     failed: (error: string) => `Could not turn that into a task: ${error}`,
+    savedFromChat: (title: string, url: string) => `Saved "${title}" as a task. It stays paused until you review it: ${url}`,
     timedOut: "It is taking too long to write the task down. Check that its brain is connected and try again.",
     noBrain: "Connect a brain before teaching:",
     connectBrain: "set it up",
