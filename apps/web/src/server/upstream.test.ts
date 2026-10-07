@@ -59,6 +59,7 @@ async function row(url: string, key?: string) {
     askAll: false,
     askTools: [],
     allowedEmails: null,
+    oauthClient: null,
     createdBy: null,
     createdAt: new Date(),
   };

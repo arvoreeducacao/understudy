@@ -37,6 +37,7 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     askAll: false,
     askTools: [] as string[],
     allowedEmails: null,
+    oauthClient: null,
   };
   const test = await testConnection(row);
   if (!test.ok && test.problem === "unauthorized" && !headerValue) {
