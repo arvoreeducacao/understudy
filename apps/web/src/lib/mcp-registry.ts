@@ -9,11 +9,13 @@ export type CatalogEntry = {
   website?: string;
   headerName?: string;
   headerPrefix?: string;
+  icon?: string;
 };
 
 type RegistryHeader = { name?: unknown; isSecret?: unknown; isRequired?: unknown };
 type RegistryRemote = { type?: unknown; url?: unknown; headers?: RegistryHeader[]; variables?: unknown };
-type RegistryServer = { name?: unknown; title?: unknown; description?: unknown; websiteUrl?: unknown; remotes?: RegistryRemote[] };
+type RegistryIcon = { src?: unknown; mimeType?: unknown };
+type RegistryServer = { name?: unknown; title?: unknown; description?: unknown; websiteUrl?: unknown; remotes?: RegistryRemote[]; icons?: unknown };
 type RegistryItem = { server?: RegistryServer; _meta?: Record<string, { status?: unknown; isLatest?: unknown } | undefined> };
 
 export function registrySearchUrl(query: string, limit = 40) {
@@ -38,10 +40,25 @@ function remoteOf(server: RegistryServer) {
   return null;
 }
 
+const ICON_TYPES = new Set(["image/png", "image/svg+xml", "image/webp", "image/jpeg"]);
+
+export function iconOf(icons: unknown) {
+  if (!Array.isArray(icons)) return undefined;
+  for (const icon of icons as RegistryIcon[]) {
+    if (typeof icon?.src !== "string" || icon.src.length > 500 || !/^https:\/\/[^\s"'()]+$/i.test(icon.src)) continue;
+    if (icon.mimeType !== undefined && !ICON_TYPES.has(String(icon.mimeType))) continue;
+    return icon.src;
+  }
+  return undefined;
+}
+
 const GENERIC = new Set(["mcp", "server", "mcp-server", "remote", "remote-mcp", "api"]);
 
 function titleCase(text: string) {
-  return text.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
+  return text
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .slice(0, 60);
 }
 
 function displayName(server: RegistryServer, name: string) {
@@ -85,6 +102,7 @@ export function toCatalog(payload: unknown, query = ""): CatalogEntry[] {
       website: typeof server.websiteUrl === "string" && /^https:\/\//i.test(server.websiteUrl) ? server.websiteUrl : undefined,
       headerName: remote.headerName,
       headerPrefix: remote.headerName?.toLowerCase() === "authorization" ? "Bearer " : undefined,
+      icon: iconOf(server.icons),
     });
   }
   return entries
