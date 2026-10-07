@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
 import type { OwnerData } from "@/components/workspace/AgentWorkspace";
 import { getDb, schema } from "@/lib/db";
-import { CHAT_WIDTH_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
+import { CHAT_WIDTH_COOKIE, WORKSPACE_HIDDEN_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
 import { formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { defaultModel } from "@/lib/models";
@@ -56,7 +56,9 @@ async function loadWaitingRuns(runIds: string[]) {
 export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { user, agent, access } = await requireAgentAccess(id);
-  const chatWidth = parseStoredWidth((await cookies()).get(CHAT_WIDTH_COOKIE)?.value ?? null);
+  const jar = await cookies();
+  const chatWidth = parseStoredWidth(jar.get(CHAT_WIDTH_COOKIE)?.value ?? null);
+  const workspaceHidden = jar.get(WORKSPACE_HIDDEN_COOKIE)?.value === "1";
   const db = getDb();
   const [[owner], chat, approvals, runs, recipes, ownerData] = await Promise.all([
     db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, agent.ownerId)),
@@ -87,6 +89,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       ownerName={owner?.name ?? ""}
       access={access}
       initialChatWidth={chatWidth}
+      initialWorkspaceHidden={workspaceHidden}
       initialChat={chat}
       initialApprovals={approvals}
       runs={runs.map((r) => ({

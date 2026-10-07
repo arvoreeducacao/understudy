@@ -610,6 +610,9 @@ export const en = {
   },
   workspace: {
     label: "Workspace",
+    show: "Show the computer",
+    hide: "Hide the computer",
+    backToChat: "Back to the chat",
     tabs: {
       computer: "Computer",
       files: "Files",

@@ -1,16 +1,16 @@
 "use client";
 
 import type { Look } from "@/lib/look";
-import { ArrowLeft, Paperclip } from "lucide-react";
+import { ArrowLeft, Monitor, Paperclip } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { Brain, AgentState } from "@understudy/protocol";
 import { AgentFigure } from "@/components/AgentFigure";
 import { useAgentSocket } from "@/components/live/useAgentSocket";
 import { useSpeech } from "@/components/live/useSpeech";
 import type { BrainStatus } from "@/lib/db/schema";
-import { chatRows } from "@/lib/chat-layout";
+import { WORKSPACE_HIDDEN_COOKIE, chatRows } from "@/lib/chat-layout";
 import { messages } from "@/lib/messages";
 import { STATE_PILL } from "@/lib/state-pill";
 import type { ApprovalView, ChatEntry } from "@/server/hub-types";
@@ -21,6 +21,38 @@ import { ApprovalCard, Composer, DayDivider, MessageRow, StepsGroup, StreamingRo
 import { EmptyState } from "@/components/ui/EmptyState";
 
 export { ApprovalCard };
+
+const NARROW = "(max-width: 1000px)";
+
+function useWorkspaceVisibility(initialHidden: boolean) {
+  const [hidden, setHidden] = useState(initialHidden);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSheetOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sheetOpen]);
+
+  const setVisible = useCallback((visible: boolean) => {
+    if (window.matchMedia(NARROW).matches) {
+      setSheetOpen(visible);
+      return;
+    }
+    setHidden(!visible);
+    try {
+      document.cookie = `${WORKSPACE_HIDDEN_COOKIE}=${visible ? 0 : 1}; path=/; max-age=31536000; samesite=lax`;
+    } catch {}
+  }, []);
+
+  const show = useCallback(() => setVisible(true), [setVisible]);
+  const hide = useCallback(() => setVisible(false), [setVisible]);
+
+  return { hidden, sheetOpen, show, hide };
+}
 
 const t = messages.live;
 
@@ -45,6 +77,7 @@ export function AgentInside({
   ownerData,
   access = "owner",
   initialChatWidth = null,
+  initialWorkspaceHidden = false,
 }: {
   agent: AgentInfo;
   ownerName: string;
@@ -55,6 +88,7 @@ export function AgentInside({
   ownerData: OwnerData | null;
   access?: "owner" | "approver" | "viewer";
   initialChatWidth?: number | null;
+  initialWorkspaceHidden?: boolean;
 }) {
   const owner = access === "owner";
   const [chat, setChat] = useState(initialChat);
@@ -116,6 +150,7 @@ export function AgentInside({
 
   const pinned = useRef(true);
   const { width, dragging, handleProps } = useChatWidth(initialChatWidth);
+  const workspace = useWorkspaceVisibility(initialWorkspaceHidden);
 
   useEffect(() => {
     const el = listRef.current;
@@ -141,7 +176,7 @@ export function AgentInside({
 
   return (
     <div
-      className={`cx-layout ${dragging ? "is-resizing" : ""}`}
+      className={`cx-layout ${dragging ? "is-resizing" : ""} ${workspace.hidden ? "ws-hidden" : ""} ${workspace.sheetOpen ? "ws-open" : ""}`}
       style={{ "--chat-w": `${width}px` } as CSSProperties}
     >
       <section className={`cx-col ${dropping ? "is-dropping" : ""}`} {...dropProps}>
@@ -166,6 +201,18 @@ export function AgentInside({
               <span className="truncate">{t.ownerLine(ownerName.split(" ")[0], brainName)}</span>
             </div>
           </div>
+          <button
+            type="button"
+            className="cx-show-ws"
+            aria-label={messages.workspace.show}
+            title={messages.workspace.show}
+            aria-expanded={workspace.sheetOpen}
+            aria-controls="agent-workspace"
+            onClick={workspace.show}
+          >
+            <Monitor size={17} strokeWidth={1.9} aria-hidden />
+            <span className={`ws-live ${live.online ? "on" : ""}`} aria-hidden />
+          </button>
         </header>
         <div
           ref={listRef}
@@ -205,6 +252,7 @@ export function AgentInside({
         recipes={recipes}
         runs={runs}
         ownerData={ownerData}
+        onHide={workspace.hide}
       />
     </div>
   );

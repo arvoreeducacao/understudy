@@ -57,3 +57,5 @@ export function parseStoredWidth(raw: string | null | undefined) {
 }
 
 export const CHAT_WIDTH_COOKIE = "understudy_chat_w";
+
+export const WORKSPACE_HIDDEN_COOKIE = "understudy_ws_hidden";
