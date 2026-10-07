@@ -352,11 +352,22 @@ export function startTurn(config: BrainConfig, request: TurnRequest): Turn {
     });
   });
 
-  return {
-    done,
-    cancel: () => {
-      child.kill("SIGINT");
-      setTimeout(() => child.kill("SIGKILL"), 5000).unref();
-    },
+  return { done, cancel: cancelChild(child) };
+}
+
+export function cancelChild(child: ChildProcess, graceMs = 5000) {
+  let cancelling = false;
+  const release = () => {
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  };
+  child.once("exit", () => {
+    if (cancelling) release();
+  });
+  return () => {
+    if (child.exitCode !== null || child.signalCode !== null) return release();
+    cancelling = true;
+    child.kill("SIGINT");
+    setTimeout(() => child.kill("SIGKILL"), graceMs).unref();
   };
 }

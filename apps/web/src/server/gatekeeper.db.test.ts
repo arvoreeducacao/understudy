@@ -215,3 +215,33 @@ test("access: owner, member role and strangers", { skip }, async () => {
   assert.ok((await accessibleAgentIds(ids.member)).includes(ids.agent));
   assert.ok(!(await accessibleAgentIds(ids.member, ["owner", "approver"])).includes(ids.agent));
 });
+
+test("stopping the agent closes its pending approval, the gated tool is not called and a late answer does not approve it", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { viewerHandlers } = await import("./hub/viewer-handlers");
+  const { getDb, schema } = await import("@/lib/db");
+  const hub = createHub();
+  const before = calls.length;
+  const pending = rpc("mail__send", { to: "client@example.com", body: "stop me" });
+  const approval = await pendingApproval();
+  await viewerHandlers.stop({ hub, agentId: ids.agent, userId: ids.owner, offline: () => {}, refuse: () => {} }, { type: "stop" });
+  const result = await pending;
+  assert.match(result, /^not called: the owner stopped/);
+  assert.equal(calls.length, before);
+  assert.equal(await hub.answerApproval(approval.id, true, undefined, ids.owner), false);
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approval.id));
+  assert.equal(row.status, "cancelled");
+  assert.equal(row.answeredBy, ids.owner);
+  assert.equal(await hub.approvalStatus(approval.id), "cancelled");
+});
+
+test("request_approval tells the brain the step was stopped when the owner stops it", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const pending = rpc("request_approval", { summary: "Join a channel" });
+  await pendingApproval();
+  await createHub().cancelApprovals(ids.agent, ids.owner);
+  const result = await pending;
+  assert.match(result, /^stopped: /);
+  const later = await rpc("wait_for_approval", { requestId: result.match(/requestId: (\S+)\]/)![1] });
+  assert.match(later, /^stopped: /);
+});

@@ -124,6 +124,28 @@ export class Approvals {
     }
   }
 
+  async cancelPending(agentId: string, userId: string | null) {
+    const cancelled = await getDb()
+      .update(schema.approvals)
+      .set({ status: "cancelled", answeredBy: userId, answeredAt: new Date() })
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending")))
+      .returning();
+    for (const row of cancelled) {
+      log("approval_cancelled", { approvalId: row.id, agentId });
+      this.settle(row.id, { approved: false, status: "cancelled", note: brainText.stoppedNote });
+      if (row.source === "computer") {
+        this.hub.sendToComputer(agentId, { type: "approval_answer", requestId: row.requestId ?? row.id, approved: false, note: brainText.stoppedNote });
+      }
+      this.hub.broadcast(agentId, { type: "approval_closed", id: row.id, status: "cancelled" });
+    }
+    return cancelled.length;
+  }
+
+  async status(id: string) {
+    const [row] = await getDb().select({ status: schema.approvals.status }).from(schema.approvals).where(eq(schema.approvals.id, id));
+    return row?.status ?? null;
+  }
+
   async answer(id: string, approved: boolean, note: string | undefined, userId: string) {
     const db = getDb();
     const status = approved ? "approved" : "denied";

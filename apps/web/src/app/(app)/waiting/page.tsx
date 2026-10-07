@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
-import { Check, Clock, X } from "lucide-react";
+import { Ban, Check, Clock, X } from "lucide-react";
 import Link from "next/link";
 import { accessibleAgentIds } from "@/lib/access";
 import { AgentFigure } from "@/components/AgentFigure";
@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 
 const t = messages.approvals;
 
-const STATUS_ICON = { approved: Check, denied: X, expired: Clock } as Record<string, typeof Check>;
+const STATUS_ICON = { approved: Check, denied: X, expired: Clock, cancelled: Ban } as Record<string, typeof Check>;
 
 function dayOf(date: Date) {
   const today = new Date();
@@ -102,7 +102,7 @@ export default async function WaitingPage() {
                             <span className="wait-summary">{approval.summary}</span>
                             <span className="row-sub">
                               {agent.name}
-                              {answerer && approval.status !== "expired" ? ` · ${t.answeredBy(answerer)}` : ""} · {formatTime(approval.answeredAt ?? approval.createdAt)}
+                              {answerer && approval.status !== "expired" ? ` · ${approval.status === "cancelled" ? t.stoppedBy(answerer) : t.answeredBy(answerer)}` : ""} · {formatTime(approval.answeredAt ?? approval.createdAt)}
                             </span>
                             {approval.note && <span className="wait-note">“{approval.note}”</span>}
                           </span>
