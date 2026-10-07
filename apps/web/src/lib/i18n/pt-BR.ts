@@ -610,6 +610,9 @@ export const ptBR: Messages = {
   },
   workspace: {
     label: "Área de trabalho",
+    show: "Mostrar o computador",
+    hide: "Esconder o computador",
+    backToChat: "Voltar para a conversa",
     tabs: {
       computer: "Computador",
       files: "Arquivos",

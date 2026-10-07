@@ -1,4 +1,4 @@
-import { Brain, CalendarClock, Ellipsis, FolderOpen, KeyRound, ListChecks, Monitor, Settings2, SquareTerminal, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Brain, CalendarClock, Ellipsis, FolderOpen, KeyRound, ListChecks, Monitor, PanelRightClose, Settings2, SquareTerminal, type LucideIcon } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { AgentState, FileEntry, JobInfo, MemoryFile } from "@understudy/protocol";
@@ -180,6 +180,7 @@ function WorkspaceTabs({
   counts,
   online,
   more,
+  onHide,
 }: {
   tabs: readonly WorkspaceTab[];
   current: WorkspaceTab;
@@ -188,6 +189,7 @@ function WorkspaceTabs({
   counts: Partial<Record<WorkspaceTab, { value: number; tone: "s" | "c"; label: string }>>;
   online: boolean;
   more: ReactNode;
+  onHide: () => void;
 }) {
   const t = messages.workspace;
   const { ref, edges, measure } = useScrollEdges();
@@ -220,6 +222,9 @@ function WorkspaceTabs({
 
   return (
     <div className="ws-bar">
+      <button type="button" className="ws-back" aria-label={t.backToChat} title={t.backToChat} onClick={onHide}>
+        <ArrowLeft size={17} aria-hidden />
+      </button>
       <div
         ref={ref}
         role="tablist"
@@ -270,6 +275,9 @@ function WorkspaceTabs({
         })}
       </div>
       {more}
+      <button type="button" className="ws-hide" aria-label={t.hide} title={t.hide} onClick={onHide}>
+        <PanelRightClose size={16} strokeWidth={1.9} aria-hidden />
+      </button>
     </div>
   );
 }
@@ -284,6 +292,7 @@ export function AgentWorkspace({
   recipes,
   runs,
   ownerData,
+  onHide,
 }: {
   agent: { id: string; name: string; look: Look };
   link: AgentLink;
@@ -294,6 +303,7 @@ export function AgentWorkspace({
   recipes: TaskSummary[];
   runs: RunSummary[];
   ownerData: OwnerData | null;
+  onHide: () => void;
 }) {
   const t = messages.workspace;
   const full = owner && ownerData !== null;
@@ -325,7 +335,7 @@ export function AgentWorkspace({
   }
 
   return (
-    <section className="ws" aria-label={t.label}>
+    <section id="agent-workspace" className="ws" aria-label={t.label}>
       <WorkspaceTabs
         tabs={barTabs(full, tab)}
         current={tab}
@@ -334,6 +344,7 @@ export function AgentWorkspace({
         counts={counts}
         online={link.live.online}
         more={<MoreMenu tabs={advancedTabs(full)} current={tab} hrefFor={hrefFor} onSelect={select} agentName={agent.name} />}
+        onHide={onHide}
       />
       {tabs.map((name) =>
         name === "computer" || visited.has(name) || name === tab ? (
