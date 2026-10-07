@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { checkMcpServer, removeMcpServer, setServerAccess, setServerApprovals } from "@/app/actions/servers";
 import { featuredFor } from "@/lib/connector-showcase";
@@ -108,26 +111,53 @@ function CheckAgain({ id }: { id: string }) {
   );
 }
 
-function ToolList({ tools }: { tools: string[] }) {
+export function ConnectedActions({ id }: { id: string }) {
   const t = messages.admin;
-  if (!tools.length) return null;
+  const router = useRouter();
+  const [removing, startRemove] = useTransition();
   return (
-    <details className="text-[12.5px]">
-      <summary className="cursor-pointer text-ash">{t.serverSeeTools(tools.length)}</summary>
-      <div className="flex flex-wrap gap-1.5 pt-2">
-        {tools.map((tool) => (
-          <span key={tool} className="pill font-mono">
-            {tool}
-          </span>
-        ))}
-      </div>
-    </details>
+    <div className="flex items-center gap-2 flex-wrap">
+      <CheckAgain id={id} />
+      <button
+        type="button"
+        className="btn sec sm"
+        disabled={removing}
+        onClick={() =>
+          startRemove(async () => {
+            await removeMcpServer(id);
+            router.push("/admin#connected-tools");
+          })
+        }
+      >
+        {t.serverRemove}
+      </button>
+    </div>
+  );
+}
+
+export function ConnectorSettings({ server }: { server: ServerRow }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <AccessRules server={server} />
+      <ApprovalRules server={server} />
+    </div>
+  );
+}
+
+export function ConnectorActionsList({ tools }: { tools: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tools.map((tool) => (
+        <span key={tool} className="pill font-mono">
+          {tool}
+        </span>
+      ))}
+    </div>
   );
 }
 
 function ConnectedCard({ server }: { server: ServerRow }) {
   const t = messages.admin;
-  const [removing, startRemove] = useTransition();
   const known = featuredFor(server.url);
   const down = server.tools === null;
   let host = server.url;
@@ -135,32 +165,21 @@ function ConnectedCard({ server }: { server: ServerRow }) {
     host = new URL(server.url).host;
   } catch {}
   return (
-    <li className="conn-card">
-      <div className="flex items-center gap-3 flex-wrap">
+    <li>
+      <Link href={`/admin/connectors/${known?.id ?? server.id}`} className="conn-card conn-card-link">
         <ConnectorLogo name={known?.name ?? server.name} icon={known?.icon} />
-        <div className="min-w-0 flex-1">
-          <div className="conn-name truncate">{server.name}</div>
-          <div className="conn-by truncate">{host}</div>
-        </div>
+        <span className="min-w-0 flex-1">
+          <span className="conn-name">{server.name}</span>
+          <span className="conn-by">{host}</span>
+        </span>
         <span className={`pill ${down ? "c" : "g"}`}>{down ? t.connectedDown : t.connectedWorks(server.tools?.length ?? 0)}</span>
-        <div className="flex items-center gap-2">
-          <CheckAgain id={server.id} />
-          <button type="button" className="btn sec sm" disabled={removing} onClick={() => startRemove(() => removeMcpServer(server.id))}>
-            {t.serverRemove}
-          </button>
-        </div>
-      </div>
-      <details className="conn-details">
-        <summary>{t.connectedSettings}</summary>
-        <div className="flex flex-col gap-3 pt-3">
-          {server.tools && <ToolList tools={server.tools} />}
-          <AccessRules server={server} />
-          <ApprovalRules server={server} />
-        </div>
-      </details>
+        <ChevronRight size={16} className="text-smoke flex-none" aria-hidden />
+      </Link>
     </li>
   );
 }
+
+export type { ServerRow };
 
 export function ServersAdmin({ servers }: { servers: ServerRow[] }) {
   const t = messages.admin;
