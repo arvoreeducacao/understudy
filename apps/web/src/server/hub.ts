@@ -347,6 +347,10 @@ export class Hub {
     return this.approvals.payloadHash(id, agentId);
   }
 
+  useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
+    return this.approvals.useActionApproval(agentId, hash, maxAgeMs);
+  }
+
   approvalOutcome(id: string, agentId: string) {
     return this.approvals.outcome(id, agentId);
   }

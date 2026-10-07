@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
@@ -11,6 +11,7 @@ import { postApprovalInThread } from "../slack-threads";
 import type { ApprovalView } from "../hub-types";
 import { isOffRecipe } from "@/lib/approval-fields";
 import { agentIdentity, escapeSlack, sendDirectMessage, slackInteractive } from "../slack";
+import { clipPreview, slackPreview } from "../slack-preview";
 import { log, type Answer } from "./shared";
 
 export class Approvals {
@@ -69,6 +70,31 @@ export class Approvals {
       .from(schema.approvals)
       .where(and(eq(schema.approvals.id, id), eq(schema.approvals.agentId, agentId)));
     return row?.status === "approved" ? row.hash : null;
+  }
+
+  async useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
+    const db = getDb();
+    const fresh = and(
+      eq(schema.approvals.agentId, agentId),
+      eq(schema.approvals.payloadHash, hash),
+      eq(schema.approvals.status, "approved"),
+      isNull(schema.approvals.usedAt),
+      gt(schema.approvals.answeredAt, new Date(Date.now() - maxAgeMs)),
+    );
+    const candidate = db
+      .select({ id: schema.approvals.id })
+      .from(schema.approvals)
+      .innerJoin(schema.runs, and(eq(schema.runs.id, schema.approvals.runId), eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
+      .where(fresh)
+      .orderBy(desc(schema.approvals.answeredAt))
+      .limit(1);
+    const [row] = await db
+      .update(schema.approvals)
+      .set({ usedAt: new Date() })
+      .where(and(inArray(schema.approvals.id, candidate), fresh))
+      .returning({ id: schema.approvals.id });
+    if (row) log("approval_used", { agentId, approvalId: row.id });
+    return row?.id ?? null;
   }
 
   async outcome(id: string, agentId: string) {
@@ -193,8 +219,9 @@ export class Approvals {
       .where(eq(schema.agents.id, agentId));
     if (!owner) return;
     const link = `${env.publicUrl}/waiting`;
-    const fieldsText = approval.fields.map((f) => `*${escapeSlack(f.label)}:* ${f.value.trim() ? escapeSlack(f.value) : `_${copy.approvals.emptyValue}_`}`).join("\n");
-    const fields = fieldsText.length > 2800 ? `${fieldsText.slice(0, 2800)}…\n${copy.slack.fullInPanel}` : fieldsText;
+    const fieldsText = approval.fields.map((f) => `*${escapeSlack(f.label)}:* ${f.value.trim() ? slackPreview(f.value) : `_${copy.approvals.emptyValue}_`}`).join("\n");
+    const clipped = clipPreview(fieldsText);
+    const fields = clipped.clipped ? `${clipped.text}…\n${copy.slack.fullInPanel}` : clipped.text;
     const text = copy.slack.approvalText(escapeSlack(owner.name), escapeSlack(approval.summary));
     const interactive = await slackInteractive();
     const blocks = [
