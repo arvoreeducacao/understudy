@@ -1,0 +1,164 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [apps/computer, apps/host, packages/protocol, packages/runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile --filter "{./${{ matrix.package }}}..."
+
+      - working-directory: ${{ matrix.package }}
+        run: |
+          if ! ls src/*.test.ts >/dev/null 2>&1; then
+            echo "::notice::no tests in ${{ matrix.package }}"
+            exit 0
+          fi
+          node --experimental-strip-types --no-warnings --test src/*.test.ts
+
+  build:
+    needs: test
+    if: vars.NAME_PREFIX != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: web
+            platform: linux/${{ vars.NODE_ARCH }}
+            runner: ${{ vars.NODE_ARCH == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+          - app: computer
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - app: host
+            platform: linux/amd64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        run: |
+          if [ -f "apps/${{ matrix.app }}/Dockerfile" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::apps/${{ matrix.app }}/Dockerfile not found, skipping"
+          fi
+
+      - if: steps.check.outputs.present == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
+
+      - if: steps.check.outputs.present == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - if: steps.check.outputs.present == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - if: steps.check.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            UNDERSTUDY_VERSION=${{ github.sha }}
+          push: true
+          tags: |
+            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.sha }}
+            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.ref_name }}
+            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:latest
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  deploy-web:
+    needs: build
+    if: vars.NAME_PREFIX != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        run: |
+          if [ -f apps/web/Dockerfile ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - if: steps.check.outputs.present == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - if: steps.check.outputs.present == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_EKS_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 1800
+          role-chaining: true
+
+      - if: steps.check.outputs.present == 'true'
+        env:
+          NAME_PREFIX: ${{ vars.NAME_PREFIX }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+          ALB_GROUP: ${{ vars.ALB_GROUP }}
+          NODE_ARCH: ${{ vars.NODE_ARCH }}
+          CERTIFICATE_ARN: ${{ secrets.CERTIFICATE_ARN }}
+          IMAGE: ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-web:${{ github.sha }}
+        run: |
+          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region "${{ vars.AWS_REGION }}"
+          bash infra/k8s/apply.sh
+
+  deploy-host:
+    needs: build
+    if: vars.NAME_PREFIX != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        run: |
+          if [ -f apps/host/Dockerfile ] && [ -f apps/computer/Dockerfile ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - if: steps.check.outputs.present == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - if: steps.check.outputs.present == 'true'
+        env:
+          NAME_PREFIX: ${{ vars.NAME_PREFIX }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+          ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+        run: bash infra/host/deploy.sh "${{ github.sha }}"

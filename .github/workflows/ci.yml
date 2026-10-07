@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: understudy_test
+          POSTGRES_USER: understudy
+          POSTGRES_PASSWORD: understudy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U understudy -d understudy_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://understudy:understudy@localhost:5432/understudy_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        id: types
+        run: |
+          status=0
+          for dir in apps/* packages/*; do
+            if [ -f "$dir/tsconfig.json" ]; then
+              echo "::group::tsc $dir"
+              (cd "$dir" && pnpm exec tsc --noEmit -p tsconfig.json) || status=1
+              echo "::endgroup::"
+            else
+              echo "::notice::$dir has no tsconfig.json, skipped"
+            fi
+          done
+          exit $status
+
+      - name: Tests
+        if: success() || failure()
+        run: pnpm -r test
