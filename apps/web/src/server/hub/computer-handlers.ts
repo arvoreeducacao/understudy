@@ -5,6 +5,7 @@ import { newId } from "@/lib/ids";
 import { effectiveModel } from "@/lib/models";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
+import { taskLink } from "../task-tools";
 import { activeThread, relayActivity, relayAgentChat, streamDelta } from "../slack-threads";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
@@ -125,6 +126,7 @@ export const computerHandlers: Handlers = {
     if (!saved) return;
     hub.broadcast(agentId, { type: "recipe", recordingId: message.recordingId, recipeId: saved.id, recipe: saved.recipe });
     hub.broadcast(agentId, { type: "recording", recordingId: message.recordingId, status: "done" });
+    if (saved.source === "chat") await hub.addMessage(agentId, "system", copy.teach.savedFromChat(saved.recipe.title, taskLink(agentId, saved.id)));
   },
 
   async recipe_failed(hub, agentId, message) {

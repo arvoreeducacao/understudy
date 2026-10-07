@@ -37,10 +37,13 @@ export class Recordings {
     return recordingId;
   }
 
-  async startFromText(agentId: string, text: string) {
+  async startFromText(agentId: string, text: string, source: "computer" | "chat" = "computer") {
     const recordingId = newId("rec");
-    await getDb().insert(schema.recordings).values({ id: recordingId, agentId, status: "processing" });
-    this.hub.sendToComputer(agentId, { type: "teach_text", recordingId, text });
+    await getDb().insert(schema.recordings).values({ id: recordingId, agentId, status: "processing", source });
+    if (!this.hub.sendToComputer(agentId, { type: "teach_text", recordingId, text })) {
+      await this.fail(agentId, recordingId);
+      return null;
+    }
     this.hub.broadcast(agentId, { type: "recording", recordingId, status: "processing" });
     return recordingId;
   }
@@ -57,11 +60,11 @@ export class Recordings {
     const saved = { ...draft, askFirstRuns: existing ? existing.recipe.askFirstRuns : DEFAULT_ASK_FIRST_RUNS };
     if (existing) {
       await db.update(schema.recipes).set({ recipe: saved, updatedAt: new Date() }).where(eq(schema.recipes.id, existing.id));
-      return { id: existing.id, recipe: saved };
+      return { id: existing.id, recipe: saved, source: recording.source };
     }
     const id = newId("rcp");
     await db.insert(schema.recipes).values({ id, agentId, recordingId, recipe: saved, timezone: process.env.UNDERSTUDY_TIMEZONE?.trim() || "UTC" });
-    return { id, recipe: saved };
+    return { id, recipe: saved, source: recording.source };
   }
 
   async fail(agentId: string, recordingId: string) {
