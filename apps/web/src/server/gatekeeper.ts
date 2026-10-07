@@ -220,7 +220,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     const proxied = await Promise.all(
       upstreams.map(async (upstream) => {
         try {
-          const tools = await listUpstreamTools(upstream);
+          const tools = await listUpstreamTools(upstream, agent.ownerId);
           return tools.map((tool) => ({
             name: `${upstream.slug}${PROXY_SEPARATOR}${tool.name}`,
             description: `[${upstream.name}] ${tool.description ?? ""}${needsApproval(upstream, tool.name) ? " (the owner approves every call; it may take a while)" : ""}`.trim(),
@@ -316,7 +316,7 @@ async function proxyCall(
   }
   const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, `${upstream.name}: ${toolName}`, [...shown.fields], args, needsApproval, waitOutcome, extra);
   if (!allowed.ok) return text(allowed.text.replace(/^not done:/, "not called:"), true);
-  const result = await callUpstreamTool(upstream, toolName, args);
+  const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];
   const parts = content.map((part: { type: string; text?: string }) => (part.type === "text" ? part.text ?? "" : JSON.stringify(part)));
   return text(parts.join("\n") || JSON.stringify(result), Boolean(result.isError));

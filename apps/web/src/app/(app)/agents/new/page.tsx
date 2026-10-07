@@ -7,7 +7,7 @@ import { slackEnabled } from "@/server/slack";
 
 export default async function NewAgentPage() {
   const user = await requireUser();
-  const servers = await serverOptions(user.email);
+  const servers = await serverOptions(user);
   return (
     <div className="page">
       <div className="top">

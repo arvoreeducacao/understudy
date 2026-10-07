@@ -173,8 +173,15 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1791415872410,
-      "tag": "0024_approval_used_at",
+      "when": 1791416112975,
+      "tag": "0024_connector_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791416413175,
+      "tag": "0025_approval_used_at",
       "breakpoints": true
     }
   ]

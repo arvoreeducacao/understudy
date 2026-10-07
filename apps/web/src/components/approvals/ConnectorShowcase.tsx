@@ -1,10 +1,10 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition, type CSSProperties } from "react";
-import { ArrowUpRight, Check, Plus, Search } from "lucide-react";
+import { ArrowUpRight, Check, Copy, LogIn, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { addMcpServer, searchConnectorCatalog, type AddServerState } from "@/app/actions/servers";
+import { addMcpServer, searchConnectorCatalog, startConnectorSignIn, type AddServerState } from "@/app/actions/servers";
 import { catalogExtras, connectorHref, publisherLine, CUSTOM_CONNECTOR, filterFeatured, logoSources, monogram, sameAddress, SHOWCASE_CATEGORIES, tintOf, withPrefix, type Connector, type ShowcaseCategory } from "@/lib/connector-showcase";
 import type { CatalogEntry } from "@/lib/mcp-registry";
 import { messages } from "@/lib/messages";
@@ -54,7 +54,72 @@ function ConnectorTile({ connector, blurb, connected, query }: { connector: Conn
   );
 }
 
-export function ConnectForm({ connector }: { connector: Connector }) {
+export function SignInForm({ name, url, needsClient, returnAddress, keyPage }: { name: string; url: string; needsClient: boolean; returnAddress: string; keyPage?: string }) {
+  const t = messages.admin;
+  const [state, action, pending] = useActionState(startConnectorSignIn, null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (state?.ok) window.location.assign(state.to);
+  }, [state]);
+
+  const going = pending || Boolean(state?.ok);
+  return (
+    <form className="card conn-panel" action={action}>
+      <h2 className="m-0 text-[15px] font-semibold">{t.signInTitle(name)}</h2>
+      <p className="m-0 text-[13px] text-ash">{t.signInBody(name)}</p>
+      <input type="hidden" name="name" value={name} />
+      <input type="hidden" name="url" value={url} />
+      {needsClient && (
+        <>
+          <p className="conn-note m-0">
+            {t.signInClientHint(name)}{" "}
+            {keyPage && (
+              <a href={keyPage} target="_blank" rel="noreferrer" className="conn-link">
+                {t.signInClientWhere(name)}
+                <ArrowUpRight size={12} aria-hidden />
+              </a>
+            )}
+          </p>
+          <Field label={t.signInReturnAddress}>
+            <div className="flex items-center gap-2">
+              <Input readOnly className="font-mono" value={returnAddress} onFocus={(e) => e.currentTarget.select()} />
+              <button
+                type="button"
+                className="btn sec sm flex-none"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(returnAddress).then(() => setCopied(true));
+                }}
+              >
+                <Copy size={13} aria-hidden />
+                {copied ? t.signInCopied : t.signInCopy}
+              </button>
+            </div>
+          </Field>
+          <Field label={t.signInClientId}>
+            <Input name="clientId" className="font-mono" required autoComplete="off" spellCheck={false} />
+          </Field>
+          <Field label={t.signInClientSecret} hint={t.connectKeySafe}>
+            <Input name="clientSecret" type="password" className="font-mono" autoComplete="off" spellCheck={false} />
+          </Field>
+        </>
+      )}
+      {state && !state.ok && !pending && (
+        <p role="alert" className="m-0 text-[12.5px] text-coral">
+          {state.message}
+        </p>
+      )}
+      <div>
+        <button type="submit" className="btn pri" disabled={going}>
+          <LogIn size={14} aria-hidden />
+          {going ? t.signInGoing : t.signInGo(name)}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function ConnectForm({ connector, returnAddress }: { connector: Connector; returnAddress: string }) {
   const t = messages.admin;
   const router = useRouter();
   const [state, action, pending] = useActionState(addMcpServer, null);
@@ -70,6 +135,9 @@ export function ConnectForm({ connector }: { connector: Connector }) {
   const prefix = connector.headerPrefix ?? (wantsKey ? "Bearer " : undefined);
   const showKey = needsKey || wantsKey;
   const failure = !pending && state && !state.ok ? state.message : null;
+
+  if (connector.signIn) return <SignInForm name={connector.name} url={connector.url} needsClient={connector.signIn.needsClient} keyPage={connector.keyPage} returnAddress={returnAddress} />;
+  if (state?.signIn && !pending) return <SignInForm name={connector.name} url={connector.url} {...state.signIn} />;
 
   return (
     <form className="card conn-panel" action={action}>
@@ -145,6 +213,8 @@ export function ManualConnectForm() {
   useEffect(() => {
     if (state?.ok && state.id) router.push(`/admin/connectors/${state.id}`);
   }, [state, router]);
+
+  if (state?.signIn && !pending) return <SignInForm name={fields.name.trim()} url={fields.url.trim()} {...state.signIn} />;
 
   return (
     <form action={action} className="card conn-panel">

@@ -331,12 +331,31 @@ export const mcpServers = pgTable("mcp_servers", {
   url: text("url").notNull(),
   headerName: text("header_name"),
   headerValue: text("header_value"),
+  oauthClient: text("oauth_client"),
   askAll: boolean("ask_all").notNull().default(false),
   askTools: jsonb("ask_tools").$type<string[]>().notNull().default([]),
   allowedEmails: jsonb("allowed_emails").$type<string[] | null>(),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const mcpServerLogins = pgTable(
+  "mcp_server_logins",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokens: text("tokens"),
+    state: text("state").unique(),
+    verifier: text("verifier"),
+    returnTo: text("return_to"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.userId] })],
+);
 
 export const runRecords = pgTable("run_records", {
   runId: text("run_id")

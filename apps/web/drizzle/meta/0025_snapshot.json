@@ -1,6 +1,6 @@
 {
-  "id": "5aa27799-8081-4045-9e79-fda4aeea9171",
-  "prevId": "753a6fd3-fdd9-44a8-8809-6e2ebb855606",
+  "id": "ab0240c7-0123-4ee4-a0a4-a67231bd16a4",
+  "prevId": "5aa27799-8081-4045-9e79-fda4aeea9171",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -723,6 +723,12 @@
         },
         "answered_at": {
           "name": "answered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "used_at": {
+          "name": "used_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
