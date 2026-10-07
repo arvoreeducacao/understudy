@@ -172,7 +172,7 @@ test("what's new: desktop and office files, terminal, rules, page watching", asy
 
   await helper.goto(`${agentPath}/setup`);
   await helper.getByRole("button", { name: /^Remove: / }).click();
-  await expect(helper.getByText("No rules yet.")).toBeVisible();
+  await expect(helper.getByText("Add something it must never do, like paying over a limit or opening a site.")).toBeVisible();
 
   await page.goto(recipePath);
   const watchCard = page.getByRole("heading", { name: "Start when a page changes" });

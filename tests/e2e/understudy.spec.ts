@@ -215,7 +215,8 @@ test("an owner teaches a task, runs it, approves the irreversible step and sees 
     await page.goto(`${agentPath}/setup`);
     await page.getByRole("button", { name: "Rules", exact: true }).click();
     await page.getByRole("button", { name: `Remove: ${rule}` }).click();
-    await expect(page.getByText("No rules yet")).toBeVisible();
+    await expect(page.getByRole("button", { name: `Remove: ${rule}` })).toHaveCount(0);
+    await expect(page.getByText("Add something it must never do, like paying over a limit or opening a site.")).toBeVisible();
   });
 
   await test.step("two understudies talk and hand work to each other, shown in Conversations", async () => {

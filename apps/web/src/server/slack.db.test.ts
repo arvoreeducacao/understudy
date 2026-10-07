@@ -179,12 +179,13 @@ test("an approval for an agent talking in a thread lands in that thread, and run
   const { createHub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");
   const hub = createHub();
-  const postsBefore = slackCalls.filter((c) => c.method === "chat.postMessage").length;
-  await hub.createApproval(ids.ana, { summary: "Pay supplier 2", runId: "", fields: [{ label: "Amount", value: "10" }] }, "mcp", 3600);
+  const approvalId = await hub.createApproval(ids.ana, { summary: "Pay supplier 2", runId: "", fields: [{ label: "Amount", value: "10" }] }, "mcp", 3600);
   const card = await waitFor(
-    () => slackCalls.filter((c) => c.method === "chat.postMessage").slice(postsBefore).find((p) => p.body.channel === "D1" && p.body.thread_ts === "200.1"),
+    () => slackCalls.find((c) => c.method === "chat.postMessage" && JSON.stringify(c.body.blocks).includes(approvalId)),
     "the approval card in the thread",
   );
+  assert.equal(card.body.channel, "D1");
+  assert.equal(card.body.thread_ts, "200.1");
   assert.ok(card, "approval card in the thread");
   assert.ok(JSON.stringify(card?.body.blocks).includes('"action_id":"approve"'));
   const { startRunProgress, finishRunProgress } = await import("./slack-threads");
@@ -226,6 +227,10 @@ test("approval buttons answer only for people who may approve", { skip }, async 
   const { getDb, schema } = await import("@/lib/db");
   const hub = createHub();
   const approvalId = await hub.createApproval(ids.ana, { summary: "Pay supplier", runId: "" }, "mcp", 3600);
+  await waitFor(
+    () => slackCalls.find((c) => c.method === "chat.postMessage" && JSON.stringify(c.body.blocks).includes(approvalId)),
+    "the approval card to be posted",
+  );
   const click = (user: string, action: string) =>
     signed(
       "/api/slack/interactivity",
