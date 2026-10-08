@@ -46,6 +46,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` | Run the Claude brain on an API key or gateway instead of each owner's subscription |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | The same for the ChatGPT brain |
 | `UNDERSTUDY_ENABLE_CODEX` | `true` offers the ChatGPT (Codex) brain, which is experimental |
+| `UNDERSTUDY_RUN_MODEL` | A faster Claude model for task runs, such as `haiku`. A run starts on it; if it stops before finishing and the owner did not refuse anything, the agent's main model takes over in the same session. Unset, runs use the main model only |
 | `UNDERSTUDY_FAKE_BRAIN` | `1` replaces the brain with a scripted one, for testing without any account |
 
 For example, to run every understudy on one Anthropic key, set `ANTHROPIC_API_KEY` and `UNDERSTUDY_COMPUTER_ENV=ANTHROPIC_API_KEY`.
