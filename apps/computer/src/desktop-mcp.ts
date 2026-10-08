@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { cdpCall, cdpConnect, pageTargets } from "./cdp.ts";
 import { DISPLAY, SCREEN } from "./desktop.ts";
 
 const APPS: Record<string, string[]> = {
@@ -21,7 +22,7 @@ export const DESKTOP_TOOLS = [
   },
   {
     name: "desktop_click",
-    description: "Click a point on the screen, in any program (terminal, files, Writer, Calc, dialogs, the app bar, the browser's own buttons).",
+    description: "Click a point on the screen, in any program (terminal, files, Writer, Calc, dialogs, the app bar, the browser's own buttons). A click inside a web page is refused; use the browser tools there.",
     inputSchema: {
       type: "object",
       properties: { ...point, button: { type: "string", enum: ["left", "right", "middle"] }, double: { type: "boolean" } },
@@ -39,7 +40,7 @@ export const DESKTOP_TOOLS = [
   },
   {
     name: "desktop_type",
-    description: "Type text into whatever has the keyboard focus.",
+    description: "Type text into whatever has the keyboard focus. Refused while a web page has the focus; use the browser tools there.",
     inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
   {
@@ -81,6 +82,108 @@ export function desktopCommand(name: string, args: Record<string, unknown>): str
   return null;
 }
 
+export type PageWindow = { screenX: number; screenY: number; outerWidth: number; outerHeight: number; innerWidth: number; innerHeight: number; scale: number; visible: boolean; focused: boolean };
+
+export type Rect = { x: number; y: number; width: number; height: number };
+
+export const PAGE_WINDOW_SCRIPT = `({ screenX, screenY, outerWidth, outerHeight, innerWidth, innerHeight, scale: devicePixelRatio || 1, visible: document.visibilityState === "visible", focused: document.hasFocus() })`;
+
+export function pageViewport(page: PageWindow): Rect {
+  const scale = page.scale > 0 ? page.scale : 1;
+  const border = Math.max(0, (page.outerWidth - page.innerWidth) / 2);
+  return {
+    x: (page.screenX + border) * scale,
+    y: (page.screenY + Math.max(0, page.outerHeight - page.innerHeight - border)) * scale,
+    width: page.innerWidth * scale,
+    height: page.innerHeight * scale,
+  };
+}
+
+export function insideRect(x: number, y: number, rect: Rect): boolean {
+  return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+}
+
+const DEVTOOLS_KEYS = new Set(["f12", "ctrl+shift+i", "ctrl+shift+j", "ctrl+shift+c"]);
+
+function normalizeCombo(combo: string): string {
+  const parts = combo.toLowerCase().split("+").map((part) => (part === "control" ? "ctrl" : part));
+  const key = parts.pop() ?? "";
+  return [...parts.sort(), key].join("+");
+}
+
+const WEB_PAGE_HINT = "Use the browser tools (browser_click, browser_type, browser_press_key and the rest) for anything inside a web page; the desktop tools are for other programs and the browser's own buttons and menus.";
+
+export const PAGE_GUARDED_TOOLS = new Set(["desktop_click", "desktop_drag", "desktop_type", "desktop_key"]);
+
+export type ScreenWindow = Rect & { browser: boolean };
+
+export function parseClientStack(text: string): string[] {
+  return (text.split("#")[1] ?? "").split(",").map((id) => id.trim()).filter((id) => /^0x[0-9a-f]+$/i.test(id));
+}
+
+export function parseWindowInfo(text: string): Rect | null {
+  const read = (label: string) => Number(text.match(new RegExp(`${label}:\\s*(-?\\d+)`))?.[1]);
+  if (!/Map State:\s*IsViewable/.test(text)) return null;
+  const rect = { x: read("Absolute upper-left X"), y: read("Absolute upper-left Y"), width: read("Width"), height: read("Height") };
+  return Object.values(rect).every(Number.isFinite) ? rect : null;
+}
+
+export function isBrowserWindowClass(text: string): boolean {
+  return /chrom/i.test(text.split("=").slice(1).join("="));
+}
+
+export function topWindowAt(x: number, y: number, stack: ScreenWindow[]): ScreenWindow | undefined {
+  return stack.filter((window) => insideRect(x, y, window)).pop();
+}
+
+export function desktopRefusal(name: string, args: Record<string, unknown>, pages: PageWindow[] | null, stack: ScreenWindow[] | null = null): string | null {
+  if (!PAGE_GUARDED_TOOLS.has(name)) return null;
+  if (pages === null) return `Refused: the computer could not check whether this would act on a web page, so it did nothing. ${WEB_PAGE_HINT}`;
+  const shown = pages.filter((page) => page.visible);
+  if (!shown.length) return null;
+  if (name === "desktop_click" || name === "desktop_drag") {
+    const points = name === "desktop_click" ? [[args.x, args.y]] : [[args.fromX, args.fromY], [args.toX, args.toY]];
+    for (const [x, y] of points) {
+      const px = Number(clampX(x));
+      const py = Number(clampY(y));
+      const top = stack ? topWindowAt(px, py, stack) : undefined;
+      if (stack && top && !top.browser) continue;
+      if (shown.some((page) => insideRect(px, py, pageViewport(page)))) return `Refused: (${px}, ${py}) is inside a web page in the browser. ${WEB_PAGE_HINT}`;
+    }
+    return null;
+  }
+  if (shown.some((page) => page.focused)) return `Refused: the keyboard focus is on a web page in the browser. ${WEB_PAGE_HINT}`;
+  if (name === "desktop_type" && /javascript\s*:/i.test(String(args.text ?? ""))) return `Refused: typing a javascript: address would run code in a web page. ${WEB_PAGE_HINT}`;
+  if (name === "desktop_key" && String(args.keys ?? "").trim().split(/\s+/).some((combo) => DEVTOOLS_KEYS.has(normalizeCombo(combo)))) return `Refused: that shortcut opens the browser's developer tools. ${WEB_PAGE_HINT}`;
+  return null;
+}
+
+export async function browserPageWindows(): Promise<PageWindow[] | null> {
+  let targets: Awaited<ReturnType<typeof pageTargets>>;
+  try {
+    targets = await pageTargets();
+  } catch {
+    return [];
+  }
+  try {
+    return await Promise.all(
+      targets.map(async (target) => {
+        const socket = await cdpConnect(target.webSocketDebuggerUrl!, 2000);
+        try {
+          const reply = await cdpCall(socket, "Runtime.evaluate", { expression: PAGE_WINDOW_SCRIPT, returnByValue: true }, 2000);
+          const value = reply?.result?.value;
+          if (!value || typeof value.innerWidth !== "number") throw new Error("no window");
+          return value as PageWindow;
+        } finally {
+          socket.close();
+        }
+      }),
+    );
+  } catch {
+    return null;
+  }
+}
+
 function run(command: string, args: string[], env: NodeJS.ProcessEnv, capture = false): Promise<{ code: number | null; stdout: Buffer; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { env, stdio: ["ignore", capture ? "pipe" : "ignore", "pipe"] });
@@ -100,6 +203,20 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv, capture = 
   });
 }
 
+async function screenWindows(env: NodeJS.ProcessEnv): Promise<ScreenWindow[] | null> {
+  const list = await run("xprop", ["-root", "_NET_CLIENT_LIST_STACKING"], env, true);
+  if (list.code !== 0) return null;
+  const stack: ScreenWindow[] = [];
+  for (const id of parseClientStack(list.stdout.toString())) {
+    const info = await run("xwininfo", ["-id", id], env, true);
+    const rect = info.code === 0 ? parseWindowInfo(info.stdout.toString()) : null;
+    if (!rect) continue;
+    const wmClass = await run("xprop", ["-id", id, "WM_CLASS"], env, true);
+    stack.push({ ...rect, browser: wmClass.code === 0 && isBrowserWindowClass(wmClass.stdout.toString()) });
+  }
+  return stack;
+}
+
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 export async function callDesktopTool(name: string, args: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<{ content: Content[]; isError?: boolean }> {
@@ -117,6 +234,8 @@ export async function callDesktopTool(name: string, args: Record<string, unknown
     child.unref();
     return { content: [{ type: "text", text: `opening ${String(args.app)}; take a screenshot in a moment to see it` }] };
   }
+  const refusal = PAGE_GUARDED_TOOLS.has(name) ? desktopRefusal(name, args, await browserPageWindows(), name === "desktop_click" || name === "desktop_drag" ? await screenWindows(env) : null) : null;
+  if (refusal) return { content: [{ type: "text", text: refusal }], isError: true };
   const command = desktopCommand(name, args);
   if (!command) return { content: [{ type: "text", text: `nothing to do for ${name} with ${JSON.stringify(args)}` }], isError: true };
   const result = await run("xdotool", command, env);
