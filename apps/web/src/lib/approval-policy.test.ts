@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { accountSource, grantsAdmin, shouldAutoApprove, signUpRefusal, trustedForAdminList } from "./approval-policy";
 
-const base = { emailVerified: false, isAdminEmail: false, allowedDomain: "example.com" };
+const base = { emailVerified: false, isAdminEmail: false, allowedDomains: ["example.com"] };
 
 test("the public sign-up endpoint is always a sign-up, whatever the body claims", () => {
   assert.equal(accountSource("/sign-up/email", "admin"), "sign_up");
@@ -25,16 +25,16 @@ test("email and password sign-ups never grant admin", () => {
 });
 
 test("sign-up is refused for admin-listed emails and when no domain is set", () => {
-  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: true, allowedDomain: "example.com" }), "admin_email");
-  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: false, allowedDomain: "" }), "sign_up_closed");
-  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: false, allowedDomain: "example.com" }), null);
-  assert.equal(signUpRefusal({ source: "google", isAdminEmail: true, allowedDomain: "" }), null);
+  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: true, allowedDomains: ["example.com"] }), "admin_email");
+  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: false, allowedDomains: [] }), "sign_up_closed");
+  assert.equal(signUpRefusal({ source: "sign_up", isAdminEmail: false, allowedDomains: ["example.com"] }), null);
+  assert.equal(signUpRefusal({ source: "google", isAdminEmail: true, allowedDomains: [] }), null);
 });
 
 test("verified Google is approved with an allowed domain, or when the email is a listed admin", () => {
   assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: true }), true);
-  assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: true, allowedDomain: "" }), false);
-  assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: true, allowedDomain: "", isAdminEmail: true }), true);
+  assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: true, allowedDomains: [] }), false);
+  assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: true, allowedDomains: [], isAdminEmail: true }), true);
   assert.equal(shouldAutoApprove({ ...base, source: "google", emailVerified: false, isAdminEmail: true }), false);
   assert.equal(grantsAdmin({ source: "google", emailVerified: true, isAdminEmail: true }), true);
   assert.equal(grantsAdmin({ source: "google", emailVerified: false, isAdminEmail: true }), false);

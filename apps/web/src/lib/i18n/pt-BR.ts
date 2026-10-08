@@ -1,4 +1,5 @@
 import type { Messages } from "./en";
+import { emailDomains } from "./email-domains";
 
 export const ptBR: Messages = {
   product: {
@@ -205,8 +206,8 @@ export const ptBR: Messages = {
     createOne: "Criar uma",
     signInLink: "Entrar",
     askAdmin: "Ainda não tem conta? Peça para alguém da administração criar a sua.",
-    domainHint: (domain: string) => (domain ? `Use o seu e-mail @${domain}.` : ""),
-    domainNotAllowed: (domain: string) => `Só e-mails @${domain} podem entrar.`,
+    domainHint: (domains: string[]) => (domains.length > 0 ? `Use o seu e-mail ${emailDomains(domains, "pt-BR")}.` : ""),
+    domainNotAllowed: (domains: string[]) => `Só e-mails ${emailDomains(domains, "pt-BR")} podem entrar.`,
     failed: "Não deu para entrar. Confira o e-mail e a senha.",
     signUpFailed: "Não deu para criar a conta.",
     signUpClosed: "As contas são criadas por um admin. Peça a um para te adicionar.",

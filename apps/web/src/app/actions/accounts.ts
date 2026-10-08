@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { env } from "@/lib/env";
 import { messages } from "@/lib/messages";
 import { getAuth } from "@/lib/auth";
 import { currentUser, requireAdmin } from "@/lib/session";
@@ -39,7 +40,7 @@ export async function createUserAccount(_: { ok?: boolean; message?: string } | 
     console.error(JSON.stringify({ event: "create_user_failed", reason }));
     const text =
       reason === "domain_not_allowed"
-        ? messages.auth.domainNotAllowed(process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN ?? "")
+        ? messages.auth.domainNotAllowed(env.allowedEmailDomains)
         : messages.admin.createFailed;
     return { ok: false, message: text };
   }
@@ -88,7 +89,7 @@ export async function createFirstAdmin(_: { error?: string; email?: string; pass
     return {
       error:
         reason === "domain_not_allowed"
-          ? messages.auth.domainNotAllowed(process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN ?? "")
+          ? messages.auth.domainNotAllowed(env.allowedEmailDomains)
           : messages.auth.signUpFailed,
     };
   }

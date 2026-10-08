@@ -8,6 +8,6 @@ export default async function SignUpPage() {
   const user = await currentUser();
   if (user) redirect(user.status !== "approved" ? "/pending" : "/");
   if (bootstrapAllowed() && !(await hasAnyUser())) redirect("/setup");
-  if (!env.allowedEmailDomain) redirect("/sign-in");
-  return <SignUpForm domain={env.allowedEmailDomain} />;
+  if (env.allowedEmailDomains.length === 0) redirect("/sign-in");
+  return <SignUpForm domains={env.allowedEmailDomains} />;
 }

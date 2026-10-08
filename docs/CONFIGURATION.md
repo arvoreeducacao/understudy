@@ -12,7 +12,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_PUBLIC_URL` | Address people use to open the panel |
 | `UNDERSTUDY_COMPUTER_SERVER_URL` | Address computers use to reach the panel; defaults to the public URL, and the compose default works with Docker Desktop and Linux |
 | `UNDERSTUDY_ADMIN_EMAILS` | Comma-separated admins; empty lets the first account become admin |
-| `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` | Only this email domain can have accounts and sign up; empty closes public sign-up, so accounts come from an admin, the `create-user` command or Google |
+| `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` | Only these email domains (comma separated) can have accounts and sign up; empty closes public sign-up, so accounts come from an admin, the `create-user` command or Google |
 | `UNDERSTUDY_HOST_IDS` | Host ids allowed to connect; empty trusts the first host and asks an admin about any other |
 | `UNDERSTUDY_BLOCKED_CIDRS` | Extra address ranges connected tools may never use; private, loopback, link-local, metadata and CGNAT ranges are always blocked |
 | `UNDERSTUDY_ALLOW_PRIVATE_MCP` | `1` lets connected tools live on private addresses; local development only |

@@ -1,4 +1,5 @@
 import type { AgentState } from "@understudy/protocol";
+import { emailDomains } from "./email-domains";
 
 export const en = {
   product: {
@@ -205,8 +206,8 @@ export const en = {
     createOne: "Create one",
     signInLink: "Sign in",
     askAdmin: "No account yet? Ask an admin to create one for you.",
-    domainHint: (domain: string) => (domain ? `Use your @${domain} email.` : ""),
-    domainNotAllowed: (domain: string) => `Only @${domain} emails can sign in.`,
+    domainHint: (domains: string[]) => (domains.length > 0 ? `Use your ${emailDomains(domains, "en")} email.` : ""),
+    domainNotAllowed: (domains: string[]) => `Only ${emailDomains(domains, "en")} emails can sign in.`,
     failed: "Could not sign in. Check your email and password.",
     signUpFailed: "Could not create the account.",
     signUpClosed: "Accounts are created by an admin. Ask one to add you.",

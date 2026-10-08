@@ -6,7 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { messages } from "@/lib/messages";
 import { Input } from "@/components/ui/controls";
 
-export function AuthForm({ domain, google }: { domain: string; google: boolean }) {
+export function AuthForm({ domains, google }: { domains: string[]; google: boolean }) {
   const t = messages.auth;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +49,7 @@ export function AuthForm({ domain, google }: { domain: string; google: boolean }
         <div className="fld">
           <label htmlFor="email">{t.email}</label>
           <Input id="email" name="email" type="email" autoComplete="email" required />
-          {domain && <div className="text-smoke text-[11.5px] mt-1">{t.domainHint(domain)}</div>}
+          {domains.length > 0 && <div className="text-smoke text-[11.5px] mt-1">{t.domainHint(domains)}</div>}
         </div>
         <div className="fld">
           <label htmlFor="password">{t.password}</label>
@@ -60,7 +60,7 @@ export function AuthForm({ domain, google }: { domain: string; google: boolean }
           {t.signIn}
         </button>
       </form>
-      {domain ? (
+      {domains.length > 0 ? (
         <div className="text-[12.5px] text-ash text-center">
           {t.noAccount}{" "}
           <Link href="/sign-up" className="text-mist">
