@@ -726,6 +726,41 @@ test("the AI can see and drive the whole desktop", async () => {
   assert.ok(!JSON.stringify(config.mcpServers.desktop).includes("\"t\""));
 });
 
+test("desktop clicks and typing never reach a web page, and other programs keep working", async () => {
+  const { desktopRefusal, pageViewport, insideRect, parseClientStack, parseWindowInfo, isBrowserWindowClass, topWindowAt } = await import("./desktop-mcp.ts");
+  const page = { screenX: 0, screenY: 0, outerWidth: 1440, outerHeight: 856, innerWidth: 1440, innerHeight: 770, scale: 1, visible: true, focused: false };
+  assert.deepEqual(pageViewport(page), { x: 0, y: 86, width: 1440, height: 770 });
+  assert.deepEqual(pageViewport({ ...page, screenX: 100, screenY: 50, outerWidth: 808, outerHeight: 608, innerWidth: 800, innerHeight: 500 }), { x: 104, y: 154, width: 800, height: 500 });
+  assert.equal(insideRect(10, 86, pageViewport(page)), true);
+  assert.equal(insideRect(10, 85, pageViewport(page)), false);
+  assert.match(desktopRefusal("desktop_click", { x: 700, y: 400 }, [page]) ?? "", /^Refused: \(700, 400\) is inside a web page.*browser tools/);
+  assert.equal(desktopRefusal("desktop_click", { x: 700, y: 40 }, [page]), null);
+  assert.equal(desktopRefusal("desktop_click", { x: 700, y: 870 }, [page]), null);
+  assert.equal(desktopRefusal("desktop_click", { x: 700, y: 400 }, [{ ...page, visible: false }]), null);
+  assert.equal(desktopRefusal("desktop_click", { x: 700, y: 400 }, []), null);
+  assert.match(desktopRefusal("desktop_drag", { fromX: 700, fromY: 40, toX: 700, toY: 400 }, [page]) ?? "", /^Refused/);
+  assert.equal(desktopRefusal("desktop_scroll", { x: 700, y: 400, amount: 3 }, [page]), null);
+  assert.match(desktopRefusal("desktop_click", { x: 1, y: 1 }, null) ?? "", /could not check/);
+  const stack = [{ x: 0, y: 0, width: 1440, height: 856, browser: true }, { x: 200, y: 200, width: 600, height: 400, browser: false }];
+  assert.equal(topWindowAt(300, 300, stack)?.browser, false);
+  assert.equal(desktopRefusal("desktop_click", { x: 300, y: 300 }, [page], stack), null);
+  assert.match(desktopRefusal("desktop_click", { x: 1000, y: 700 }, [page], stack) ?? "", /^Refused/);
+  assert.match(desktopRefusal("desktop_type", { text: "hello" }, [{ ...page, focused: true }]) ?? "", /focus is on a web page/);
+  assert.match(desktopRefusal("desktop_key", { keys: "Return" }, [{ ...page, focused: true }]) ?? "", /focus is on a web page/);
+  assert.equal(desktopRefusal("desktop_type", { text: "hello" }, [page]), null);
+  assert.equal(desktopRefusal("desktop_key", { keys: "ctrl+s" }, [page]), null);
+  assert.match(desktopRefusal("desktop_type", { text: "JavaScript :fetch('/x')" }, [page]) ?? "", /javascript: address/);
+  assert.match(desktopRefusal("desktop_key", { keys: "shift+ctrl+J" }, [page]) ?? "", /developer tools/);
+  assert.match(desktopRefusal("desktop_key", { keys: "F12" }, [page]) ?? "", /developer tools/);
+  assert.equal(desktopRefusal("desktop_key", { keys: "F12" }, []), null);
+  assert.deepEqual(parseClientStack("_NET_CLIENT_LIST_STACKING(WINDOW): window id # 0x400003, 0x1200007"), ["0x400003", "0x1200007"]);
+  assert.deepEqual(parseClientStack("_NET_CLIENT_LIST_STACKING:  not found."), []);
+  assert.deepEqual(parseWindowInfo("  Absolute upper-left X:  12\n  Absolute upper-left Y:  -4\n  Width: 800\n  Height: 600\n  Map State: IsViewable\n"), { x: 12, y: -4, width: 800, height: 600 });
+  assert.equal(parseWindowInfo("  Absolute upper-left X:  12\n  Absolute upper-left Y:  4\n  Width: 800\n  Height: 600\n  Map State: IsUnMapped\n"), null);
+  assert.equal(isBrowserWindowClass('WM_CLASS(STRING) = "chromium", "Chromium"'), true);
+  assert.equal(isBrowserWindowClass('WM_CLASS(STRING) = "libreoffice", "libreoffice-calc"'), false);
+});
+
 test("the brain gets every tool up front instead of searching for them each turn", async () => {
   const { claudeEnv } = await import("./brain.ts");
   assert.equal(claudeEnv({ PATH: "/bin" }, "/home/agent").ENABLE_TOOL_SEARCH, "false");
@@ -876,6 +911,38 @@ test("the browser guard blocks what the owner's rules forbid and lets the rest t
   assert.equal(ruleCheck(rules, "browser_click", { target: "e3" }, page([{ label: "Amount (USD)", value: "5000" }]), false), null);
   assert.equal(ruleCheck(rules, "browser_click", { target: "e3" }, page([], { url: "https://gamble.example/x" }), false)?.rule.id, "site");
   assert.equal(ruleCheck([], "browser_navigate", { url: "https://gamble.example" }, null, false), null);
+});
+
+test("a script that sends something from a page needs the owner's approval and obeys the owner's rules", async () => {
+  const { scriptRequestVerdict, scriptRequestSubject, SCRIPT_TOOLS } = await import("./browser-guard.ts");
+  assert.deepEqual([...SCRIPT_TOOLS].sort(), ["browser_evaluate", "browser_run_code"]);
+  const rules = [
+    { id: "pay", kind: "max_amount" as const, amount: 1000, currency: "USD" },
+    { id: "mail", kind: "allowed_email_domains" as const, domains: ["northwind.com"] },
+    { id: "site", kind: "blocked_site" as const, site: "gamble.example" },
+  ];
+  const post = (over: Record<string, unknown> = {}) => ({ method: "POST", url: "https://mail.example.com/api/send", body: '{"to":"ana@northwind.com","subject":"Report"}', pageUrl: "https://mail.example.com/inbox", ...over });
+  const steps = [{ id: "s4", text: "Send the weekly report" }];
+  const chat = scriptRequestVerdict({ mode: "chat" }, [], post());
+  assert.equal(chat.kind, "ask");
+  assert.equal(chat.kind === "ask" && chat.summary, "Script sent a POST to mail.example.com");
+  assert.deepEqual(chat.kind === "ask" && chat.fields.map((field) => field.label), ["Step", "Page", "Request", "Body"]);
+  assert.equal(chat.kind === "ask" && chat.fields[2].value, "POST https://mail.example.com/api/send");
+  const run = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post(), "send weekly report");
+  assert.equal(run.kind === "ask" && run.stepId, "s4");
+  const stray = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post({ method: "delete", body: undefined }));
+  assert.ok(stray.kind === "ask" && stray.summary === "Script sent a DELETE to mail.example.com" && stray.fields[0].value === "Not a step of the recipe" && stray.fields.length === 3);
+  assert.equal(scriptRequestVerdict({ mode: "recipe" }, [], post()).kind, "block");
+  assert.deepEqual(scriptRequestVerdict({ mode: "run", approvalsRequired: false }, [], post()), { kind: "pass" });
+  for (const method of ["GET", "head", "OPTIONS"]) assert.deepEqual(scriptRequestVerdict({ mode: "recipe" }, rules, post({ method, url: "https://gamble.example/" })), { kind: "pass" });
+  const outside = scriptRequestVerdict({ mode: "run", approvalsRequired: false }, rules, post({ body: '{"to":["eve@evil.example"]}' }));
+  assert.equal(outside.kind === "rule" && outside.violation.rule.id, "mail");
+  const tooMuch = scriptRequestVerdict({ mode: "chat" }, rules, post({ url: "https://pay.example.com/transfer", body: "amount=2500.00&memo=invoice+2041" }));
+  assert.equal(tooMuch.kind === "rule" && tooMuch.violation.rule.id, "pay");
+  const blockedSite = scriptRequestVerdict({ mode: "recipe" }, rules, post({ url: "https://www.gamble.example/bet", body: "" }));
+  assert.equal(blockedSite.kind === "rule" && blockedSite.violation.rule.id, "site");
+  assert.equal(scriptRequestVerdict({ mode: "chat" }, rules, post()).kind, "ask");
+  assert.deepEqual(scriptRequestSubject({ url: "https://a.example/x", pageUrl: "", body: "to=bob%40other.org" }).texts, ["to=bob%40other.org", "bob@other.org"]);
 });
 
 test("owner rules are stored privately, reach the system prompt, and a guard block is reported to the panel", async () => {
