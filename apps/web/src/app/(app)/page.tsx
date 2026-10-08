@@ -17,16 +17,16 @@ const t = messages.home;
 export default async function HomePage() {
   const user = await requireUser();
   const db = getDb();
-  const visible = await accessibleAgentIds(user.id);
+  const [visible, answerable] = await Promise.all([accessibleAgentIds(user.id), accessibleAgentIds(user.id, ["owner", "approver"])]);
   const agents = visible.length
     ? await db.select().from(schema.agents).where(inArray(schema.agents.id, visible)).orderBy(desc(schema.agents.createdAt))
     : [];
   const ids = agents.map((b) => b.id);
-  const pending = ids.length
+  const pending = answerable.length
     ? await db
         .select()
         .from(schema.approvals)
-        .where(and(inArray(schema.approvals.agentId, ids), eq(schema.approvals.status, "pending")))
+        .where(and(inArray(schema.approvals.agentId, answerable), eq(schema.approvals.status, "pending")))
         .orderBy(desc(schema.approvals.createdAt))
     : [];
   const recipes = ids.length
