@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
-import { AMOUNT_LABEL, describeRule, findViolation, looksIrreversible, type OwnerRule, type RuleViolation } from "@understudy/protocol";
+import { AMOUNT_LABEL, argsSubject, describeRule, findViolation, looksIrreversible, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
+import { openRequestGate, type GatedRequest, type RequestGate } from "./request-gate.ts";
 import { readTurnState, turnStateFile, type TurnState } from "./turn-state.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
 import { openVault } from "./vault.ts";
@@ -118,6 +119,53 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   };
 }
 
+export const SCRIPT_TOOLS = new Set(["browser_evaluate", "browser_run_code"]);
+
+export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+export const SCRIPT_GRACE_MS = 1500;
+
+export type ScriptVerdict = Verdict | { kind: "rule"; violation: RuleViolation };
+
+export function scriptRequestSubject(request: Pick<GatedRequest, "url" | "body" | "pageUrl">): { urls: string[]; texts: string[]; amounts: string[] } {
+  const urls = [request.url, request.pageUrl].filter(Boolean);
+  const body = (request.body ?? "").slice(0, 20000);
+  if (!body) return { urls, texts: [], amounts: [] };
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    if (/^[^\s=&]+=[^&\s]*(&[^\s=&]+=[^&\s]*)*$/.test(body.trim())) parsed = Object.fromEntries(new URLSearchParams(body.trim()));
+  }
+  const inner = parsed && typeof parsed === "object" ? argsSubject(parsed) : { urls: [], texts: [], amounts: [] };
+  return { urls: [...urls, ...(inner.urls ?? [])], texts: [body, ...(inner.texts ?? [])], amounts: inner.amounts ?? [] };
+}
+
+export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = ""): ScriptVerdict {
+  const method = request.method.toUpperCase();
+  if (SAFE_METHODS.has(method)) return { kind: "pass" };
+  const violation = rules.length ? findViolation(rules, scriptRequestSubject(request)) : null;
+  if (violation) return { kind: "rule", violation };
+  if (state.mode === "recipe") return { kind: "block", reason: "blocked: while learning a task nothing is submitted or sent, and a script just tried to send a request" };
+  if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
+  let host = request.url;
+  try {
+    host = new URL(request.url).host;
+  } catch {}
+  const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
+  return {
+    kind: "ask",
+    summary: `Script sent a ${method} to ${host}`.slice(0, 480),
+    stepId: step?.id,
+    fields: [
+      { label: "Step", value: step ? step.text : state.mode === "run" ? "Not a step of the recipe" : "Asked in chat" },
+      { label: "Page", value: (request.pageUrl || "unknown").slice(0, 300) },
+      { label: "Request", value: `${method} ${request.url}`.slice(0, 300) },
+      ...(request.body ? [{ label: "Body", value: request.body.slice(0, 300) }] : []),
+    ],
+  };
+}
+
 export const RECIPIENT_LABEL = /\b(to|cc|bcc|recipients?|send to|forward to|share with|invite|para|destinat\w*|copia)\b/i;
 
 export const RULE_CHECKED_TOOLS = new Set(["browser_navigate", "browser_tabs", "browser_type", "browser_fill_form", "browser_select_option", "browser_click", "browser_press_key"]);
@@ -198,7 +246,7 @@ async function serve() {
   const toBrain = (message: Rpc) => process.stdout.write(`${JSON.stringify(message)}\n`);
   const toChild = (message: Rpc) => child.stdin.write(`${JSON.stringify(message)}\n`);
   const own = new Map<string, (message: Rpc) => void>();
-  const pendingResults = new Map<string | number, (message: Rpc) => Rpc>();
+  const pendingResults = new Map<string | number, (message: Rpc) => Rpc | Promise<Rpc>>();
   let next = 0;
   let gatekeeper: Promise<McpSession> | null = null;
 
@@ -234,6 +282,78 @@ async function serve() {
     }
   };
 
+  const gatedScript = async (message: Rpc, args: Record<string, unknown>, rules: OwnerRule[]) => {
+    const state = readTurnState(stateFile);
+    const notes: string[] = [];
+    const pending = new Set<Promise<boolean>>();
+    let blocked = false;
+    let denied = false;
+    let seen = 0;
+    let asking: Promise<unknown> = Promise.resolve();
+    const stepHint = String(args.element ?? "");
+    const judge = async (request: GatedRequest): Promise<boolean> => {
+      const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
+      const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint);
+      if (verdict.kind === "pass") return true;
+      if (verdict.kind === "rule") {
+        blocked = true;
+        await notifyMain({ event: "rule_blocked", ruleId: verdict.violation.rule.id, rule: describeRule(verdict.violation.rule), detail: verdict.violation.reason });
+        notes.push(ruleBlockText(verdict.violation));
+        return false;
+      }
+      if (verdict.kind === "block") {
+        blocked = true;
+        notes.push(verdict.reason);
+        return false;
+      }
+      const turn = asking.then(async () => {
+        if (denied) return false;
+        const answer = await askOwner(verdict, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
+        if (!answer.approved) {
+          denied = true;
+          notes.push(`blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
+          return false;
+        }
+        notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+        return true;
+      });
+      asking = turn.catch(() => {});
+      const approved = await turn;
+      if (!approved) blocked = true;
+      return approved;
+    };
+    const onRequest = (request: GatedRequest) => {
+      if (SAFE_METHODS.has(request.method.toUpperCase())) return Promise.resolve(true);
+      seen++;
+      const work = judge(request).catch(() => false);
+      pending.add(work);
+      void work.finally(() => pending.delete(work));
+      return work;
+    };
+    let gate: RequestGate;
+    try {
+      gate = await openRequestGate(onRequest);
+    } catch (error) {
+      return toBrain(textResult(message.id, `blocked: the computer could not watch what this script would send (${(error as Error).message}), so it did not run it. Use the browser tools (click, type, fill) instead.`));
+    }
+    pendingResults.set(message.id!, async (reply) => {
+      for (let round = 0; round < 5; round++) {
+        const before = seen;
+        await new Promise((resolve) => setTimeout(resolve, SCRIPT_GRACE_MS));
+        await Promise.all([...pending]);
+        if (seen === before) break;
+      }
+      await gate.close();
+      if (!notes.length) return reply;
+      const text = `Requests this script tried to send:\n${notes.join("\n")}`;
+      if (!reply.result?.content) return textResult(reply.id, text);
+      reply.result.content.push({ type: "text", text });
+      if (blocked) reply.result.isError = true;
+      return reply;
+    });
+    toChild(message);
+  };
+
   const guarded = async (message: Rpc) => {
     const tool = String(message.params?.name ?? "");
     const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
@@ -243,6 +363,7 @@ async function serve() {
       await notifyMain({ event: "rule_blocked", ruleId: violation.rule.id, rule: describeRule(violation.rule), detail: violation.reason });
       return toBrain(textResult(message.id, ruleBlockText(violation)));
     };
+    if (SCRIPT_TOOLS.has(tool)) return gatedScript(message, args, rules);
     if (tool !== "browser_click" && tool !== "browser_press_key" && tool !== "browser_type") {
       if (rules.length && RULE_CHECKED_TOOLS.has(tool)) {
         const pageInfo = tool === "browser_navigate" || tool === "browser_tabs" ? null : await elementInfo(args.target ?? undefined);
@@ -285,10 +406,14 @@ async function serve() {
     }
     if (message.result?.tools) message.result.tools = message.result.tools.filter((tool: { name: string }) => !HIDDEN_TOOLS.has(tool.name));
     const hook = message.id !== undefined ? pendingResults.get(message.id) : undefined;
-    if (hook) {
-      pendingResults.delete(message.id!);
-      message = hook(message);
-    }
+    if (!hook) return deliver(message);
+    pendingResults.delete(message.id!);
+    void Promise.resolve()
+      .then(() => hook(message))
+      .then(deliver, (error: Error) => deliver(textResult(message.id, `blocked: ${error.message}`)));
+  });
+
+  const deliver = (message: Rpc) => {
     const list = secrets();
     if (!list.length) return toBrain(message);
     try {
@@ -296,7 +421,7 @@ async function serve() {
     } catch {
       if (message.id !== undefined) toBrain(textResult(message.id, "The result was withheld because it could not be cleaned of saved secrets."));
     }
-  });
+  };
 
   createInterface({ input: process.stdin }).on("line", (line) => {
     let message: Rpc;

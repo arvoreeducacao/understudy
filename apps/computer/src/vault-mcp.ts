@@ -1,9 +1,7 @@
 import { createInterface } from "node:readline";
-import WebSocket from "ws";
 import { CDP_ENDPOINT } from "./browser.ts";
+import { cdpCall, cdpConnect, pageTargets } from "./cdp.ts";
 import { hostMatches, openVault, type Vault } from "./vault.ts";
-
-type Target = { id: string; type: string; url: string; webSocketDebuggerUrl?: string };
 
 type Part = "username" | "secret";
 
@@ -68,29 +66,6 @@ export function locateFieldScript(selector: string, part: Part): string {
 })()`;
 }
 
-function cdpCall(socket: WebSocket, method: string, params: Record<string, unknown> = {}): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const id = Math.floor(Math.random() * 1e9);
-    const onMessage = (data: WebSocket.RawData) => {
-      const message = JSON.parse(data.toString());
-      if (message.id !== id) return;
-      socket.off("message", onMessage);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result);
-    };
-    socket.on("message", onMessage);
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-}
-
-function connect(url: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    socket.once("open", () => resolve(socket));
-    socket.once("error", reject);
-  });
-}
-
 export async function fillCredential(vault: Vault, args: { name?: string; fieldSelector?: string; part?: string }, endpoint = CDP_ENDPOINT): Promise<string> {
   const name = String(args.name ?? "");
   const part: Part = args.part === "username" ? "username" : "secret";
@@ -98,14 +73,14 @@ export async function fillCredential(vault: Vault, args: { name?: string; fieldS
   if (!credential) return `No saved login named "${name}". Ask the owner to add it in the panel.`;
   if (!credential.site) return `Refused: "${name}" has no site, and a saved login is only filled on its own site. Ask the owner to set one.`;
   const value = part === "username" ? credential.username : credential.secret;
-  const targets = ((await (await fetch(`${endpoint}/json/list`)).json()) as Target[]).filter((target) => target.type === "page" && target.webSocketDebuggerUrl);
+  const targets = await pageTargets(endpoint);
   let refusedSite = false;
   for (const target of targets) {
     if (!hostMatches(credential.site, target.url)) {
       refusedSite = true;
       continue;
     }
-    const socket = await connect(target.webSocketDebuggerUrl!);
+    const socket = await cdpConnect(target.webSocketDebuggerUrl!);
     try {
       const located = await cdpCall(socket, "Runtime.evaluate", { expression: locateFieldScript(String(args.fieldSelector ?? ""), part), returnByValue: true });
       const outcome = located?.result?.value;
