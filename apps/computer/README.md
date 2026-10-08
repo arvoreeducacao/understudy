@@ -31,6 +31,7 @@ The wire format is `packages/protocol`: zod schemas with the TypeScript types de
 | `UNDERSTUDY_SERVER_URL` | yes | Panel base URL, `https://...` |
 | `AGENT_BRAIN` | no | `claude` (default) or `codex`, used until the panel sends `set_brain` |
 | `UNDERSTUDY_ENABLE_CODEX` | no | `true` offers the experimental codex brain, only if its sandbox can start (see the security model); off by default |
+| `UNDERSTUDY_RUN_MODEL` | no | Faster Claude model that starts every task run (for example `haiku`); the main model takes over in the same session only if it stops without finishing and the owner refused nothing |
 | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` | no | API-key mode for the claude brain instead of a subscription login |
 | `OPENAI_BASE_URL`, `OPENAI_API_KEY` | no | API-key mode for the codex brain |
 | `CHROMIUM_PATH`, `PLAYWRIGHT_MCP_BIN` | no | Override the bundled binaries |
