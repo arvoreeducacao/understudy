@@ -26,7 +26,7 @@ function createAuth() {
           google: {
             clientId: process.env.GOOGLE_CLIENT_ID as string,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-            hd: env.allowedEmailDomain || undefined,
+            hd: env.allowedEmailDomains.length === 1 ? env.allowedEmailDomains[0] : undefined,
           },
         }
       : {},
@@ -46,11 +46,11 @@ function createAuth() {
         create: {
           before: async (user, context) => {
             if (!isAllowedEmail(user.email)) {
-              throw new APIError("FORBIDDEN", { message: messages.auth.domainNotAllowed(env.allowedEmailDomain) });
+              throw new APIError("FORBIDDEN", { message: messages.auth.domainNotAllowed(env.allowedEmailDomains) });
             }
             const source = accountSource(context?.path, (user as { source?: unknown }).source);
             const adminEmail = isAdminEmail(user.email);
-            const refusal = signUpRefusal({ source, isAdminEmail: adminEmail, allowedDomain: env.allowedEmailDomain });
+            const refusal = signUpRefusal({ source, isAdminEmail: adminEmail, allowedDomains: env.allowedEmailDomains });
             if (refusal) {
               console.error(JSON.stringify({ event: "sign_up_refused", reason: refusal }));
               throw new APIError("FORBIDDEN", { message: refusal === "sign_up_closed" ? messages.auth.signUpClosed : messages.auth.signUpFailed });
@@ -62,7 +62,7 @@ function createAuth() {
                 ...user,
                 emailVerified,
                 source,
-                status: shouldAutoApprove({ ...policy, allowedDomain: env.allowedEmailDomain }) ? "approved" : "pending",
+                status: shouldAutoApprove({ ...policy, allowedDomains: env.allowedEmailDomains }) ? "approved" : "pending",
                 admin: grantsAdmin(policy),
               },
             };

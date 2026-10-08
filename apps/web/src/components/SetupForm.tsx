@@ -6,7 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { messages } from "@/lib/messages";
 import { Input } from "@/components/ui/controls";
 
-export function SetupForm({ domain }: { domain: string }) {
+export function SetupForm({ domains }: { domains: string[] }) {
   const t = messages.setupFirst;
   const [state, action, pending] = useActionState(createFirstAdmin, null);
   useEffect(() => {
@@ -26,7 +26,7 @@ export function SetupForm({ domain }: { domain: string }) {
       <div className="fld">
         <label htmlFor="email">{messages.auth.email}</label>
         <Input id="email" name="email" type="email" autoComplete="email" required />
-        {domain && <div className="text-smoke text-[11.5px] mt-1">{messages.auth.domainHint(domain)}</div>}
+        {domains.length > 0 && <div className="text-smoke text-[11.5px] mt-1">{messages.auth.domainHint(domains)}</div>}
       </div>
       <div className="fld">
         <label htmlFor="password">{messages.auth.password}</label>

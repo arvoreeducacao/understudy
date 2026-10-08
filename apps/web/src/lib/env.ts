@@ -16,8 +16,8 @@ export const env = {
   get publicUrl() {
     return (process.env.UNDERSTUDY_PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, "");
   },
-  get allowedEmailDomain() {
-    return (process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN ?? "").trim().toLowerCase().replace(/^@/, "");
+  get allowedEmailDomains() {
+    return list(process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN).map((domain) => domain.replace(/^@/, ""));
   },
   get adminEmails() {
     return list(process.env.UNDERSTUDY_ADMIN_EMAILS);
@@ -57,7 +57,8 @@ export function isAdmin(email: string, flaggedAdmin: boolean, source?: string | 
 }
 
 export function isAllowedEmail(email: string) {
-  const domain = env.allowedEmailDomain;
-  if (!domain) return true;
-  return email.trim().toLowerCase().endsWith(`@${domain}`);
+  const domains = env.allowedEmailDomains;
+  if (domains.length === 0) return true;
+  const address = email.trim().toLowerCase();
+  return domains.some((domain) => address.endsWith(`@${domain}`));
 }

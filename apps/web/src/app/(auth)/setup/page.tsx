@@ -7,5 +7,5 @@ export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
   if (!bootstrapAllowed() || (await hasAnyUser())) redirect("/sign-in");
-  return <SetupForm domain={env.allowedEmailDomain} />;
+  return <SetupForm domains={env.allowedEmailDomains} />;
 }

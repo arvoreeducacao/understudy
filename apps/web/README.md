@@ -16,7 +16,7 @@ pnpm --filter @understudy/web dev
 pnpm --filter @understudy/web create-user --email you@example.com --name "Your Name"
 ```
 
-Anyone from `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` can sign up with email and password and waits for an admin to approve them; without an allowed domain, public sign-up is closed. Email and password sign-ups are never verified, so they never become admin and are never approved on their own, and signing up with an address listed in `UNDERSTUDY_ADMIN_EMAILS` is refused. An admin is a listed email whose account was created by an admin, by the `create-user` command, or through Google with a verified email; when the list is empty, the first account created on a fresh database (the `/setup` page) becomes the admin. Admins can create accounts with a temporary password that must be changed at first sign-in. When `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set, Google sign-in appears and verified accounts from the allowed domain get in directly.
+Anyone from a domain in `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` (one or more, comma separated) can sign up with email and password and waits for an admin to approve them; without an allowed domain, public sign-up is closed. Email and password sign-ups are never verified, so they never become admin and are never approved on their own, and signing up with an address listed in `UNDERSTUDY_ADMIN_EMAILS` is refused. An admin is a listed email whose account was created by an admin, by the `create-user` command, or through Google with a verified email; when the list is empty, the first account created on a fresh database (the `/setup` page) becomes the admin. Admins can create accounts with a temporary password that must be changed at first sign-in. When `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set, Google sign-in appears and verified accounts from an allowed domain get in directly.
 
 To see the whole loop without real computers, run the fake host. It answers `computer_ensure` with a simulated computer that streams a fixed frame, records, returns a recipe, asks for approval through the gatekeeper and keeps a small memory:
 
@@ -32,7 +32,7 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `BETTER_AUTH_SECRET` | Session signing, also the key for sealed MCP headers |
 | `UNDERSTUDY_PUBLIC_URL` | Public URL of the panel; computers and Slack links use it |
 | `UNDERSTUDY_COMPUTER_SERVER_URL` | Optional. URL the computers use to reach the panel when it differs from the public one (e.g. `http://host.docker.internal:3000` in docker-compose). Defaults to `UNDERSTUDY_PUBLIC_URL` |
-| `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` | Only this email domain can have an account |
+| `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` | Only these email domains (comma separated) can have an account |
 | `UNDERSTUDY_ADMIN_EMAILS` | Comma separated; these people manage accounts and connected tools |
 | `UNDERSTUDY_SECRET_KEY` | Optional. Key for the sealed MCP auth headers; falls back to `BETTER_AUTH_SECRET`. Changing it makes stored headers unreadable, so re-enter them |
 | `UNDERSTUDY_HOST_TOKEN` | Bearer token the host supervisor uses on `/api/ws/host` |

@@ -9,16 +9,16 @@ export function accountSource(path: string | undefined, preset: unknown): Accoun
   return "sign_up";
 }
 
-export function signUpRefusal(input: { source: AccountSource; isAdminEmail: boolean; allowedDomain: string }) {
+export function signUpRefusal(input: { source: AccountSource; isAdminEmail: boolean; allowedDomains: string[] }) {
   if (input.source !== "sign_up") return null;
-  if (!input.allowedDomain) return "sign_up_closed" as const;
+  if (input.allowedDomains.length === 0) return "sign_up_closed" as const;
   if (input.isAdminEmail) return "admin_email" as const;
   return null;
 }
 
-export function shouldAutoApprove(input: { source: AccountSource; emailVerified: boolean; isAdminEmail: boolean; allowedDomain: string }) {
+export function shouldAutoApprove(input: { source: AccountSource; emailVerified: boolean; isAdminEmail: boolean; allowedDomains: string[] }) {
   if (vouchedSources.has(input.source)) return true;
-  if (input.source === "google" && input.emailVerified) return Boolean(input.allowedDomain) || input.isAdminEmail;
+  if (input.source === "google" && input.emailVerified) return input.allowedDomains.length > 0 || input.isAdminEmail;
   return false;
 }
 
