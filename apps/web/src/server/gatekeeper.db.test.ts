@@ -17,6 +17,7 @@ const ids = {
   owner: "usr_gk_owner",
   member: "usr_gk_member",
   stranger: "usr_gk_stranger",
+  admin: "usr_gk_admin",
   agent: "agt_gk",
   server: "mcp_gk",
   recipe: "rcp_gk",
@@ -78,11 +79,12 @@ before(async () => {
   const db = getDb();
   await (await import("./test-db")).migrateTestDb();
   await db.delete(schema.mcpServers).where(eq(schema.mcpServers.id, ids.server));
-  await db.delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.member, ids.stranger]));
+  await db.delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.member, ids.stranger, ids.admin]));
   await db.insert(schema.user).values([
     { id: ids.owner, name: "Owner", email: "gk-owner@test.local", status: "approved" },
     { id: ids.member, name: "Member", email: "gk-member@test.local", status: "approved" },
     { id: ids.stranger, name: "Stranger", email: "gk-stranger@test.local", status: "approved" },
+    { id: ids.admin, name: "Admin", email: "gk-admin@test.local", status: "approved", admin: true },
   ]);
   await db.insert(schema.mcpServers).values({ id: ids.server, name: "Mail", slug: "mail", url: `${upstreamUrl}/mcp`, askAll: true });
   await db.insert(schema.agents).values({
@@ -120,7 +122,7 @@ after(async () => {
   if (!url) return;
   const { getDb, schema, getPool } = await import("@/lib/db");
   await getDb().delete(schema.mcpServers).where(eq(schema.mcpServers.id, ids.server));
-  await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.member, ids.stranger]));
+  await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.member, ids.stranger, ids.admin]));
   upstream.close();
   panel.close();
   await getPool().end();
@@ -214,6 +216,14 @@ test("access: owner, member role and strangers", { skip }, async () => {
   assert.equal(canApprove(await agentAccess(ids.member, ids.agent)), false);
   assert.ok((await accessibleAgentIds(ids.member)).includes(ids.agent));
   assert.ok(!(await accessibleAgentIds(ids.member, ["owner", "approver"])).includes(ids.agent));
+});
+
+test("access: an admin reads every agent but answers none", { skip }, async () => {
+  const { agentAccess, accessibleAgentIds, canApprove } = await import("@/lib/access");
+  assert.equal(await agentAccess(ids.admin, ids.agent), "viewer");
+  assert.equal(canApprove(await agentAccess(ids.admin, ids.agent)), false);
+  assert.ok((await accessibleAgentIds(ids.admin)).includes(ids.agent));
+  assert.ok(!(await accessibleAgentIds(ids.admin, ["owner", "approver"])).includes(ids.agent));
 });
 
 test("stopping the agent closes its pending approval, the gated tool is not called and a late answer does not approve it", { skip }, async () => {
