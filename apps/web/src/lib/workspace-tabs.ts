@@ -2,9 +2,11 @@ export const WORKSPACE_TABS = ["computer", "files", "terminal", "jobs", "memory"
 
 export type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
 
+export type AgentView = "card" | WorkspaceTab;
+
 const SHARED_TABS: readonly WorkspaceTab[] = ["computer", "tasks"];
 
-export const DEFAULT_TAB: WorkspaceTab = "computer";
+export const DEFAULT_VIEW: AgentView = "card";
 
 export function tabsFor(owner: boolean): readonly WorkspaceTab[] {
   return owner ? WORKSPACE_TABS : SHARED_TABS;
@@ -12,27 +14,30 @@ export function tabsFor(owner: boolean): readonly WorkspaceTab[] {
 
 export const ADVANCED_TABS: readonly WorkspaceTab[] = ["terminal"];
 
-export function barTabs(owner: boolean, current: WorkspaceTab): readonly WorkspaceTab[] {
-  return tabsFor(owner).filter((tab) => tab === current || !ADVANCED_TABS.includes(tab));
+export function panelTabs(owner: boolean): readonly WorkspaceTab[] {
+  return tabsFor(owner).filter((tab) => tab !== "computer");
+}
+
+export function barTabs(owner: boolean, current: AgentView): readonly WorkspaceTab[] {
+  return panelTabs(owner).filter((tab) => tab === current || !ADVANCED_TABS.includes(tab));
 }
 
 export function advancedTabs(owner: boolean): readonly WorkspaceTab[] {
   return tabsFor(owner).filter((tab) => ADVANCED_TABS.includes(tab));
 }
 
-export function parseTab(value: string | null | undefined, owner: boolean): WorkspaceTab {
-  const tabs = tabsFor(owner);
-  return tabs.find((tab) => tab === value) ?? DEFAULT_TAB;
+export function parseView(value: string | null | undefined, owner: boolean): AgentView {
+  return tabsFor(owner).find((tab) => tab === value) ?? DEFAULT_VIEW;
 }
 
-export function tabSearch(current: string, tab: WorkspaceTab) {
+export function tabSearch(current: string, view: AgentView) {
   const params = new URLSearchParams(current);
-  if (tab === DEFAULT_TAB) params.delete("tab");
-  else params.set("tab", tab);
+  if (view === DEFAULT_VIEW) params.delete("tab");
+  else params.set("tab", view);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
 
-export function agentTabPath(agentId: string, tab: WorkspaceTab) {
-  return `/agents/${agentId}${tabSearch("", tab)}`;
+export function agentTabPath(agentId: string, view: AgentView) {
+  return `/agents/${agentId}${tabSearch("", view)}`;
 }

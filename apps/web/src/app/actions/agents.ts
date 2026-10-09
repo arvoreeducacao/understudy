@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
 import { cleanRules } from "@/server/rules";
 import { computerProfile } from "@/server/computer-profile";
+import { cleanLook, type Look } from "@/lib/look";
 import { agentTabPath } from "@/lib/workspace-tabs";
 import { toolsFrom, parseLook, ownAgent } from "./shared";
 
@@ -52,6 +53,17 @@ export async function updateAgentTools(agentId: string, form: FormData) {
       tools: await toolsFrom(form, user.email),
       updatedAt: new Date(),
     })
+    .where(eq(schema.agents.id, agentId));
+  const profile = await computerProfile(agentId);
+  if (profile) getHub()?.sendToComputer(agentId, profile);
+  revalidatePath(`/agents/${agentId}`, "layout");
+}
+
+export async function updateAgentLook(agentId: string, look: unknown) {
+  await ownAgent(agentId);
+  await getDb()
+    .update(schema.agents)
+    .set({ look: cleanLook(look as Partial<Look> | null), updatedAt: new Date() })
     .where(eq(schema.agents.id, agentId));
   const profile = await computerProfile(agentId);
   if (profile) getHub()?.sendToComputer(agentId, profile);

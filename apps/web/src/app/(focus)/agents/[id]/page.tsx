@@ -2,7 +2,10 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
 import type { OwnerData } from "@/components/workspace/AgentWorkspace";
+import type { RailData } from "@/components/inside/AgentRail";
+import { accessibleAgentIds } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
+import { env } from "@/lib/env";
 import { CHAT_WIDTH_COOKIE, WORKSPACE_HIDDEN_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
 import { formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
@@ -53,6 +56,34 @@ async function loadWaitingRuns(runIds: string[]) {
   return new Set(rows.map((row) => row.runId));
 }
 
+async function loadRail(userId: string, userName: string): Promise<RailData> {
+  const db = getDb();
+  const [visible, answerable] = await Promise.all([accessibleAgentIds(userId), accessibleAgentIds(userId, ["owner", "approver"])]);
+  const [agents, pending] = await Promise.all([
+    visible.length
+      ? db
+          .select({ id: schema.agents.id, name: schema.agents.name, look: schema.agents.look, state: schema.agents.state, note: schema.agents.stateNote })
+          .from(schema.agents)
+          .where(inArray(schema.agents.id, visible))
+          .orderBy(asc(schema.agents.name))
+      : [],
+    answerable.length
+      ? db
+          .select({ agentId: schema.approvals.agentId })
+          .from(schema.approvals)
+          .where(and(inArray(schema.approvals.agentId, answerable), eq(schema.approvals.status, "pending")))
+      : [],
+  ]);
+  const waitingBy = new Map<string, number>();
+  for (const row of pending) waitingBy.set(row.agentId, (waitingBy.get(row.agentId) ?? 0) + 1);
+  return {
+    agents: agents.map((agent) => ({ ...agent, waiting: waitingBy.get(agent.id) ?? 0 })),
+    waiting: pending.length,
+    userName,
+    productName: env.productName,
+  };
+}
+
 export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { user, agent, access } = await requireAgentAccess(id);
@@ -60,7 +91,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const chatWidth = parseStoredWidth(jar.get(CHAT_WIDTH_COOKIE)?.value ?? null);
   const workspaceHidden = jar.get(WORKSPACE_HIDDEN_COOKIE)?.value === "1";
   const db = getDb();
-  const [[owner], chat, approvals, runs, recipes, ownerData] = await Promise.all([
+  const [[owner], chat, approvals, runs, recipes, ownerData, rail] = await Promise.all([
     db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, agent.ownerId)),
     loadChat(id),
     loadPendingApprovals(id),
@@ -71,6 +102,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       .where(eq(schema.recipes.agentId, id))
       .orderBy(desc(schema.recipes.updatedAt)),
     access === "owner" ? loadOwnerData(agent, user.email, Boolean(user.admin)) : null,
+    loadRail(user.id, user.name || user.email),
   ]);
   const waiting = await loadWaitingRuns(runs.map((r) => r.id));
   const recipeTitles = new Map(recipes.map((r) => [r.id, r.title.title]));
@@ -79,6 +111,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       agent={{
         id: agent.id,
         name: agent.name,
+        role: agent.role ?? "",
         look: agent.look,
         brain: agent.brain,
         state: agent.state,
@@ -101,6 +134,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       }))}
       recipes={recipes.map((r) => ({ id: r.id, title: r.title.title, active: r.active }))}
       ownerData={ownerData}
+      rail={rail}
     />
   );
 }

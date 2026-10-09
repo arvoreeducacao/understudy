@@ -1,18 +1,16 @@
 import { ArrowLeft, Brain, CalendarClock, Ellipsis, FolderOpen, KeyRound, ListChecks, Monitor, PanelRightClose, Settings2, SquareTerminal, type LucideIcon } from "lucide-react";
-import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import type { AgentState, FileEntry, JobInfo, MemoryFile } from "@understudy/protocol";
+import type { FileEntry, JobInfo, MemoryFile } from "@understudy/protocol";
 import { FilesBrowser } from "@/components/files/FilesBrowser";
 import { JobsList } from "@/components/jobs/JobsList";
-import type { AgentLink, Frame } from "@/components/live/useAgentSocket";
+import type { AgentLink } from "@/components/live/useAgentSocket";
 import { MemoryBrowser } from "@/components/memory/MemoryBrowser";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 import { VaultManager } from "@/components/vault/VaultManager";
 import type { CredentialInfo } from "@/lib/db/schema";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
-import { advancedTabs, barTabs, parseTab, tabSearch, tabsFor, type WorkspaceTab } from "@/lib/workspace-tabs";
-import { ComputerPanel } from "./ComputerPanel";
+import { advancedTabs, barTabs, panelTabs, type WorkspaceTab } from "@/lib/workspace-tabs";
 import { SettingsPanel, type SettingsData } from "./SettingsPanel";
 import { TasksPanel, type RunSummary, type TaskSummary } from "./TasksPanel";
 
@@ -23,7 +21,7 @@ export type OwnerData = {
   settings: SettingsData;
 };
 
-const ICONS: Record<WorkspaceTab, LucideIcon> = {
+export const TAB_ICONS: Record<WorkspaceTab, LucideIcon> = {
   computer: Monitor,
   files: FolderOpen,
   terminal: SquareTerminal,
@@ -34,11 +32,11 @@ const ICONS: Record<WorkspaceTab, LucideIcon> = {
   settings: Settings2,
 };
 
-const FILL: ReadonlySet<WorkspaceTab> = new Set(["computer", "terminal"]);
+const FILL: ReadonlySet<WorkspaceTab> = new Set(["terminal"]);
 
 const byPath = <T extends { path: string }>(items: T[]) => [...items].sort((a, b) => a.path.localeCompare(b.path));
 
-function useWorkspaceFeeds(listen: AgentLink["listen"], ownerData: OwnerData | null) {
+export function useWorkspaceFeeds(listen: AgentLink["listen"], ownerData: OwnerData | null) {
   const [files, setFiles] = useState(() => byPath(ownerData?.files ?? []));
   const [memory, setMemory] = useState(() => byPath(ownerData?.memory ?? []));
   const [credentials, setCredentials] = useState(ownerData?.credentials ?? []);
@@ -56,20 +54,6 @@ function useWorkspaceFeeds(listen: AgentLink["listen"], ownerData: OwnerData | n
   );
 
   return { files, memory, credentials, jobs };
-}
-
-function useCurrentTab(owner: boolean) {
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const tab = parseTab(params.get("tab"), owner);
-  const hrefFor = useCallback((next: WorkspaceTab) => `${pathname}${tabSearch(params.toString(), next)}`, [pathname, params]);
-  const select = useCallback(
-    (next: WorkspaceTab) => {
-      if (next !== tab) window.history.pushState(null, "", hrefFor(next));
-    },
-    [tab, hrefFor],
-  );
-  return { tab, hrefFor, select };
 }
 
 function useScrollEdges() {
@@ -143,7 +127,7 @@ function MoreMenu({
         <div role="menu" aria-label={t.more} className="ws-menu">
           <div className="ws-menu-head">{t.advanced}</div>
           {tabs.map((tab) => {
-            const Icon = ICONS[tab];
+            const Icon = TAB_ICONS[tab];
             return (
               <a
                 key={tab}
@@ -178,8 +162,9 @@ function WorkspaceTabs({
   hrefFor,
   onSelect,
   counts,
-  online,
   more,
+  backLabel,
+  onBack,
   onHide,
 }: {
   tabs: readonly WorkspaceTab[];
@@ -187,8 +172,9 @@ function WorkspaceTabs({
   hrefFor: (tab: WorkspaceTab) => string;
   onSelect: (tab: WorkspaceTab) => void;
   counts: Partial<Record<WorkspaceTab, { value: number; tone: "s" | "c"; label: string }>>;
-  online: boolean;
   more: ReactNode;
+  backLabel: string;
+  onBack: () => void;
   onHide: () => void;
 }) {
   const t = messages.workspace;
@@ -222,7 +208,7 @@ function WorkspaceTabs({
 
   return (
     <div className="ws-bar">
-      <button type="button" className="ws-back" aria-label={t.backToChat} title={t.backToChat} onClick={onHide}>
+      <button type="button" className="ws-back" aria-label={backLabel} title={backLabel} onClick={onBack}>
         <ArrowLeft size={17} aria-hidden />
       </button>
       <div
@@ -238,7 +224,7 @@ function WorkspaceTabs({
         className={`ws-tabs ${edges.start ? "" : "fade-start"} ${edges.end ? "" : "fade-end"}`}
       >
         {tabs.map((tab) => {
-          const Icon = ICONS[tab];
+          const Icon = TAB_ICONS[tab];
           const count = counts[tab];
           const selected = tab === current;
           return (
@@ -256,12 +242,6 @@ function WorkspaceTabs({
             >
               <Icon size={15} strokeWidth={1.9} aria-hidden />
               <span className="ws-label">{t.tabs[tab]}</span>
-              {tab === "computer" && (
-                <>
-                  <span className={`ws-live ${online ? "on" : ""}`} aria-hidden />
-                  <span className="sr-only">, {online ? t.online : t.offline}</span>
-                </>
-              )}
               {count && count.value > 0 && (
                 <>
                   <span className={`ws-count ${count.tone}`} aria-hidden>
@@ -285,32 +265,36 @@ function WorkspaceTabs({
 export function AgentWorkspace({
   agent,
   link,
-  state,
   owner,
   approvals,
-  subscribeFrames,
   recipes,
   runs,
   ownerData,
+  feeds,
+  tab,
+  hrefFor,
+  onSelect,
+  onBack,
   onHide,
 }: {
   agent: { id: string; name: string; look: Look };
   link: AgentLink;
-  state: AgentState;
   owner: boolean;
   approvals: number;
-  subscribeFrames: (listener: (frame: Frame) => void) => () => void;
   recipes: TaskSummary[];
   runs: RunSummary[];
   ownerData: OwnerData | null;
+  feeds: ReturnType<typeof useWorkspaceFeeds>;
+  tab: WorkspaceTab;
+  hrefFor: (tab: WorkspaceTab) => string;
+  onSelect: (tab: WorkspaceTab) => void;
+  onBack: () => void;
   onHide: () => void;
 }) {
   const t = messages.workspace;
   const full = owner && ownerData !== null;
-  const tabs = tabsFor(full);
-  const { tab, hrefFor, select } = useCurrentTab(full);
+  const tabs = panelTabs(full);
   const [visited, setVisited] = useState<ReadonlySet<WorkspaceTab>>(() => new Set([tab]));
-  const feeds = useWorkspaceFeeds(link.listen, ownerData);
 
   useEffect(() => {
     setVisited((current) => (current.has(tab) ? current : new Set(current).add(tab)));
@@ -323,7 +307,6 @@ export function AgentWorkspace({
   };
 
   function panel(name: WorkspaceTab) {
-    if (name === "computer") return <ComputerPanel agent={agent} link={link} state={state} owner={owner} subscribeFrames={subscribeFrames} />;
     if (name === "tasks") return <TasksPanel agentId={agent.id} owner={owner} recipes={recipes} runs={runs} look={agent.look} />;
     if (!ownerData) return null;
     if (name === "files") return <FilesBrowser agentId={agent.id} live={link.live} send={link.send} files={feeds.files} look={agent.look} />;
@@ -331,7 +314,8 @@ export function AgentWorkspace({
     if (name === "jobs") return <JobsList agentName={agent.name} link={link} jobs={feeds.jobs} look={agent.look} />;
     if (name === "memory") return <MemoryBrowser link={link} files={feeds.memory} look={agent.look} />;
     if (name === "logins") return <VaultManager link={link} credentials={feeds.credentials} look={agent.look} />;
-    return <SettingsPanel link={link} data={ownerData.settings} />;
+    if (name === "settings") return <SettingsPanel link={link} data={ownerData.settings} />;
+    return null;
   }
 
   return (
@@ -340,14 +324,15 @@ export function AgentWorkspace({
         tabs={barTabs(full, tab)}
         current={tab}
         hrefFor={hrefFor}
-        onSelect={select}
+        onSelect={onSelect}
         counts={counts}
-        online={link.live.online}
-        more={<MoreMenu tabs={advancedTabs(full)} current={tab} hrefFor={hrefFor} onSelect={select} agentName={agent.name} />}
+        more={<MoreMenu tabs={advancedTabs(full)} current={tab} hrefFor={hrefFor} onSelect={onSelect} agentName={agent.name} />}
+        backLabel={t.backToCard(agent.name)}
+        onBack={onBack}
         onHide={onHide}
       />
       {tabs.map((name) =>
-        name === "computer" || visited.has(name) || name === tab ? (
+        visited.has(name) || name === tab ? (
           <div
             key={name}
             id={`ws-panel-${name}`}
