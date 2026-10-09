@@ -6,11 +6,12 @@ test("an owner can open every tab", () => {
   assert.equal(parseView("terminal", true), "terminal");
   assert.equal(parseView("settings", true), "settings");
   assert.equal(parseView("computer", true), "computer");
-  assert.equal(tabsFor(true).length, 8);
+  assert.equal(tabsFor(true).length, 9);
 });
 
-test("a teammate only gets the computer and the tasks", () => {
+test("a teammate only gets the computer, the artifacts and the tasks", () => {
   assert.equal(parseView("tasks", false), "tasks");
+  assert.equal(parseView("artifacts", false), "artifacts");
   assert.equal(parseView("computer", false), "computer");
   assert.equal(parseView("terminal", false), "card");
   assert.equal(parseView("logins", false), "card");
@@ -37,13 +38,13 @@ test("the old pages redirect into their tab", () => {
 
 test("the computer opens in its own frame, never in the panel tabs", () => {
   assert.equal(panelTabs(true).includes("computer"), false);
-  assert.deepEqual(panelTabs(false), ["tasks"]);
+  assert.deepEqual(panelTabs(false), ["artifacts", "tasks"]);
 });
 
 test("the terminal stays out of the tab bar and lives under More", () => {
   assert.equal(barTabs(true, "files").includes("terminal"), false);
   assert.deepEqual(advancedTabs(true), ["terminal"]);
-  assert.equal(barTabs(true, "files").length, 6);
+  assert.equal(barTabs(true, "files").length, 7);
 });
 
 test("an open terminal shows in the bar so the page still says where you are", () => {
@@ -52,5 +53,5 @@ test("an open terminal shows in the bar so the page still says where you are", (
 
 test("a teammate gets no advanced tools", () => {
   assert.deepEqual(advancedTabs(false), []);
-  assert.deepEqual(barTabs(false, "tasks"), ["tasks"]);
+  assert.deepEqual(barTabs(false, "tasks"), ["artifacts", "tasks"]);
 });

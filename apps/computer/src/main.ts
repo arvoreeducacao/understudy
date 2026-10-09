@@ -174,6 +174,7 @@ async function main() {
           ...(message.fromAgent ? { fromAgent: message.fromAgent } : {}),
           ...(message.model ? { model: message.model } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+          ...(message.artifactEdit ? { artifactEdit: message.artifactEdit } : {}),
         });
         return;
       case "room_turn":
@@ -269,7 +270,9 @@ async function main() {
       case "upload_cancel":
       case "file_read":
       case "file_thumb":
-      case "file_share": {
+      case "file_share":
+      case "artifact_render":
+      case "artifact_page": {
         const reply = await answerFileMessage(store, message);
         if (reply) link.send(reply);
         if (message.type === "file_share") files.publish();

@@ -1,6 +1,7 @@
 import type { Recipe } from "@understudy/protocol";
 import type { BrainConfig, BrainEvent, Turn, TurnRequest, TurnResult } from "./brain.ts";
 import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { openGatekeeper } from "./gatekeeper-client.ts";
 import { connectBench } from "./bench-client.ts";
 import { createInterface } from "node:readline";
@@ -265,6 +266,30 @@ export function startFakeTurn(config: BrainConfig, request: TurnRequest): Turn {
         }
       }
       const text = shared.every((answer) => answer.startsWith("shared")) ? `Done, ${shared.length === 1 ? "it is" : "they are"} in the chat.` : `Something failed: ${shared.join(" | ").slice(0, 300)}`;
+      emit({ kind: "text", text });
+      return { ok: true, sessionId, text, usage };
+    }
+    const publish = prompt.match(/^publish the file (\S+) as "([^"]{1,120})"/im);
+    const edit = prompt.match(/artifact_id (art_[A-Za-z0-9_-]+)\), version \d+\.\nThat version is saved on your computer at "([^"]+)"/);
+    if (publish || edit) {
+      const gatekeeper = await openGatekeeper(config.serverUrl, config.token, controller.signal);
+      let args: { path: string; title: string; artifact_id?: string; note?: string };
+      if (edit) {
+        const wanted = prompt.split("What your owner wants:\n")[1]?.split("\n")[0]?.trim() ?? "an edit";
+        const title = prompt.match(/edit to the artifact "([^"]+)"/)?.[1] ?? "Artifact";
+        const name = edit[2].split("/").pop()!;
+        const output = `${config.workDir}/outbox/${name}`;
+        const original = readFileSync(edit[2], "utf8");
+        const line = wanted.replace(/[<>&]/g, "");
+        writeFileSync(output, /\.html?$/i.test(name) ? `${original}\n<p>${line}</p>\n` : /\.md$/i.test(name) ? `${original}\n\n${line}\n` : original);
+        args = { path: output, title, artifact_id: edit[1], note: wanted.slice(0, 120) };
+      } else {
+        args = { path: publish![1], title: publish![2] };
+      }
+      emit({ kind: "tool", name: "mcp__gatekeeper__publish_artifact", input: args });
+      const answer = await gatekeeper.call("publish_artifact", args);
+      emit({ kind: "tool_result", name: "mcp__gatekeeper__publish_artifact", isError: /^not published/i.test(answer), text: answer });
+      const text = answer.startsWith("published") ? (edit ? "Changed it and published the next version." : "Here it is, beside the chat.") : `Something failed: ${answer.slice(0, 300)}`;
       emit({ kind: "text", text });
       return { ok: true, sessionId, text, usage };
     }

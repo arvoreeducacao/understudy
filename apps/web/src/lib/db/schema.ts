@@ -1,6 +1,6 @@
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { Look } from "../look";
-import type { ApprovalRequest, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
+import type { ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -105,6 +105,16 @@ export const agents = pgTable(
 
 export type MessageRole = "agent" | "user" | "activity" | "system";
 
+export type MessageArtifact = {
+  artifactId: string;
+  version: number;
+  title: string;
+  kind: ArtifactKind;
+  name: string;
+  pages: number;
+  edit?: { quote?: string; page?: number };
+};
+
 export const messages = pgTable(
   "messages",
   {
@@ -118,6 +128,7 @@ export const messages = pgTable(
     authorId: text("author_id"),
     via: text("via"),
     attachments: jsonb("attachments").$type<Attachment[]>(),
+    artifact: jsonb("artifact").$type<MessageArtifact>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("messages_agent_idx").on(t.agentId, t.createdAt)],
@@ -552,4 +563,64 @@ export const roomMessages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("room_messages_room_idx").on(t.roomId, t.createdAt), index("room_messages_agent_idx").on(t.agentId, t.createdAt)],
+);
+
+export const artifacts = pgTable(
+  "artifacts",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    kind: text("kind").$type<ArtifactKind>().notNull(),
+    latestVersion: integer("latest_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("artifacts_agent_idx").on(t.agentId, t.updatedAt)],
+);
+
+export const artifactVersions = pgTable(
+  "artifact_versions",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => artifacts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    kind: text("kind").$type<ArtifactKind>().notNull(),
+    note: text("note").notNull().default(""),
+    name: text("name").notNull(),
+    sourcePath: text("source_path"),
+    size: bigint("size", { mode: "number" }).notNull(),
+    sha256: text("sha256").notNull(),
+    pages: integer("pages").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("artifact_versions_number_idx").on(t.artifactId, t.version)],
+);
+
+export const artifactBlobs = pgTable("artifact_blobs", {
+  key: text("key").primaryKey(),
+  contentType: text("content_type").notNull(),
+  data: bytes("data").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const artifactLinks = pgTable(
+  "artifact_links",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => artifacts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("artifact_links_token_idx").on(t.tokenHash), index("artifact_links_artifact_idx").on(t.artifactId)],
 );

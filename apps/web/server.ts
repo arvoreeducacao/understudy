@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import next from "next";
 import { WebSocketServer, type WebSocket } from "ws";
-import { PATHS } from "@understudy/protocol";
+import { panelFramePolicy, PATHS } from "@understudy/protocol";
 import { agentAccess } from "@/lib/access";
 import { sessionFromHeaders } from "@/lib/auth";
 import { sameSecret } from "@/lib/secret-compare";
@@ -20,6 +20,7 @@ import { handleInboundEmail } from "@/server/inbound-email/handler";
 import { handleFigureRoute, isFigureRoute } from "@/server/figure-png";
 import { handleSlack, isSlackRoute } from "@/server/slack-inbound";
 import { createExtensionRoutes, isExtensionRoute } from "@/server/extension/routes";
+import { ARTIFACT_CONTENT_PREFIX, handleArtifactContent, isArtifactContentRoute } from "@/server/artifacts/routes";
 import { createFileRoutes, isFileRoute } from "@/server/files/routes";
 import { startBriefings } from "@/server/briefing";
 import { originAllowed } from "@/server/origin";
@@ -110,6 +111,16 @@ async function main() {
       });
       return;
     }
+    if (isArtifactContentRoute(url.pathname)) {
+      handleArtifactContent(req, res, url).catch((error) => {
+        console.error("artifact_route_error", error);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        } else res.destroy();
+      });
+      return;
+    }
     if (isFileRoute(url.pathname)) {
       fileRoutes.handle(req, res, url).catch((error) => {
         console.error("file_route_error", error);
@@ -160,6 +171,7 @@ async function main() {
       });
       return;
     }
+    res.setHeader("Content-Security-Policy", panelFramePolicy(`${env.artifactOrigin ?? env.publicUrl}${ARTIFACT_CONTENT_PREFIX}`));
     handle(req, res);
   });
 

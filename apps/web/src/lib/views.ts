@@ -11,7 +11,7 @@ export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[
     .limit(limit);
   return rows
     .reverse()
-    .map((m) => ({ id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }));
+    .map((m) => ({ id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.artifact ? { artifact: m.artifact } : {}) }));
 }
 
 export async function loadPendingApprovals(agentId: string): Promise<ApprovalView[]> {

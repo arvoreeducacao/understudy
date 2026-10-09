@@ -22,6 +22,7 @@ import { ComputerPanel } from "@/components/workspace/ComputerPanel";
 import { parseView, tabSearch, type AgentView } from "@/lib/workspace-tabs";
 import { AgentRail, initials, type RailData } from "./AgentRail";
 import type { RunSummary, TaskSummary } from "@/components/workspace/TasksPanel";
+import { ARTIFACT_EVENT } from "@/components/artifacts/artifact-ui";
 import { useAttachments } from "./useAttachments";
 import { ApprovalCard, Composer, DayDivider, MessageRow, StepsGroup, StreamingRow, WorkingRow, useChatWidth } from "./ChatParts";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -137,6 +138,7 @@ export function AgentInside({
     {
       onChat: (entry) => {
         setChat((c) => (c.some((e) => e.id === entry.id) ? c : [...c, entry]));
+        if (entry.artifact && entry.role === "agent") window.dispatchEvent(new Event(ARTIFACT_EVENT));
         if (entry.streamId) setDrafts((d) => d.filter((x) => x.streamId !== entry.streamId));
       },
       onChatDelta: (streamId, text) =>
@@ -347,7 +349,7 @@ export function AgentInside({
           {rows.map((row) => {
             if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
             if (row.kind === "steps") return <StepsGroup key={row.key} entries={row.entries} active={working && row === lastRow && drafts.length === 0} />;
-            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} />;
+            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} onOpenArtifact={workspace.show} />;
           })}
           {drafts.map((d) => (
             <StreamingRow key={d.streamId} text={d.text} agentName={agent.name} look={agent.look} />

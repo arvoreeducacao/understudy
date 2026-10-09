@@ -30,6 +30,7 @@ export * from "./recipe.ts";
 export * from "./rules.ts";
 export * from "./capture.ts";
 export * from "./files.ts";
+export * from "./artifacts.ts";
 
 export type AgentState = z.infer<typeof AgentStateSchema>;
 export type Brain = z.infer<typeof BrainSchema>;

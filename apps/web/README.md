@@ -47,6 +47,12 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `UNDERSTUDY_EXTENSION_DIR` | Optional. Folder with the built extension that `/api/extension/package.zip` serves. Defaults to `../extension/dist` next to the app |
 | `UNDERSTUDY_COMPUTER_IMAGE` | Image sent in `computer_ensure` (the host may override it) |
 | `UNDERSTUDY_PRODUCT_NAME` | Name shown in the panel, default `Understudy` |
+| `UNDERSTUDY_ARTIFACT_S3_BUCKET` | Bucket for artifact versions and page images. Any S3-compatible store works (AWS S3, MinIO, SeaweedFS, Garage). Empty keeps them in Postgres |
+| `UNDERSTUDY_ARTIFACT_S3_ENDPOINT`, `UNDERSTUDY_ARTIFACT_S3_REGION` | Endpoint (default `https://s3.<region>.amazonaws.com`, path-style) and region (default `AWS_REGION` or `us-east-1`) |
+| `UNDERSTUDY_ARTIFACT_S3_ACCESS_KEY_ID`, `UNDERSTUDY_ARTIFACT_S3_SECRET_ACCESS_KEY` | Keys for that bucket; fall back to `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` |
+| `UNDERSTUDY_ARTIFACT_MAX_BYTES` | Largest file one artifact version can hold (25 MB by default) |
+| `UNDERSTUDY_ARTIFACT_AGENT_MAX_BYTES` | Total size of every artifact version one understudy can keep (1 GB by default) |
+| `UNDERSTUDY_ARTIFACT_ORIGIN` | Optional separate origin (another registrable domain) that serves artifact content; without it content is served from the panel host, already sandboxed with an opaque origin |
 | `UNDERSTUDY_LOCALE` | `en` (default) or `pt-BR` |
 | `UNDERSTUDY_TIMEZONE` | Default time zone for dates and new schedules, default `UTC` |
 | `UNDERSTUDY_BRIEFING_CRON` | When the daily Slack briefing goes out, default `0 8 * * 1-5`; `off` disables it |

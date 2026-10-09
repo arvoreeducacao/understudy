@@ -1,6 +1,7 @@
-import { ArrowLeft, Brain, CalendarClock, Ellipsis, FolderOpen, KeyRound, ListChecks, Monitor, PanelRightClose, Settings2, SquareTerminal, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Brain, CalendarClock, Ellipsis, FolderOpen, KeyRound, ListChecks, Monitor, PanelRightClose, PanelsTopLeft, Settings2, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { FileEntry, JobInfo, MemoryFile } from "@understudy/protocol";
+import { ArtifactsPanel } from "@/components/artifacts/ArtifactsPanel";
 import { FilesBrowser } from "@/components/files/FilesBrowser";
 import { JobsList } from "@/components/jobs/JobsList";
 import type { AgentLink } from "@/components/live/useAgentSocket";
@@ -23,6 +24,7 @@ export type OwnerData = {
 
 export const TAB_ICONS: Record<WorkspaceTab, LucideIcon> = {
   computer: Monitor,
+  artifacts: PanelsTopLeft,
   files: FolderOpen,
   terminal: SquareTerminal,
   jobs: CalendarClock,
@@ -32,7 +34,7 @@ export const TAB_ICONS: Record<WorkspaceTab, LucideIcon> = {
   settings: Settings2,
 };
 
-const FILL: ReadonlySet<WorkspaceTab> = new Set(["terminal"]);
+const FILL: ReadonlySet<WorkspaceTab> = new Set(["terminal", "artifacts"]);
 
 const byPath = <T extends { path: string }>(items: T[]) => [...items].sort((a, b) => a.path.localeCompare(b.path));
 
@@ -307,6 +309,7 @@ export function AgentWorkspace({
   };
 
   function panel(name: WorkspaceTab) {
+    if (name === "artifacts") return <ArtifactsPanel agentId={agent.id} agentName={agent.name} look={agent.look} owner={owner} send={owner ? link.send : undefined} />;
     if (name === "tasks") return <TasksPanel agentId={agent.id} owner={owner} recipes={recipes} runs={runs} look={agent.look} />;
     if (!ownerData) return null;
     if (name === "files") return <FilesBrowser agentId={agent.id} live={link.live} send={link.send} files={feeds.files} look={agent.look} />;
