@@ -128,14 +128,14 @@ test("what's new: desktop and office files, terminal, rules, page watching", asy
   const page = await context.newPage();
   timeline.reset();
 
-  await page.goto(agentPath);
+  await page.goto(`${agentPath}?tab=computer`);
   const screen = page.locator("canvas:not(.hidden)");
   await timeline.wait(() => expect(screen).toBeVisible({ timeout: 2 * 60 * 1000 }));
   await pause(page, 2500);
   await say(page, "make a spreadsheet of this weeks invoices");
   await timeline.wait(() => expect(page.getByText(/Saved outbox\/this-weeks-invoices\.xlsx/)).toBeVisible({ timeout: 2 * 60 * 1000 }));
   await pause(page, 3000);
-  await page.getByRole("button", { name: "Take control" }).click();
+  await page.getByRole("button", { name: "Take over" }).click();
   await pause(page, 1200);
   await clickOnScreen(page, screen, 1100, 700);
   await page.keyboard.press("Meta+o");

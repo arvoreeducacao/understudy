@@ -111,7 +111,7 @@ test("screenshots for the README", async ({ browser }) => {
 
   await page.getByRole("button", { name: "Run now" }).click();
   await expect(page.getByText("Started. Follow it in the chat.")).toBeVisible();
-  await page.goto(agentPath);
+  await page.goto(`${agentPath}?tab=computer`);
   await expect(page.locator("canvas:not(.hidden)")).toBeVisible({ timeout: 2 * 60 * 1000 });
   await page.waitForTimeout(6000);
   await shoot(page, "computer");

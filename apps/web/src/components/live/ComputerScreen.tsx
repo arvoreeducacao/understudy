@@ -19,6 +19,7 @@ export function ComputerScreen({
   url,
   label,
   look,
+  compact = false,
 }: {
   subscribeFrames: (listener: (frame: Frame) => void) => () => void;
   sendInput: (event: InputEvent) => void;
@@ -27,6 +28,7 @@ export function ComputerScreen({
   url: string;
   label?: string;
   look?: Look;
+  compact?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -136,9 +138,9 @@ export function ComputerScreen({
     : {};
 
   return (
-    <div className={`screen ${desktop ? "is-desktop" : ""} ${controlling ? "controlling" : ""}`}>
+    <div className={`screen ${desktop ? "is-desktop" : ""} ${controlling ? "controlling" : ""} ${compact ? "is-compact" : ""}`}>
       {desktop && label && <span className="screen-tag">{label}</span>}
-      {!desktop && (
+      {!desktop && !compact && (
       <div className="chrome">
         <div className="dots">
           <i />
@@ -181,7 +183,7 @@ export function ComputerScreen({
         />
         {!hasFrame && (
           <div className="placeholder">
-            <AgentFigure state={online ? "thinking" : "calm"} size={56} look={look} />
+            <AgentFigure state={online ? "thinking" : "calm"} size={compact ? 36 : 56} look={look} />
             {online ? t.waitingFrame : t.offline}
           </div>
         )}

@@ -1,32 +1,43 @@
-import Link from "next/link";
-import { Maximize2, Minimize2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Maximize2, Minimize2, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AgentState } from "@understudy/protocol";
+import { AgentFigure } from "@/components/AgentFigure";
 import { ComputerScreen } from "@/components/live/ComputerScreen";
 import type { AgentLink, Frame } from "@/components/live/useAgentSocket";
-import type { Look } from "@/lib/look";
+import { cleanLook, type Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
-import { STATE_PILL } from "@/lib/state-pill";
 
 const t = messages.live;
+const a = messages.agentPage;
+
+export function computerStatusText(live: AgentLink["live"], state: AgentState) {
+  if (live.online) return `${messages.states[state]}${live.note ? ` · ${live.note}` : ""}`;
+  if (live.computerStatus === "starting" || live.computerStatus === "pending") return messages.home.computer[live.computerStatus];
+  return t.offline;
+}
 
 export function ComputerPanel({
   agent,
   link,
   state,
   owner,
+  ownerInitials,
   subscribeFrames,
+  onClose,
 }: {
   agent: { id: string; name: string; look: Look };
   link: Pick<AgentLink, "live" | "send">;
   state: AgentState;
   owner: boolean;
+  ownerInitials: string;
   subscribeFrames: (listener: (frame: Frame) => void) => () => void;
+  onClose: () => void;
 }) {
   const { live, send } = link;
   const [controlling, setControlling] = useState(false);
   const [full, setFull] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const inControl = controlling && live.online;
 
   useEffect(() => {
     const onChange = () => setFull(document.fullscreenElement === panelRef.current && panelRef.current !== null);
@@ -34,56 +45,80 @@ export function ComputerPanel({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
+  useEffect(() => {
+    if (!live.online) setControlling(false);
+  }, [live.online]);
+
   function toggleFull() {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     else void panelRef.current?.requestFullscreen?.().catch(() => {});
   }
 
-  const statusText = live.online
-    ? `${messages.states[state]}${live.note ? ` · ${live.note}` : ""}`
-    : live.computerStatus === "starting" || live.computerStatus === "pending"
-      ? messages.home.computer[live.computerStatus]
-      : t.offline;
+  const headline = live.online ? (inControl ? a.youAreInControl : a.connected) : computerStatusText(live, state);
 
   return (
-    <div ref={panelRef} className={`computer-panel flex flex-col gap-2.5 h-full min-h-0 ${full ? "is-full" : ""}`}>
-      <div className="flex items-center gap-2.5 text-[12.5px] text-ash flex-wrap">
-        <span className={`pill ${live.online ? STATE_PILL[state] : ""}`}>
-          <span className="dot" />
-          <span className="max-w-[320px] truncate">{statusText}</span>
-        </span>
-        <span className="truncate">{t.liveLabel(agent.name)}</span>
-        <div className="ml-auto flex gap-2 flex-wrap">
-          {owner && live.online && state === "working" && (
-            <button className="btn sec" onClick={() => send({ type: "stop" })}>
-              {t.stop}
+    <div
+      ref={panelRef}
+      className={`computer-panel pc-frame ${full ? "is-full" : ""} ${inControl ? "is-yours" : ""}`}
+      style={{ "--agent": cleanLook(agent.look).color } as CSSProperties}
+    >
+      <div className="pc-ring">
+        <div className="pc-top">
+          <span className={`pc-dot ${live.online ? "on" : ""}`} aria-hidden />
+          <span className="truncate">{a.computerOf(agent.name)} · {headline}</span>
+          <div className="pc-top-actions">
+            <button type="button" className="pc-mini" onClick={toggleFull} aria-label={full ? t.exitFullScreen : t.fullScreen} title={full ? t.exitFullScreen : t.fullScreen}>
+              {full ? <Minimize2 size={13} aria-hidden /> : <Maximize2 size={13} aria-hidden />}
             </button>
-          )}
-          {owner && (
-            <button className={`btn ${controlling ? "warn" : "sec"}`} disabled={!live.online} onClick={() => setControlling((c) => !c)}>
-              {controlling ? t.releaseControl : t.takeControl}
-            </button>
-          )}
-          {owner && !full && (
-            <Link href={`/agents/${agent.id}/teach`} className="btn sec">
-              {t.teach}
-            </Link>
-          )}
-          <button type="button" className="btn sec icon-only" onClick={toggleFull} aria-label={full ? t.exitFullScreen : t.fullScreen} title={full ? t.exitFullScreen : t.fullScreen}>
-            {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
-          </button>
+            {!full && (
+              <button type="button" className="pc-mini" onClick={onClose} aria-label={a.closeComputer} title={a.closeComputer}>
+                <X size={13} aria-hidden />
+              </button>
+            )}
+          </div>
         </div>
+        <ComputerScreen
+          subscribeFrames={subscribeFrames}
+          sendInput={(event) => send({ type: "input", event })}
+          controlling={inControl}
+          online={live.online}
+          url={live.url}
+          look={agent.look}
+        />
       </div>
-      {controlling && <div className="text-coral text-[12px]">{t.inControl}</div>}
       {live.error && <div className="err">{live.error}</div>}
-      <ComputerScreen
-        subscribeFrames={subscribeFrames}
-        sendInput={(event) => send({ type: "input", event })}
-        controlling={controlling && live.online}
-        online={live.online}
-        url={live.url}
-        look={agent.look}
-      />
+      {owner && live.online && (
+        <div className="pc-control" role="group" aria-label={a.control}>
+          {inControl ? (
+            <>
+              <span className="pc-you" aria-hidden>
+                {ownerInitials}
+              </span>
+              <span>
+                <strong>{a.you}</strong> {a.haveControl}
+              </span>
+              <button type="button" className="btn pc-agent-btn" onClick={() => setControlling(false)}>
+                {a.returnControl}
+              </button>
+            </>
+          ) : (
+            <>
+              <AgentFigure size={24} look={agent.look} state={state} />
+              <span>
+                <strong>{agent.name}</strong> {a.hasControl}
+              </span>
+              {state === "working" && (
+                <button type="button" className="btn sec" onClick={() => send({ type: "stop" })}>
+                  {a.stop}
+                </button>
+              )}
+              <button type="button" className="btn pri" onClick={() => setControlling(true)}>
+                {a.takeOver}
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
