@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { attachmentsBriefing, rulesBriefing, type AgentState, type Attachment, type Brain, type ComputerToServer, type OwnerRule, type Recipe, type RecordedEvent } from "@understudy/protocol";
-import { startTurn, validModel, type BrainConfig, type BrainEvent, type Turn, type TurnResult } from "./brain.ts";
+import { addUsage, startTurn, validModel, type BrainConfig, type BrainEvent, type Turn, type TurnResult } from "./brain.ts";
 import { log } from "@understudy/runtime";
 import { dayOf, type Memory } from "./memory.ts";
 import { DEFAULT_ASK_FIRST_RUNS, extractJson, normalizeRecipe, parseRunResult, recipePrompt, recipePromptFromText, runPrompt, withAnomalies, withoutResultLine } from "./recipe.ts";
@@ -190,6 +190,21 @@ export function isApprovalTool(name: string): boolean {
   return /(request_approval|wait_for_approval)$/.test(name);
 }
 
+export function runModelFor(brain: Brain, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return brain === "claude" ? validModel(env.UNDERSTUDY_RUN_MODEL) : undefined;
+}
+
+export function handoverPrompt(stopped: string): string {
+  return `A faster model was running this task and stopped before finishing. What it said: ${JSON.stringify(stopped.slice(0, 1500))}
+Take over now. Look at the page as it is, work out which steps are already done, and do only the rest. Never repeat a step that already submitted, sent, saved or paid for something; if you cannot tell whether it went through, stop and say so.
+End your answer with the RESULT line exactly as described before.`;
+}
+
+export function shouldHandOver(result: TurnResult, ok: boolean, ownerBlocked: boolean): boolean {
+  if (ok || ownerBlocked) return false;
+  return !/not logged in|please run \/login|authentication/i.test(result.error ?? "");
+}
+
 export function approvalPending(text: string): boolean {
   return /status\W{1,8}pending/i.test(text) || /^\s*pending\b/i.test(text);
 }
@@ -240,6 +255,7 @@ export function createAgent(options: {
     quiet?: boolean;
     transcript?: string;
     observe?: (event: BrainEvent) => void;
+    model?: string;
   }): Promise<TurnResult> => {
     const { runId, roomId, chatty = true, quiet = false, transcript } = input;
     const streams = chatty && !runId ? streamer((message) => options.send(message.type === "chat_delta" && roomId ? { ...message, roomId } : message)) : null;
@@ -266,7 +282,7 @@ export function createAgent(options: {
       if (event.kind === "tool_result" && isApprovalTool(event.name) && !approvalPending(event.text)) setState("working");
     };
     const jobModel = "model" in input.job ? input.job.model : undefined;
-    const model = validModel(jobModel) ?? persisted.model;
+    const model = input.model ?? validModel(jobModel) ?? persisted.model;
     const started = run(options.config, { brain: persisted.brain, ...(model ? { model } : {}), prompt: input.prompt, system: systemPrompt(options.rulesFile ? readRules(options.rulesFile) : []), resume: input.resume, onEvent });
     if (current) {
       current.turn = started;
@@ -366,7 +382,29 @@ export function createAgent(options: {
     });
     const prompt = `${memory.briefing({ recipe: job.recipe, input: job.webhook ? undefined : job.context })}\n\n${runPrompt(job)}`;
     const record = createRunRecord({ describe: describeTool, screenshot: options.screenshot });
-    const result = await turn({ job, prompt, resume: null, runId: job.runId, transcript: join(dir, "transcript.jsonl"), observe: (event) => record.observe(event) });
+    const transcript = join(dir, "transcript.jsonl");
+    let ownerBlocked = false;
+    const observe = (event: BrainEvent) => {
+      record.observe(event);
+      if (event.kind !== "tool_result") return;
+      if (/^\s*blocked\b/i.test(event.text)) ownerBlocked = true;
+      if (isApprovalTool(event.name) && !approvalPending(event.text) && !/^\s*approved\b/i.test(event.text)) ownerBlocked = true;
+    };
+    const fast = runModelFor(persisted.brain);
+    let result = await turn({ job, prompt, resume: null, runId: job.runId, transcript, observe, ...(fast ? { model: fast } : {}) });
+    let handedOver = false;
+    if (fast && !cancelled()) {
+      const first = parseRunResult(result.text);
+      if (shouldHandOver(result, result.ok && (first?.ok ?? false), ownerBlocked)) {
+        handedOver = true;
+        log("agent", `run ${job.runId}: ${fast} stopped, handing over to the main model`);
+        options.send({ type: "activity", runId: job.runId, text: "Handing the task to the main model" });
+        const stopped = first?.summary || result.error || result.text.trim().split("\n").slice(-1)[0] || "no reason given";
+        const second = await turn({ job, prompt: result.sessionId ? handoverPrompt(stopped) : prompt, resume: result.sessionId, runId: job.runId, transcript, observe });
+        const usage = addUsage(result.usage, second.usage);
+        result = usage ? { ...second, usage } : second;
+      }
+    }
     const steps = await record.finish();
     if (cancelled()) {
       options.send({ type: "run_record", runId: job.runId, steps });
@@ -378,7 +416,7 @@ export function createAgent(options: {
     const ok = result.ok && (parsed?.ok ?? false);
     const summary = ((parsed?.summary ? withAnomalies(parsed) : "") || (result.ok ? result.text.trim().split("\n").slice(-1)[0] : result.error) || "The run ended without a summary.").slice(0, 1000);
     writeFileSync(join(dir, "result.json"), JSON.stringify({ ok, summary, at: Date.now() }, null, 2));
-    memory.appendJournal(`run ${job.runId} "${job.recipe.title}": ${ok ? "ok" : "failed"}: ${summary}`);
+    memory.appendJournal(`run ${job.runId} "${job.recipe.title}": ${ok ? "ok" : "failed"}${handedOver ? " (handed over to the main model)" : ""}: ${summary}`);
     options.send({ type: "run_record", runId: job.runId, steps, ...(parsed?.anomalies.length ? { unusual: parsed.anomalies } : {}) });
     options.send({ type: "run_finished", runId: job.runId, ok, summary, ...(result.usage ? { usage: result.usage } : {}) });
     setState(ok ? "done" : "stuck", ok ? undefined : summary.slice(0, 300));

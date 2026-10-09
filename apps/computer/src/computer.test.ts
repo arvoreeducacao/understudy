@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ComputerToServer, Recipe } from "@understudy/protocol";
-import { approvalPending, createAgent, describeTool, SYSTEM_PROMPT } from "./agent.ts";
+import { approvalPending, createAgent, describeTool, handoverPrompt, runModelFor, shouldHandOver, SYSTEM_PROMPT } from "./agent.ts";
 import { claudeArgs, claudeEnv, claudeMcpConfig, codexArgs, PROTECTED_TOOL_RULES, parseClaudeLine, parseCodexLine, type BrainEvent, type TurnRequest } from "./brain.ts";
 import { captureScript, SENSITIVE_LABEL } from "./capture-script.ts";
 import { computerSocketUrl, gatekeeperUrl } from "./endpoints.ts";
@@ -1115,4 +1115,115 @@ test("stopping a recipe run cancels its brain", async () => {
   for (let i = 0; i < 50 && !sent.some((message) => message.type === "run_finished"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(cancelled, 1);
   assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "r-stop", ok: false, summary: "Stopped by the owner." });
+});
+
+const fastRecipe = { title: "Monthly invoices", trigger: "x", steps: [{ id: "s1", text: "Open the billing page", mode: "auto" as const }], questions: [], askFirstRuns: 3 };
+
+function fastAgent(script: (request: TurnRequest) => { events: BrainEvent[]; result: { ok: boolean; text: string; sessionId: string } }) {
+  const home = mkdtempSync(join(tmpdir(), "understudy-"));
+  const sent: ComputerToServer[] = [];
+  const memory = createMemory(home);
+  const { requests, runTurn } = fakeTurns(script);
+  const agent = createAgent({
+    config: { home, workDir: join(home, "work"), serverUrl: "http://x", token: "t" },
+    memory,
+    settingsFile: join(home, ".understudy", "settings.json"),
+    send: (message) => (sent.push(message), true),
+    runTurn: runTurn as never,
+  });
+  return { agent, sent, requests, memory };
+}
+
+async function withRunModel<T>(value: string | undefined, body: () => Promise<T>): Promise<T> {
+  const before = process.env.UNDERSTUDY_RUN_MODEL;
+  if (value === undefined) delete process.env.UNDERSTUDY_RUN_MODEL;
+  else process.env.UNDERSTUDY_RUN_MODEL = value;
+  try {
+    return await body();
+  } finally {
+    if (before === undefined) delete process.env.UNDERSTUDY_RUN_MODEL;
+    else process.env.UNDERSTUDY_RUN_MODEL = before;
+  }
+}
+
+test("the run model applies only to the claude brain and only when it is a valid name", () => {
+  assert.equal(runModelFor("claude", { UNDERSTUDY_RUN_MODEL: "haiku" }), "haiku");
+  assert.equal(runModelFor("codex", { UNDERSTUDY_RUN_MODEL: "haiku" }), undefined);
+  assert.equal(runModelFor("claude", {}), undefined);
+  assert.equal(runModelFor("claude", { UNDERSTUDY_RUN_MODEL: "haiku; rm -rf" }), undefined);
+});
+
+test("hand over only when the fast run did not finish and the owner did not say no", () => {
+  const failed = { ok: true, sessionId: "s", text: "" };
+  assert.equal(shouldHandOver(failed, false, false), true);
+  assert.equal(shouldHandOver(failed, true, false), false);
+  assert.equal(shouldHandOver(failed, false, true), false);
+  assert.equal(shouldHandOver({ ok: false, sessionId: null, text: "", error: "Not logged in · Please run /login" }, false, false), false);
+  assert.match(handoverPrompt("could not find the export button"), /could not find the export button[\s\S]*Never repeat a step/);
+});
+
+test("a run starts on the run model and keeps it when the run finishes", async () => {
+  await withRunModel("haiku", async () => {
+    const { agent, sent, requests } = fastAgent(() => ({ events: [], result: { ok: true, text: 'RESULT {"ok": true, "summary": "Downloaded 3 invoices"}', sessionId: "s1" } }));
+    agent.enqueue({ kind: "run", runId: "f1", recipe: fastRecipe, approvalsRequired: false });
+    await settle();
+    assert.deepEqual(requests.map((request) => request.model ?? null), ["haiku"]);
+    assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "f1", ok: true, summary: "Downloaded 3 invoices" });
+  });
+});
+
+test("a stuck fast run is handed to the main model in the same session, with usage added up", async () => {
+  await withRunModel("haiku", async () => {
+    const { agent, sent, requests, memory } = fastAgent((request) =>
+      request.model === "haiku"
+        ? { events: [], result: { ok: true, text: 'RESULT {"ok": false, "summary": "The export button is not where the recipe says"}', sessionId: "s1", usage: { inputTokens: 100, outputTokens: 10 } } as never }
+        : { events: [], result: { ok: true, text: 'RESULT {"ok": true, "summary": "Downloaded 3 invoices"}', sessionId: "s1", usage: { inputTokens: 40, outputTokens: 5 } } as never },
+    );
+    agent.setModel("opus");
+    agent.enqueue({ kind: "run", runId: "f2", recipe: fastRecipe, approvalsRequired: false });
+    await settle();
+    assert.deepEqual(requests.map((request) => request.model ?? null), ["haiku", "opus"]);
+    assert.equal(requests[1].resume, "s1");
+    assert.match(requests[1].prompt, /The export button is not where the recipe says/);
+    assert.ok(sent.some((message) => message.type === "activity" && /main model/.test((message as { text: string }).text)));
+    assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "f2", ok: true, summary: "Downloaded 3 invoices", usage: { inputTokens: 140, outputTokens: 15 } });
+    assert.match(memory.lastJournalLines(1)[0], /handed over to the main model/);
+  });
+});
+
+test("a fast run the owner refused is not handed over", async () => {
+  await withRunModel("haiku", async () => {
+    const { agent, requests } = fastAgent(() => ({
+      events: [
+        { kind: "tool", name: "mcp__browser__browser_click", input: { element: "Pay" } },
+        { kind: "tool_result", name: "mcp__browser__browser_click", isError: true, text: "blocked: needs approval. The owner did not approve" },
+      ],
+      result: { ok: true, text: 'RESULT {"ok": false, "summary": "The owner did not approve the payment"}', sessionId: "s1" },
+    }));
+    agent.enqueue({ kind: "run", runId: "f3", recipe: fastRecipe, approvalsRequired: true });
+    await settle();
+    assert.equal(requests.length, 1);
+  });
+});
+
+test("a denied approval request also stops the hand over", async () => {
+  await withRunModel("haiku", async () => {
+    const { agent, requests } = fastAgent(() => ({
+      events: [{ kind: "tool_result", name: "mcp__gatekeeper__request_approval", isError: false, text: "denied: not this month" }],
+      result: { ok: true, text: 'RESULT {"ok": false, "summary": "Not approved"}', sessionId: "s1" },
+    }));
+    agent.enqueue({ kind: "run", runId: "f4", recipe: fastRecipe, approvalsRequired: true });
+    await settle();
+    assert.equal(requests.length, 1);
+  });
+});
+
+test("without a run model, runs use the agent's model once as before", async () => {
+  await withRunModel(undefined, async () => {
+    const { agent, requests } = fastAgent(() => ({ events: [], result: { ok: true, text: 'RESULT {"ok": false, "summary": "Stuck"}', sessionId: "s1" } }));
+    agent.enqueue({ kind: "run", runId: "f5", recipe: fastRecipe, approvalsRequired: false });
+    await settle();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].model, undefined);
+  });
 });
