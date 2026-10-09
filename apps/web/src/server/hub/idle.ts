@@ -52,7 +52,7 @@ export class IdleSleeper {
       const signals = await this.signals(agentId, now - at);
       if (!signals || !shouldSleep(signals)) continue;
       if (now - (this.lastActive.get(agentId) ?? 0) < IDLE_SLEEP_MS) continue;
-      await this.hub.hosts.sleep(agentId);
+      await this.hub.putToSleep(agentId);
       this.lastActive.delete(agentId);
       log("computer_sleeping", { agentId, idleMinutes: Math.round(signals.idleMs / 60000) });
     }

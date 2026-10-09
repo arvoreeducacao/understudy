@@ -45,6 +45,7 @@ export class Hub {
   readonly rooms = new Rooms(this);
   readonly uploads = new Uploads();
   private computers = new Map<string, WebSocket>();
+  private fallingAsleep = new Set<string>();
   private viewers = new Map<string, Set<Viewer>>();
   private lastFrames = new Map<string, Frame>();
   private lastJobs = new Map<string, JobInfo[]>();
@@ -91,7 +92,7 @@ export class Hub {
 
   sendToComputer(agentId: string, message: ServerToComputer) {
     const ws = this.computers.get(agentId);
-    if (!ws) return false;
+    if (!ws || this.fallingAsleep.has(agentId)) return false;
     if (message.type !== "ping") this.idle.touch(agentId);
     send(ws, message);
     return true;
@@ -113,6 +114,11 @@ export class Hub {
 
   announceViewers(agentId: string) {
     this.sendToComputer(agentId, { type: "viewers", count: this.viewers.get(agentId)?.size ?? 0 });
+  }
+
+  async putToSleep(agentId: string) {
+    this.fallingAsleep.add(agentId);
+    await this.hosts.sleep(agentId);
   }
 
   viewerCount(agentId: string) {
@@ -212,6 +218,7 @@ export class Hub {
     const previous = this.computers.get(agentId);
     if (previous && previous !== ws) previous.close(4000, "replaced");
     this.computers.set(agentId, ws);
+    this.fallingAsleep.delete(agentId);
     this.idle.touch(agentId);
     log("computer_connected", { agentId });
     let queue: Promise<void> = Promise.resolve();
@@ -255,6 +262,7 @@ export class Hub {
       if (this.computers.get(agentId) !== ws) return;
       this.computers.delete(agentId);
       this.idle.forget(agentId);
+      this.fallingAsleep.delete(agentId);
       this.lastFrames.delete(agentId);
       this.lastJobs.delete(agentId);
       for (const [requestId, pending] of this.asks) {

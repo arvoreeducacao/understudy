@@ -51,14 +51,21 @@ after(async () => {
   setTimeout(() => process.exit(0), 100).unref();
 });
 
+function hostWith(hub: { hosts: unknown }, running: string[]) {
+  const host = fakeSocket();
+  const conn = { ws: host, hostId: "host-idle", capacity: 4, running: new Set(running) };
+  (hub.hosts as { hosts: Map<string, unknown> }).hosts.set("host-idle", conn);
+  const hosts = hub.hosts as { onComputerStatus(c: unknown, m: unknown): Promise<void>; reconcile(c: unknown): Promise<void> };
+  return { host, conn, hosts };
+}
+
 test("an idle computer goes to sleep, stays asleep when the host reconnects, and wakes up for the next message", { skip }, async () => {
   const { Hub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();
+  await db.update(schema.agents).set({ computerStatus: "running" }).where(eq(schema.agents.id, ids.quiet));
   const hub = new Hub();
-  const host = fakeSocket();
-  const conn = { ws: host, hostId: "host-idle", capacity: 4, running: new Set([ids.quiet]) };
-  (hub.hosts as unknown as { hosts: Map<string, unknown> }).hosts.set("host-idle", conn);
+  const { host, conn, hosts } = hostWith(hub, [ids.quiet]);
   const computer = fakeSocket();
   await hub.attachComputer(computer as never, ids.quiet);
   hub.idle.touch(ids.quiet, longAgo);
@@ -67,7 +74,6 @@ test("an idle computer goes to sleep, stays asleep when the host reconnects, and
   assert.deepEqual(host.received.map((m) => [m.type, m.agentId]), [["computer_stop", ids.quiet]]);
   assert.equal(conn.running.size, 0);
 
-  const hosts = hub.hosts as unknown as { onComputerStatus(c: unknown, m: unknown): Promise<void>; reconcile(c: unknown): Promise<void> };
   await hosts.onComputerStatus(conn, { type: "computer_status", agentId: ids.quiet, status: "stopped" });
   computer.close();
   const [asleep] = await db.select().from(schema.agents).where(eq(schema.agents.id, ids.quiet));
@@ -81,6 +87,35 @@ test("an idle computer goes to sleep, stays asleep when the host reconnects, and
   const result = await hub.deliver(ids.quiet, { type: "chat", text: "wake up", from: "Owner" }, { source: "panel" });
   assert.deepEqual(result, { status: "queued", starting: true });
   assert.deepEqual(host.received.map((m) => [m.type, m.spec?.agentId]), [["computer_ensure", ids.quiet]]);
+  const woken = fakeSocket();
+  await hub.attachComputer(woken as never, ids.quiet);
+  await hub.inbound.flush(ids.quiet);
+  assert.deepEqual(woken.received.filter((m) => m.type === "chat").map((m) => (m as { text?: string }).text), ["wake up"]);
+  woken.close();
+});
+
+test("a message that arrives while the computer is falling asleep waits and brings it back", { skip }, async () => {
+  const { Hub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().update(schema.agents).set({ computerStatus: "running" }).where(eq(schema.agents.id, ids.quiet));
+  const hub = new Hub();
+  const { host } = hostWith(hub, [ids.quiet]);
+  const computer = fakeSocket();
+  await hub.attachComputer(computer as never, ids.quiet);
+  hub.idle.touch(ids.quiet, longAgo);
+  await hub.idle.sweep();
+
+  const late = await hub.deliver(ids.quiet, { type: "chat", text: "just in time", from: "Owner" }, { source: "panel" });
+  assert.deepEqual(late, { status: "queued", starting: true });
+  assert.equal(computer.received.filter((m) => m.type === "chat").length, 0);
+  assert.deepEqual(host.received.map((m) => m.type), ["computer_stop", "computer_ensure"]);
+
+  computer.close();
+  const woken = fakeSocket();
+  await hub.attachComputer(woken as never, ids.quiet);
+  await hub.inbound.flush(ids.quiet);
+  assert.deepEqual(woken.received.filter((m) => m.type === "chat").map((m) => (m as { text?: string }).text), ["just in time"]);
+  woken.close();
 });
 
 test("a computer someone is looking at, or one watching a page, stays on", { skip }, async () => {
@@ -91,8 +126,7 @@ test("a computer someone is looking at, or one watching a page, stays on", { ski
   await db.insert(schema.recipes).values({ id: "rcp_idle_watch", agentId: ids.watched, recipe: {}, active: true } as never);
   await db.insert(schema.recipeWatches).values({ recipeId: "rcp_idle_watch", agentId: ids.watched, url: "https://example.com", everyMinutes: 60 } as never);
   const hub = new Hub();
-  const host = fakeSocket();
-  (hub.hosts as unknown as { hosts: Map<string, unknown> }).hosts.set("host-idle", { ws: host, hostId: "host-idle", capacity: 4, running: new Set([ids.quiet, ids.watched]) });
+  const { host } = hostWith(hub, [ids.quiet, ids.watched]);
   const quiet = fakeSocket();
   const watched = fakeSocket();
   await hub.attachComputer(quiet as never, ids.quiet);
