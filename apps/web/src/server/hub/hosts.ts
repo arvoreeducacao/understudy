@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { parseHostToServer, type HostToServer, type ServerToHost } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
@@ -97,15 +97,15 @@ export class Hosts {
     else conn.running.delete(message.agentId);
     const [agent] = await getDb()
       .update(schema.agents)
-      .set({ computerStatus: message.status, computerMessage: message.message ?? null, updatedAt: new Date() })
+      .set({ computerStatus: message.status === "stopped" ? sql`case when ${schema.agents.computerStatus} = 'sleeping' then 'sleeping' else 'stopped' end` : message.status, computerMessage: message.message ?? null, updatedAt: new Date() })
       .where(eq(schema.agents.id, message.agentId))
       .returning();
     if (!agent) return;
-    log("computer_status", { agentId: message.agentId, status: message.status, message: message.message });
+    log("computer_status", { agentId: message.agentId, status: agent.computerStatus, message: message.message });
     this.hub.broadcast(message.agentId, {
       type: "presence",
       online: this.hub.isOnline(message.agentId),
-      computerStatus: message.status,
+      computerStatus: agent.computerStatus,
       message: message.message ?? null,
     });
   }
@@ -118,7 +118,7 @@ export class Hosts {
       .where(eq(schema.user.status, "approved"));
     const placed = new Set([...this.hosts.values()].flatMap((h) => [...h.running]));
     for (const agent of all) {
-      if (agent.status === "stopped_by_owner") continue;
+      if (agent.status === "stopped_by_owner" || agent.status === "sleeping") continue;
       if (placed.has(agent.id) || this.hub.isOnline(agent.id)) continue;
       if (!canPlaceOn(agent.hostId, conn.hostId)) continue;
       await this.ensure(agent.id, conn);
@@ -166,6 +166,11 @@ export class Hosts {
     } satisfies ServerToHost);
     log("computer_ensure", { agentId, hostId: host.hostId });
     return true;
+  }
+
+  async sleep(agentId: string) {
+    await getDb().update(schema.agents).set({ computerStatus: "sleeping", updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+    this.stop(agentId);
   }
 
   stop(agentId: string, destroy = false) {

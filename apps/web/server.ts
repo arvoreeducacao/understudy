@@ -66,6 +66,7 @@ async function main() {
   const scheduler = new Scheduler(hub);
   scheduler.start();
   hub.watcher.start();
+  hub.idle.start();
   const briefings = startBriefings();
   const extension = createExtensionRoutes(hub);
   const fileRoutes = createFileRoutes(hub);

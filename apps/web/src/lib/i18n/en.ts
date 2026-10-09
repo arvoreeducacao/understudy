@@ -428,6 +428,7 @@ export const en = {
       starting: "computer starting",
       running: "computer on",
       stopped: "computer off",
+      sleeping: "computer asleep, wakes up when called",
       failed: "the computer did not start",
       offline: "computer off",
     } as Record<string, string>,
