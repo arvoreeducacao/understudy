@@ -13,7 +13,7 @@ const a = messages.agentPage;
 
 export function computerStatusText(live: AgentLink["live"], state: AgentState) {
   if (live.online) return `${messages.states[state]}${live.note ? ` · ${live.note}` : ""}`;
-  if (live.computerStatus === "starting" || live.computerStatus === "pending") return messages.home.computer[live.computerStatus];
+  if (live.computerStatus === "starting" || live.computerStatus === "pending" || live.computerStatus === "sleeping") return messages.home.computer[live.computerStatus];
   return t.offline;
 }
 

@@ -428,6 +428,7 @@ export const ptBR: Messages = {
       starting: "ligando o computador",
       running: "computador ligado",
       stopped: "computador desligado",
+      sleeping: "computador dormindo, acorda quando chamado",
       failed: "o computador não ligou",
       offline: "computador desligado",
     },

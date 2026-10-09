@@ -8,6 +8,7 @@ import { messages as copy } from "@/lib/messages";
 import { Approvals } from "./hub/approvals";
 import { handleComputerMessage } from "./hub/computer-handlers";
 import { Hosts } from "./hub/hosts";
+import { IdleSleeper } from "./hub/idle";
 import { InboundQueue, type DeliverOptions } from "./hub/inbound-queue";
 import { Recordings } from "./hub/recordings";
 import { Rooms } from "./hub/rooms";
@@ -31,6 +32,7 @@ type AskRequest = Extract<ServerToComputer, { requestId: string }>;
 
 const PING_INTERVAL_MS = 30_000;
 const QUEUE_TICK_MS = 3_000;
+const QUIET_COMPUTER_MESSAGES = new Set<string>(["frame", "pong", "jobs", "files", "memory", "credentials", "watch_result"]);
 
 export class Hub {
   readonly approvals = new Approvals(this);
@@ -39,6 +41,7 @@ export class Hub {
   readonly hosts = new Hosts(this);
   readonly inbound = new InboundQueue(this);
   readonly watcher = new Watcher(this);
+  readonly idle = new IdleSleeper(this);
   readonly rooms = new Rooms(this);
   readonly uploads = new Uploads();
   private computers = new Map<string, WebSocket>();
@@ -89,6 +92,7 @@ export class Hub {
   sendToComputer(agentId: string, message: ServerToComputer) {
     const ws = this.computers.get(agentId);
     if (!ws) return false;
+    if (message.type !== "ping") this.idle.touch(agentId);
     send(ws, message);
     return true;
   }
@@ -109,6 +113,14 @@ export class Hub {
 
   announceViewers(agentId: string) {
     this.sendToComputer(agentId, { type: "viewers", count: this.viewers.get(agentId)?.size ?? 0 });
+  }
+
+  viewerCount(agentId: string) {
+    return this.viewers.get(agentId)?.size ?? 0;
+  }
+
+  runningJobs(agentId: string) {
+    return (this.lastJobs.get(agentId) ?? []).filter((job) => job.status === "running").length;
   }
 
   rememberJobs(agentId: string, jobs: JobInfo[]) {
@@ -200,6 +212,7 @@ export class Hub {
     const previous = this.computers.get(agentId);
     if (previous && previous !== ws) previous.close(4000, "replaced");
     this.computers.set(agentId, ws);
+    this.idle.touch(agentId);
     log("computer_connected", { agentId });
     let queue: Promise<void> = Promise.resolve();
 
@@ -222,6 +235,7 @@ export class Hub {
         return;
       }
       const message: ComputerToServer = parsed.message;
+      if (!QUIET_COMPUTER_MESSAGES.has(message.type)) this.idle.touch(agentId);
       if (message.type === "upload_state" || message.type === "upload_done" || message.type === "file_chunk" || message.type === "file_shared" || message.type === "artifact_rendered") {
         this.answerAsk(agentId, message);
         return;
@@ -240,6 +254,7 @@ export class Hub {
     ws.on("close", () => {
       if (this.computers.get(agentId) !== ws) return;
       this.computers.delete(agentId);
+      this.idle.forget(agentId);
       this.lastFrames.delete(agentId);
       this.lastJobs.delete(agentId);
       for (const [requestId, pending] of this.asks) {
@@ -284,12 +299,16 @@ export class Hub {
 
     ws.on("close", () => {
       set.delete(viewer);
+      this.idle.touch(agentId);
       if (set.size === 0) this.viewers.delete(agentId);
       this.announceViewers(agentId);
     });
 
     const [agent] = await getDb().select().from(schema.agents).where(eq(schema.agents.id, agentId));
     if (!agent) return;
+    if (viewer.owner && agent.computerStatus === "sleeping" && !this.isOnline(agentId)) {
+      this.hosts.ensure(agentId).catch((error) => log("wake_on_view_error", { agentId, error: String(error) }));
+    }
     send(ws, {
       type: "snapshot",
       online: this.isOnline(agentId),
