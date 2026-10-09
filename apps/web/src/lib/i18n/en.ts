@@ -640,9 +640,9 @@ export const en = {
     waitingYou: "waiting for you",
   },
   agentPage: {
-    railLabel: "Agents",
-    allAgents: "All agents",
-    newAgent: "New agent",
+    railLabel: "Understudies",
+    allAgents: "All understudies",
+    newAgent: "New understudy",
     cardLabel: (name: string) => `About ${name}`,
     customize: (name: string) => `Customize ${name}`,
     customizeTitle: (name: string) => `Customize ${name}`,

@@ -54,7 +54,7 @@ export function ComputerPanel({
     else void panelRef.current?.requestFullscreen?.().catch(() => {});
   }
 
-  const headline = live.online ? (inControl ? a.youAreInControl : a.connected) : computerStatusText(live, state);
+  const headline = inControl ? a.youAreInControl : computerStatusText(live, state);
 
   return (
     <div
