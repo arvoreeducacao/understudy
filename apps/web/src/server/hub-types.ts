@@ -1,5 +1,6 @@
 import type {
   ApprovalRequest,
+  ArtifactEdit,
   Attachment,
   MemoryFile,
   FileEntry,
@@ -10,7 +11,7 @@ import type {
   Recipe,
   RecordedEvent,
 } from "@understudy/protocol";
-import type { BrainStatus } from "@/lib/db/schema";
+import type { BrainStatus, MessageArtifact } from "@/lib/db/schema";
 
 export type ChatEntry = {
   id: string;
@@ -20,6 +21,7 @@ export type ChatEntry = {
   via?: string | null;
   streamId?: string | null;
   attachments?: Attachment[];
+  artifact?: MessageArtifact;
   at: string;
 };
 
@@ -76,7 +78,7 @@ export type ViewerToServer =
   | { type: "terminal_resize"; terminalId: string; cols: number; rows: number }
   | { type: "terminal_close"; terminalId: string }
   | { type: "job_stop"; jobId: string }
-  | { type: "chat"; text: string; attachments?: string[] }
+  | { type: "chat"; text: string; attachments?: string[]; artifactEdit?: ArtifactEdit }
   | { type: "record_start" }
   | { type: "record_narration"; text: string }
   | { type: "record_stop" }

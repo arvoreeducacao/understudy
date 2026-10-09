@@ -34,6 +34,7 @@ const LIMITS: Record<string, [number, number]> = {
   upload_done: [10, 100],
   file_chunk: [40, 400],
   file_shared: [5, 50],
+  artifact_rendered: [2, 20],
   files: [1, 10],
   memory: [1, 10],
   credentials: [1, 10],

@@ -17,6 +17,11 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_BLOCKED_CIDRS` | Extra address ranges connected tools may never use; private, loopback, link-local, metadata and CGNAT ranges are always blocked |
 | `UNDERSTUDY_ALLOW_PRIVATE_MCP` | `1` lets connected tools live on private addresses; local development only |
 | `UNDERSTUDY_PRODUCT_NAME` | Name shown in the panel; default `Understudy` |
+| `UNDERSTUDY_ARTIFACT_S3_BUCKET` | Bucket for artifact versions and page images. Any S3-compatible store works (AWS S3, MinIO, SeaweedFS, Garage). Empty keeps them in Postgres |
+| `UNDERSTUDY_ARTIFACT_S3_ENDPOINT`, `UNDERSTUDY_ARTIFACT_S3_REGION` | Endpoint (default `https://s3.<region>.amazonaws.com`, path-style) and region (default `AWS_REGION` or `us-east-1`) |
+| `UNDERSTUDY_ARTIFACT_S3_ACCESS_KEY_ID`, `UNDERSTUDY_ARTIFACT_S3_SECRET_ACCESS_KEY` | Keys for that bucket; fall back to `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` |
+| `UNDERSTUDY_ARTIFACT_MAX_BYTES` | Largest file one artifact version can hold (25 MB by default) |
+| `UNDERSTUDY_ARTIFACT_ORIGIN` | Optional separate origin (another registrable domain) that serves artifact content; without it content is served from the panel host, already sandboxed with an opaque origin |
 | `UNDERSTUDY_LOCALE` | `en` (default) or `pt-BR` |
 | `UNDERSTUDY_TIMEZONE` | Time zone for dates and new schedules; default `UTC` |
 | `UNDERSTUDY_AGENT_TALK_CEILING` | Most turns in a row understudies may take talking among themselves, in rooms and through messages and hand-offs; empty means no limit, and the owner can always press Stop |

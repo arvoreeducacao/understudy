@@ -199,6 +199,10 @@ export const computerHandlers: Handlers = {
     hub.answerAsk(agentId, message);
   },
 
+  artifact_rendered(hub, agentId, message) {
+    hub.answerAsk(agentId, message);
+  },
+
   file_content(hub, agentId, message) {
     hub.resolveFile(agentId, message.requestId, { base64: message.base64, error: message.error });
   },

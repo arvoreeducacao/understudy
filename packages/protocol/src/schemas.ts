@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ArtifactEditContextSchema } from "./artifacts.ts";
 import { AttachmentSchema, MAX_ATTACHMENTS } from "./files.ts";
 
 const text = z.string();
@@ -93,6 +94,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("upload_done"), requestId: id, uploadId: id, attachment: AttachmentSchema.optional(), error: fileError }),
   z.object({ type: z.literal("file_chunk"), requestId: id, size: byteCount.optional(), base64: chunkData.optional(), error: fileError }),
   z.object({ type: z.literal("file_shared"), requestId: id, attachment: AttachmentSchema.optional(), error: fileError }),
+  z.object({ type: z.literal("artifact_rendered"), requestId: id, key: z.string().regex(/^[a-f0-9]{32}$/).optional(), pages: z.number().int().min(0).max(1000).optional(), error: fileError }),
   z.object({ type: z.literal("pong"), at: time }),
 ]);
 
@@ -110,7 +112,7 @@ export const InputEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const ServerToComputerSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional() }),
+  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(), artifactEdit: ArtifactEditContextSchema.optional() }),
   z.object({ type: z.literal("room_turn"), roomId: id, prompt: z.string().max(64 * 1024), model: optionalText }),
   z.object({ type: z.literal("input"), event: InputEventSchema }),
   z.object({ type: z.literal("record_start"), recordingId: id }),
@@ -149,6 +151,8 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("file_read"), requestId: id, path: z.string().min(1).max(600), offset: byteCount, length: byteCount }),
   z.object({ type: z.literal("file_thumb"), requestId: id, path: z.string().min(1).max(600) }),
   z.object({ type: z.literal("file_share"), requestId: id, path: z.string().min(1).max(1000) }),
+  z.object({ type: z.literal("artifact_render"), requestId: id, path: z.string().min(1).max(600) }),
+  z.object({ type: z.literal("artifact_page"), requestId: id, key: z.string().regex(/^[a-f0-9]{32}$/), page: z.number().int().min(1).max(1000) }),
   z.object({ type: z.literal("teach_text"), recordingId: id, text }),
   z.object({ type: z.literal("teach_recording"), recordingId: id, events: z.array(RecordedEventSchema).max(5000), ownerBrowser: z.boolean().optional() }),
   z.object({ type: z.literal("credential_set"), name: text, username: text, secret: text, site: optionalText }),

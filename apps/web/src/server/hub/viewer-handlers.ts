@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
-import { MEMORY_FILE_MAX_BYTES } from "@understudy/protocol";
+import { ArtifactEditSchema, MEMORY_FILE_MAX_BYTES } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import { credentialSite } from "@/lib/credential-site";
 import { mirrorPanelMessage } from "../slack-threads";
 import { messages as copy } from "@/lib/messages";
+import { prepareEdit } from "../artifacts/service";
 import type { Hub } from "../hub";
 import type { ViewerToServer } from "../hub-types";
 import { log } from "./shared";
@@ -33,15 +34,23 @@ export const viewerHandlers: Handlers = {
     hub.sendToComputer(agentId, { type: "input", event: message.event });
   },
 
-  async chat({ hub, agentId, userId }, message) {
+  async chat({ hub, agentId, userId, refuse }, message) {
     const text = String(message.text ?? "").trim().slice(0, 4000);
+    const edit = message.artifactEdit === undefined ? null : ArtifactEditSchema.safeParse(message.artifactEdit);
+    if (edit && (!edit.success || !text)) return refuse(copy.artifacts.editRefused);
+    const prepared = edit?.success ? await prepareEdit(hub, agentId, edit.data) : null;
+    if (edit && !prepared) return refuse(copy.artifacts.editRefused);
     const attachments = hub.uploads.claim(agentId, userId, message.attachments);
     if (!text && !attachments.length) return;
     const [user] = await getDb().select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
-    await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments);
-    const mirrored = attachments.length ? [text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n") : text;
+    await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments, prepared?.card);
+    const lead = prepared ? copy.artifacts.editMirror(prepared.title, prepared.card.version) : "";
+    const mirrored = [lead, text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n");
     mirrorPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("slack_mirror_error", { agentId, error: String(error) }));
-    const result = await hub.deliver(agentId, { type: "chat", text, from: user?.name ?? "", ...(attachments.length ? { attachments } : {}) }, { source: "panel" });
+    const artifactEdit = prepared
+      ? { artifactId: prepared.card.artifactId, version: prepared.card.version, title: prepared.title, path: prepared.path, ...prepared.card.edit }
+      : undefined;
+    const result = await hub.deliver(agentId, { type: "chat", text, from: user?.name ?? "", ...(attachments.length ? { attachments } : {}), ...(artifactEdit ? { artifactEdit } : {}) }, { source: "panel" });
     if (result.status === "queued") await hub.addMessage(agentId, "system", result.starting ? copy.live.startingQueued : copy.live.queued);
   },
 

@@ -126,3 +126,48 @@ test("the fake brain finds attached paths and builds a quoted ffmpeg cut", async
   assert.deepEqual(attachedPaths(prompt), [{ path: "/home/agent/files/inbox/it's a demo.mov", mime: "video/quicktime" }]);
   assert.match(clipCommand("/home/agent/files/inbox/it's a demo.mov", 5, "/home/agent/files/outbox/clip.mp4"), /-t 5 -i '\/home\/agent\/files\/inbox\/it'\\''s a demo\.mov'/);
 });
+
+const ONE_PAGE_PDF = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj
+4 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj
+trailer<</Root 1 0 R>>
+%%EOF`;
+
+test("only page documents in the inbox or outbox are rendered, and pages are read by key", async () => {
+  const dir = home();
+  const store = createFileStore(dir);
+  writeFileSync(join(dir, "files", "outbox", "page.html"), "<p>x</p>");
+  assert.deepEqual(await store.render("outbox/page.html"), { error: "not_found" });
+  assert.deepEqual(await store.render("outbox/../../.ssh/id_rsa.pdf"), { error: "not_found" });
+  assert.deepEqual(await store.render("outbox/missing.pdf"), { error: "not_found" });
+  assert.deepEqual(store.page("../../etc", 1), { error: "not_found" });
+  assert.deepEqual(store.page("a".repeat(32), 0), { error: "not_found" });
+  assert.deepEqual(store.page("a".repeat(32), 1), { error: "not_found" });
+});
+
+test("a PDF becomes numbered JPEG pages that the panel can fetch", { skip: !existsSync("/opt/homebrew/bin/pdftoppm") && !existsSync("/usr/bin/pdftoppm") && "pdftoppm is not installed" }, async () => {
+  const dir = home();
+  const store = createFileStore(dir);
+  writeFileSync(join(dir, "files", "outbox", "deck.pdf"), ONE_PAGE_PDF);
+  const rendered = await store.render("outbox/deck.pdf");
+  assert.equal(rendered.pages, 2);
+  assert.match(rendered.key ?? "", /^[a-f0-9]{32}$/);
+  const page = store.page(rendered.key!, 2);
+  assert.equal(page.data?.subarray(0, 2).toString("hex"), "ffd8");
+  assert.deepEqual(store.page(rendered.key!, 3), { error: "not_found" });
+  assert.deepEqual(await store.render("outbox/deck.pdf"), rendered);
+  const reply = await answerFileMessage(store, { type: "artifact_page", requestId: "r1", key: rendered.key!, page: 1 });
+  assert.equal(reply?.type, "file_chunk");
+});
+
+test("an artifact edit is briefed with the version file and the quote as data", () => {
+  const text = ownerMessage("Make it shorter", [], "/home/agent", { artifactId: "art_abcdef12", version: 2, title: "Brief", path: "inbox/artifacts/art_abcdef12/v2/brief.md", quote: "Renewals start" });
+  assert.match(text, /artifact_id art_abcdef12/);
+  assert.match(text, /"\/home\/agent\/files\/inbox\/artifacts\/art_abcdef12\/v2\/brief.md"/);
+  assert.match(text, /<<<\nRenewals start\n>>>/);
+  assert.match(text, /What your owner wants:\nMake it shorter/);
+  assert.equal(ownerMessage("hello", [], "/home/agent"), "hello");
+  assert.match(SYSTEM_PROMPT, /publish_artifact/);
+});

@@ -19,6 +19,7 @@ import { CHAT_WIDTH, CHAT_WIDTH_COOKIE, clampChatWidth, parseStoredWidth } from 
 import type { Look } from "@/lib/look";
 import { currentLocale, messages } from "@/lib/messages";
 import type { ApprovalView, ChatEntry } from "@/server/hub-types";
+import { ArtifactCard, ArtifactEditChip } from "@/components/artifacts/ArtifactCard";
 import { AttachmentChip, AttachmentList } from "./FileCards";
 import { Markdown } from "./Markdown";
 import type { AttachmentsState } from "./useAttachments";
@@ -56,7 +57,21 @@ export function DayDivider({ at }: { at: string }) {
   );
 }
 
-export function MessageRow({ entry, continued, agentName, look, agentId }: { entry: ChatEntry; continued: boolean; agentName: string; look: Look; agentId?: string }) {
+export function MessageRow({
+  entry,
+  continued,
+  agentName,
+  look,
+  agentId,
+  onOpenArtifact,
+}: {
+  entry: ChatEntry;
+  continued: boolean;
+  agentName: string;
+  look: Look;
+  agentId?: string;
+  onOpenArtifact?: () => void;
+}) {
   const files = agentId && entry.attachments?.length ? <AttachmentList agentId={agentId} attachments={entry.attachments} /> : null;
   if (entry.role === "system") {
     return (
@@ -76,6 +91,7 @@ export function MessageRow({ entry, continued, agentName, look, agentId }: { ent
             <time dateTime={entry.at} title={fullTimeOf(entry.at)}>{timeOf(entry.at)}</time>
           </div>
         )}
+        {entry.artifact && <ArtifactEditChip artifact={entry.artifact} onOpen={onOpenArtifact} />}
         {entry.text && <div className="cx-bubble">{entry.text}</div>}
         {files}
       </div>
@@ -93,6 +109,7 @@ export function MessageRow({ entry, continued, agentName, look, agentId }: { ent
           </div>
         )}
         {entry.text && <Markdown text={entry.text} />}
+        {entry.artifact && <ArtifactCard artifact={entry.artifact} onOpen={onOpenArtifact} />}
         {files}
       </div>
     </div>

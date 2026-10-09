@@ -82,3 +82,19 @@ The owner attaches files in the chat (paperclip, drag and drop, paste). The brow
 The brain sends files back with the gatekeeper tool `share_file`: the computer copies the file into `~/files/outbox` when it lives elsewhere in the home folder (never from hidden folders) and the panel posts it in the chat. Every file in a message renders as a card with a preview. Downloads and previews stream from `/api/files/<agent>/raw` with byte ranges (`file_read`), and PDF first pages and video posters come from `/thumb`.
 
 Only the owner uploads. The owner can read anything in the inbox and outbox; approvers and viewers can read only files that were posted in that understudy's chat. Files are served with `nosniff`, a sandboxing Content-Security-Policy, and as downloads unless they are images, video, audio or PDF; HTML and SVG are never rendered.
+
+## Artifacts
+
+An artifact is something the understudy made for people to look at (a deck, a document, a page, a chart, a small app, a PDF, an image), with a title and a list of immutable versions. The brain publishes one with the gatekeeper tool `publish_artifact` (path, title, optional `artifact_id` to add a version, optional note). The panel takes a snapshot on the spot: it reads the file over the computer socket (`file_share`, `file_read`), and for PDF and office files asks the computer to render page images (`artifact_render`, `artifact_page`; LibreOffice converts, poppler rasterizes, up to 60 pages). Metadata lives in Postgres (`artifacts`, `artifact_versions`, `artifact_links`); bytes and pages go to an S3-compatible bucket, or to `artifact_blobs` in Postgres when no bucket is set. A version opens even while the computer sleeps.
+
+The card lands in the chat and opens beside it in the Artifacts tab: versions, zoom, pages, full screen, download. "Request edits" sends a normal chat message with a structured reference (artifact, version, the selected text or the page). The panel first writes that exact version back into `~/files/inbox/artifacts/<id>/v<n>/` with `file_put`, and the computer briefs the brain with the path, the quote marked as data, and the instruction to publish again with the same `artifact_id`.
+
+Rendered content never runs with the panel's origin:
+
+- HTML loads in an iframe with `sandbox="allow-scripts"` (no `allow-same-origin`, popups, forms or top navigation), and the response itself carries `Content-Security-Policy: sandbox allow-scripts` so it stays sandboxed when opened directly. The same policy closes the network: `connect-src`, `form-action`, `frame-src`, `worker-src` are `'none'`, images and media only `data:`/`blob:`, scripts and styles inline or from cdnjs, jsdelivr and unpkg, fonts also from Google Fonts. `frame-ancestors` is the panel only.
+- Content URLs carry a signed token (HMAC, one version, one hour) instead of the session cookie, so the content route works the same on a separate origin (`UNDERSTUDY_ARTIFACT_ORIGIN`).
+- The panel prepends a short script to HTML that only reports the selected text and blocked requests with `postMessage`. The panel accepts messages only from that iframe's window, checks their shape and size, and treats them as data.
+- Markdown renders with the chat's own renderer (no raw HTML, no remote images); PDF and office files are page images; SVG only as an image with a script-free policy; downloads are `application/octet-stream` attachments.
+- What is left: an interactive artifact can still leak its own content through channels a CSP does not close (WebRTC, DNS prefetch, a CDN script URL). It cannot read anything outside itself.
+
+The owner can create a public link per artifact (`/shared/<token>`): the token is random, only its hash is stored, it expires after 30 days and every link can be turned off. The page shows the newest version with no panel controls, still sandboxed.

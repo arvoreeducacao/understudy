@@ -11,6 +11,7 @@ import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
 import { approvalFields, MAX_APPROVAL_FIELDS, payloadHash, serverAllowedFor } from "./approval-payload";
+import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
 import { reportRuleBlock } from "./rules";
@@ -176,6 +177,26 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
       if (result.error || !result.attachment) return text(`not shared: ${result.error ?? "unknown error"}`, true);
       await hub.addMessage(agent.id, "agent", (args.caption ?? "").trim().slice(0, 4000), null, undefined, undefined, undefined, [result.attachment]);
       return text(`shared "${result.attachment.name}" (${formatBytes(result.attachment.size)}) with your owner; it is in the chat as ~/files/${result.attachment.path}. Do not paste its contents again.`);
+    }) as Builtin["run"],
+  });
+
+  builtins.push({
+    name: "publish_artifact",
+    description:
+      "Show your owner something you made, beside the chat, in a viewer with pages, zoom, download and every version kept. Use it for anything meant to be looked at: a slide deck, a document, a report, a web page, a chart, a small interactive app, a PDF or an image. Supported: one self-contained .html file (it runs isolated, with no network: inline your data, scripts and styles may only load from cdnjs.cloudflare.com, cdn.jsdelivr.net or unpkg.com, and localStorage, cookies, fetch, forms and popups do not work), .md, .pdf, .pptx, .docx, .xlsx (shown as pages) and images (.png, .jpg, .webp, .gif, .svg). path: the file on your computer. title: a short human name. To change an artifact, edit the file and call this again with its artifact_id; that adds a new version. note: one short line saying what this version is or what changed.",
+    schema: z.object({
+      path: z.string().min(1).max(1000),
+      title: z.string().min(1).max(200),
+      artifact_id: z.string().max(100).optional(),
+      note: z.string().max(1000).optional(),
+    }),
+    run: (async (args: { path: string; title: string; artifact_id?: string; note?: string }) => {
+      const result = await publishArtifact(hub, agent.id, { path: args.path, title: args.title, artifactId: args.artifact_id?.trim() || undefined, note: args.note });
+      if (!result.ok) return text(`not published: ${result.error}`, true);
+      await hub.addMessage(agent.id, "agent", "", null, undefined, undefined, undefined, undefined, result.card);
+      return text(
+        `published "${result.card.title}" as artifact_id ${result.artifactId}, version ${result.version}. Your owner sees it beside the chat, so do not paste its contents. To change it, edit the file and call publish_artifact again with artifact_id ${result.artifactId}.`,
+      );
     }) as Builtin["run"],
   });
 

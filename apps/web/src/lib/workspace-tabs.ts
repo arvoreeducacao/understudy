@@ -1,10 +1,10 @@
-export const WORKSPACE_TABS = ["computer", "files", "terminal", "jobs", "memory", "tasks", "logins", "settings"] as const;
+export const WORKSPACE_TABS = ["computer", "artifacts", "files", "terminal", "jobs", "memory", "tasks", "logins", "settings"] as const;
 
 export type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
 
 export type AgentView = "card" | WorkspaceTab;
 
-const SHARED_TABS: readonly WorkspaceTab[] = ["computer", "tasks"];
+const SHARED_TABS: readonly WorkspaceTab[] = ["computer", "artifacts", "tasks"];
 
 export const DEFAULT_VIEW: AgentView = "card";
 

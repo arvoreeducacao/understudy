@@ -8,6 +8,7 @@ import { hashToken, newComputerToken, newId } from "@/lib/ids";
 import { messages } from "@/lib/messages";
 import { effectiveModel, isModel } from "@/lib/models";
 import { requireUser } from "@/lib/session";
+import { removeAgentArtifactBlobs } from "@/server/artifacts/service";
 import { getHub } from "@/server/hub-access";
 import { cleanRules } from "@/server/rules";
 import { computerProfile } from "@/server/computer-profile";
@@ -82,6 +83,7 @@ export async function deleteAgent(agentId: string) {
   getHub()?.stopComputer(agentId, true);
   getHub()?.closeViewers((id) => id === agentId);
   getHub()?.closeComputer(agentId);
+  await removeAgentArtifactBlobs(agentId).catch((error) => console.error("artifact_cleanup_failed", { agentId, error: String(error) }));
   await getDb().delete(schema.agents).where(eq(schema.agents.id, agentId));
   return { redirectTo: "/" };
 }

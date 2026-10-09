@@ -24,10 +24,13 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   areaPath,
+  ARTIFACT_MAX_PAGES,
+  artifactKindOf,
   DISK_HEADROOM_BYTES,
   FILE_MAX_BYTES,
   FILE_READ_MAX_BYTES,
   mimeOf,
+  needsPdfConversion,
   numberedName,
   safeFileName,
   type Attachment,
@@ -138,6 +141,8 @@ export function startFileExchange(home: string, send: (message: ComputerToServer
 const UPLOAD_ID = /^[A-Za-z0-9_-]{8,80}$/;
 const STALE_UPLOAD_MS = 2 * 24 * 60 * 60 * 1000;
 const THUMB_TIMEOUT_MS = 20_000;
+const CONVERT_TIMEOUT_MS = 120_000;
+const PAGE_KEY = /^[a-f0-9]{32}$/;
 
 type UploadMeta = { name: string; size: number; startedAt: number };
 
@@ -152,6 +157,8 @@ export type FileStore = {
   thumb: (path: string) => Promise<{ data?: Buffer; error?: string }>;
   share: (path: string) => { attachment?: Attachment; error?: string };
   resolve: (path: string) => string | null;
+  render: (path: string) => Promise<{ key?: string; pages?: number; error?: string }>;
+  page: (key: string, page: number) => { data?: Buffer; error?: string };
 };
 
 export function freeBytes(dir: string): number {
@@ -214,9 +221,10 @@ export function createFileStore(home: string, options: { free?: (dir: string) =>
   const outbox = join(filesRoot, "outbox");
   const uploads = join(home, ".understudy", "uploads");
   const thumbs = join(home, ".understudy", "thumbs");
+  const pagesRoot = join(home, ".understudy", "artifact-pages");
   const free = options.free ?? freeBytes;
   const now = options.now ?? Date.now;
-  for (const dir of [inbox, outbox, uploads, thumbs]) mkdirSync(dir, { recursive: true });
+  for (const dir of [inbox, outbox, uploads, thumbs, pagesRoot]) mkdirSync(dir, { recursive: true });
 
   for (const name of readdirSync(uploads)) {
     try {
@@ -362,6 +370,49 @@ export function createFileStore(home: string, options: { free?: (dir: string) =>
       return { data: readFileSync(out) };
     },
 
+    async render(path) {
+      const target = resolveArea(path);
+      if (!target || artifactKindOf(target) !== "pages") return { error: "not_found" };
+      const stat = statSync(target);
+      const key = createHash("sha256").update(`${target}:${stat.size}:${stat.mtimeMs}`).digest("hex").slice(0, 32);
+      const dir = join(pagesRoot, key);
+      const count = () => {
+        try {
+          return readdirSync(dir).filter((name) => /^page-\d+\.jpg$/.test(name)).length;
+        } catch {
+          return 0;
+        }
+      };
+      if (existsSync(join(dir, "done")) && count() > 0) return { key, pages: count() };
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      let pdf = target;
+      if (needsPdfConversion(target)) {
+        const profile = join(dir, "profile");
+        const ok = await runQuiet("soffice", [`-env:UserInstallation=file://${profile}`, "--headless", "--norestore", "--convert-to", "pdf", "--outdir", dir, target], CONVERT_TIMEOUT_MS);
+        rmSync(profile, { recursive: true, force: true });
+        pdf = readdirSync(dir).map((name) => join(dir, name)).find((name) => name.endsWith(".pdf")) ?? "";
+        if (!ok || !pdf) return { error: "no_preview" };
+      }
+      const ok = await runQuiet("pdftoppm", ["-jpeg", "-jpegopt", "quality=85", "-scale-to", "1600", "-f", "1", "-l", String(ARTIFACT_MAX_PAGES), pdf, join(dir, "raw")], CONVERT_TIMEOUT_MS);
+      const raws = readdirSync(dir).filter((name) => /^raw-\d+\.jpg$/.test(name)).sort((a, b) => Number(/\d+/.exec(a)![0]) - Number(/\d+/.exec(b)![0]));
+      if (!ok || raws.length === 0) return { error: "no_preview" };
+      raws.forEach((name, index) => renameSync(join(dir, name), join(dir, `page-${index + 1}.jpg`)));
+      if (pdf !== target) rmSync(pdf, { force: true });
+      writeFileSync(join(dir, "done"), "");
+      log("files", `rendered ${basename(target)} into ${raws.length} pages`);
+      return { key, pages: raws.length };
+    },
+
+    page(key, page) {
+      if (!PAGE_KEY.test(key) || !Number.isInteger(page) || page < 1) return { error: "not_found" };
+      try {
+        return { data: readFileSync(join(pagesRoot, key, `page-${page}.jpg`)) };
+      } catch {
+        return { error: "not_found" };
+      }
+    },
+
     share(path) {
       const raw = String(path ?? "").trim();
       if (!raw || raw.includes("\0")) return { error: "no such file" };
@@ -417,6 +468,12 @@ export async function answerFileMessage(store: FileStore, message: ServerToCompu
     }
     case "file_share":
       return { type: "file_shared", requestId: message.requestId, ...store.share(message.path) };
+    case "artifact_render":
+      return { type: "artifact_rendered", requestId: message.requestId, ...(await store.render(message.path)) };
+    case "artifact_page": {
+      const result = store.page(message.key, message.page);
+      return { type: "file_chunk", requestId: message.requestId, ...(result.data ? { size: result.data.length, base64: result.data.toString("base64") } : {}), ...(result.error ? { error: result.error } : {}) };
+    }
     default:
       return null;
   }

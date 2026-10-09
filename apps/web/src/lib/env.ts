@@ -1,4 +1,4 @@
-import { uploadLimitFrom } from "@understudy/protocol";
+import { ARTIFACT_MAX_BYTES, uploadLimitFrom } from "@understudy/protocol";
 import { AGENT_TALK_CEILING_ENV, parseTalkCeiling } from "./agent-talk";
 import { trustedForAdminList } from "./approval-policy";
 
@@ -42,6 +42,33 @@ export const env = {
   },
   get uploadMaxBytes() {
     return uploadLimitFrom(process.env.UNDERSTUDY_UPLOAD_MAX_BYTES);
+  },
+  get artifactOrigin() {
+    const raw = process.env.UNDERSTUDY_ARTIFACT_ORIGIN?.trim();
+    if (!raw) return null;
+    try {
+      const url = new URL(raw);
+      return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
+    } catch {
+      return null;
+    }
+  },
+  get artifactMaxBytes() {
+    const n = Number(process.env.UNDERSTUDY_ARTIFACT_MAX_BYTES);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : ARTIFACT_MAX_BYTES;
+  },
+  get artifactBucket() {
+    const bucket = process.env.UNDERSTUDY_ARTIFACT_S3_BUCKET?.trim();
+    if (!bucket) return null;
+    const region = process.env.UNDERSTUDY_ARTIFACT_S3_REGION?.trim() || process.env.AWS_REGION?.trim() || "us-east-1";
+    return {
+      bucket,
+      region,
+      endpoint: (process.env.UNDERSTUDY_ARTIFACT_S3_ENDPOINT?.trim() || `https://s3.${region}.amazonaws.com`).replace(/\/$/, ""),
+      accessKeyId: process.env.UNDERSTUDY_ARTIFACT_S3_ACCESS_KEY_ID?.trim() || process.env.AWS_ACCESS_KEY_ID?.trim() || "",
+      secretAccessKey: process.env.UNDERSTUDY_ARTIFACT_S3_SECRET_ACCESS_KEY?.trim() || process.env.AWS_SECRET_ACCESS_KEY?.trim() || "",
+      sessionToken: process.env.AWS_SESSION_TOKEN?.trim() || undefined,
+    };
   },
   get googleEnabled() {
     return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);

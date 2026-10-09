@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import { eq } from "drizzle-orm";
 import { parseComputerToServer, type ApprovalRequest, type Attachment, type ComputerToServer, type JobInfo, type ServerToComputer } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
-import type { RunTrigger } from "@/lib/db/schema";
+import type { MessageArtifact, RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import { Approvals } from "./hub/approvals";
@@ -23,7 +23,7 @@ export type { Viewer } from "./hub/shared";
 
 type FileAnswer = { base64?: string; error?: string };
 
-export type ComputerReply = Extract<ComputerToServer, { type: "upload_state" | "upload_done" | "file_chunk" | "file_shared" }>;
+export type ComputerReply = Extract<ComputerToServer, { type: "upload_state" | "upload_done" | "file_chunk" | "file_shared" | "artifact_rendered" }>;
 
 export type AskFailure = { type: "failed"; error: "offline" | "timeout" };
 
@@ -183,14 +183,15 @@ export class Hub {
     via?: string,
     streamId?: string,
     attachments?: Attachment[],
+    artifact?: MessageArtifact,
   ) {
     const id = newId("msg");
     const createdAt = new Date();
     const files = attachments?.length ? attachments : null;
-    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, attachments: files, createdAt });
+    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, attachments: files, artifact: artifact ?? null, createdAt });
     this.broadcast(agentId, {
       type: "chat",
-      entry: { id, role, text, runId: runId ?? null, via: via ?? null, streamId: streamId ?? null, at: createdAt.toISOString(), ...(files ? { attachments: files } : {}) },
+      entry: { id, role, text, runId: runId ?? null, via: via ?? null, streamId: streamId ?? null, at: createdAt.toISOString(), ...(files ? { attachments: files } : {}), ...(artifact ? { artifact } : {}) },
     });
     return id;
   }
@@ -221,7 +222,7 @@ export class Hub {
         return;
       }
       const message: ComputerToServer = parsed.message;
-      if (message.type === "upload_state" || message.type === "upload_done" || message.type === "file_chunk" || message.type === "file_shared") {
+      if (message.type === "upload_state" || message.type === "upload_done" || message.type === "file_chunk" || message.type === "file_shared" || message.type === "artifact_rendered") {
         this.answerAsk(agentId, message);
         return;
       }

@@ -183,6 +183,13 @@
       "when": 1791416413175,
       "tag": "0025_approval_used_at",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791515417049,
+      "tag": "0026_artifacts",
+      "breakpoints": true
     }
   ]
 }

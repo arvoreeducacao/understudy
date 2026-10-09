@@ -20,6 +20,7 @@ import { handleInboundEmail } from "@/server/inbound-email/handler";
 import { handleFigureRoute, isFigureRoute } from "@/server/figure-png";
 import { handleSlack, isSlackRoute } from "@/server/slack-inbound";
 import { createExtensionRoutes, isExtensionRoute } from "@/server/extension/routes";
+import { handleArtifactContent, isArtifactContentRoute } from "@/server/artifacts/routes";
 import { createFileRoutes, isFileRoute } from "@/server/files/routes";
 import { startBriefings } from "@/server/briefing";
 import { originAllowed } from "@/server/origin";
@@ -107,6 +108,16 @@ async function main() {
           res.writeHead(500);
           res.end();
         }
+      });
+      return;
+    }
+    if (isArtifactContentRoute(url.pathname)) {
+      handleArtifactContent(req, res, url).catch((error) => {
+        console.error("artifact_route_error", error);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        } else res.destroy();
       });
       return;
     }
