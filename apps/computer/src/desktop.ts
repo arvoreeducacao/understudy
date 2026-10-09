@@ -3,11 +3,14 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ComputerToServer, InputEvent } from "@understudy/protocol";
 import { log } from "@understudy/runtime";
+import { DESKTOP_APPS, INSTALL_APP } from "./apps.ts";
 
 export const DISPLAY = ":99";
 export const SCREEN = { width: 1440, height: 900 };
-export const PANEL_HEIGHT = 44;
-export const WALLPAPER = { top: "#1d2a4c", bottom: "#a8727a" };
+export const DOCK_HEIGHT = 60;
+export const DOCK_GAP = 14;
+export const PANEL_HEIGHT = DOCK_HEIGHT + DOCK_GAP;
+export const WALLPAPER = { top: "#fffaf4", bottom: "#efe4d6" };
 
 const FRAME_RATE = 5;
 const MAX_PENDING_BYTES = 4 * 1024 * 1024;
@@ -42,14 +45,9 @@ export const LIBREOFFICE_SETTINGS = `<?xml version="1.0" encoding="UTF-8"?>
 export const OPENBOX_MENU = `<?xml version="1.0" encoding="UTF-8"?>
 <openbox_menu xmlns="http://openbox.org/3.4/menu">
   <menu id="root-menu" label="Understudy">
-    <item label="Browser"><action name="Execute"><command>open-browser</command></action></item>
-    <item label="Terminal"><action name="Execute"><command>lxterminal --working-directory=HOME_DIR</command></action></item>
-    <item label="Files"><action name="Execute"><command>pcmanfm HOME_DIR/files</command></action></item>
+${DESKTOP_APPS.map((app) => `    <item label="${app.name}"><action name="Execute"><command>open-app ${app.id}</command></action></item>`).join("\n")}
     <separator/>
     <item label="Open the newest file in the outbox"><action name="Execute"><command>open-newest</command></action></item>
-    <item label="Writer"><action name="Execute"><command>libreoffice --writer</command></action></item>
-    <item label="Calc"><action name="Execute"><command>libreoffice --calc</command></action></item>
-    <item label="Impress"><action name="Execute"><command>libreoffice --impress</command></action></item>
   </menu>
 </openbox_menu>
 `;
@@ -60,9 +58,9 @@ export const OPENBOX_RC = `<?xml version="1.0" encoding="UTF-8"?>
     <name>Understudy</name>
     <titleLayout>NLIMC</titleLayout>
     <keepBorder>no</keepBorder>
-    <font place="ActiveWindow"><name>DejaVu Sans</name><size>9</size><weight>Bold</weight></font>
-    <font place="InactiveWindow"><name>DejaVu Sans</name><size>9</size></font>
-    <font place="MenuItem"><name>DejaVu Sans</name><size>10</size></font>
+    <font place="ActiveWindow"><name>Poppins</name><size>9</size><weight>Bold</weight></font>
+    <font place="InactiveWindow"><name>Poppins</name><size>9</size></font>
+    <font place="MenuItem"><name>Poppins</name><size>10</size></font>
   </theme>
   <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
   <placement><policy>Smart</policy><center>yes</center></placement>
@@ -104,142 +102,148 @@ Icon=${icon}
 Terminal=false
 `;
 
-export function desktopLaunchers(home: string): Record<string, string> {
-  return {
-    "browser.desktop": launcher("Browser", "open-browser", "google-chrome"),
-    "terminal.desktop": launcher("Terminal", `lxterminal --working-directory=${home}`, "utilities-terminal"),
-    "files.desktop": launcher("Files", `pcmanfm ${home}/files`, "system-file-manager"),
-    "writer.desktop": launcher("Writer", "libreoffice --writer", "libreoffice-writer"),
-    "calc.desktop": launcher("Calc", "libreoffice --calc", "libreoffice-calc"),
-  };
+export const DOCK_APPS = ["browser", "terminal", "files"];
+
+const quote = (arg: string) => `'${arg.replaceAll("'", "'\\''")}'`;
+
+export function openAppScript(home: string): string {
+  const cases = DESKTOP_APPS.map((app) => {
+    const run = `exec ${app.command(home).map(quote).join(" ")} "$@"`;
+    if (!app.installable) return `  ${app.id}) ${run} ;;`;
+    return `  ${app.id}) [ -x ${quote(app.installable.path(home))} ] || exec lxterminal ${quote(`--title=Installing ${app.name}`)} -e ${quote(`install-app ${app.id} --open`)}; ${run} ;;`;
+  }).join("\n");
+  return `#!/bin/sh\napp="$1"\n[ $# -gt 0 ] && shift\ncase "$app" in\n${cases}\n  *) echo "usage: open-app ${DESKTOP_APPS.map((app) => app.id).join("|")}"; exit 2 ;;\nesac\n`;
+}
+
+export function desktopLaunchers(): Record<string, string> {
+  const icons: Record<string, string> = { browser: "google-chrome", terminal: "utilities-terminal", files: "system-file-manager", writer: "libreoffice-writer", calc: "libreoffice-calc", impress: "libreoffice-impress", blender: "blender", inkscape: "inkscape", gimp: "gimp" };
+  return Object.fromEntries(DESKTOP_APPS.map((app) => [`${app.id}.desktop`, launcher(app.name, `open-app ${app.id}`, icons[app.id] ?? "application-x-executable")]));
 }
 
 export function tint2Config(home: string): string {
-  const apps = Object.keys(desktopLaunchers(home)).map((file) => `launcher_item_app = ${home}/.local/share/applications/${file}`).join("\n");
-  return `panel_items = LTC
-panel_size = 100% ${PANEL_HEIGHT}
-panel_margin = 0 0
-panel_padding = 10 6 10
+  const apps = DOCK_APPS.map((id) => `launcher_item_app = ${home}/.local/share/applications/${id}.desktop`).join("\n");
+  return `panel_items = LT
+panel_size = 100% ${DOCK_HEIGHT}
+panel_shrink = 1
+panel_margin = 0 ${DOCK_GAP}
+panel_padding = 10 8 8
 panel_background_id = 1
 panel_position = bottom center horizontal
 panel_layer = top
+panel_dock = 0
 strut_policy = follow_size
 font_shadow = 0
-rounded = 0
+disable_transparency = 0
+rounded = 18
+border_width = 1
+border_sides = TBLR
+background_color = #ffffff 78
+border_color = #e3d7c7 100
+rounded = 11
 border_width = 0
-background_color = #0c0f18 82
-border_color = #ffffff 8
-rounded = 10
-border_width = 1
-background_color = #ffffff 10
-border_color = #ffffff 14
-rounded = 10
-border_width = 1
-background_color = #ffffff 22
-border_color = #ffffff 30
-launcher_padding = 4 2 8
+background_color = #000000 0
+border_color = #000000 0
+rounded = 11
+border_width = 0
+background_color = #f1e8dc 100
+border_color = #000000 0
+launcher_padding = 2 0 8
 launcher_background_id = 0
-launcher_icon_size = 28
-launcher_icon_theme = Papirus-Dark
+launcher_icon_size = 40
+launcher_icon_theme = Papirus
 launcher_tooltip = 1
 ${apps}
 taskbar_mode = single_desktop
-taskbar_padding = 6 0 6
+taskbar_padding = 8 0 6
 taskbar_background_id = 0
 task_icon = 1
-task_text = 1
-task_centered = 0
-task_maximum_size = 200 32
-task_padding = 8 4 8
-task_font = DejaVu Sans 9
-task_font_color = #e6e6e6 80
-task_active_font_color = #ffffff 100
+task_text = 0
+task_centered = 1
+task_maximum_size = 46 46
+task_padding = 4 4 0
 task_background_id = 2
 task_active_background_id = 3
 task_iconified_background_id = 2
-time1_format = %H:%M
-time1_font = DejaVu Sans Bold 10
-clock_font_color = #ffffff 90
-clock_padding = 8 0
-clock_background_id = 0
-tooltip_font = DejaVu Sans 9
-tooltip_font_color = #e6e6e6 100
+tooltip_font = Poppins 9
+tooltip_font_color = #2b2621 100
 tooltip_background_id = 1
 `;
 }
 
-export const OPENBOX_THEME = `border.width: 0
-padding.width: 8
-padding.height: 6
+export const OPENBOX_THEME = `border.width: 1
+padding.width: 10
+padding.height: 7
 window.handle.width: 0
 window.client.padding.width: 0
 window.client.padding.height: 0
-window.active.border.color: #161a26
-window.inactive.border.color: #10131c
+window.active.border.color: #e3d7c7
+window.inactive.border.color: #ebe1d4
 window.active.title.bg: flat solid
-window.active.title.bg.color: #161a26
+window.active.title.bg.color: #f6f1ea
 window.inactive.title.bg: flat solid
-window.inactive.title.bg.color: #10131c
+window.inactive.title.bg.color: #fbf8f3
 window.active.label.bg: parentrelative
 window.inactive.label.bg: parentrelative
-window.active.label.text.color: #ffffff
-window.inactive.label.text.color: #8b8c8d
+window.active.label.text.color: #2b2621
+window.inactive.label.text.color: #a4977f
 window.label.text.justify: center
 window.active.button.unpressed.bg: parentrelative
-window.active.button.unpressed.image.color: #c9cbd1
+window.active.button.unpressed.image.color: #7a6f63
 window.inactive.button.unpressed.bg: parentrelative
-window.inactive.button.unpressed.image.color: #5f6270
+window.inactive.button.unpressed.image.color: #c9bdaa
 window.active.button.hover.bg: flat solid
-window.active.button.hover.bg.color: #2a3042
-window.active.button.hover.image.color: #ffffff
+window.active.button.hover.bg.color: #ebe1d4
+window.active.button.hover.image.color: #2b2621
 window.active.button.pressed.bg: flat solid
-window.active.button.pressed.bg.color: #3a4258
-window.active.button.pressed.image.color: #ffffff
+window.active.button.pressed.bg.color: #e3d7c7
+window.active.button.pressed.image.color: #2b2621
 window.active.button.disabled.bg: parentrelative
-window.active.button.disabled.image.color: #5f6270
+window.active.button.disabled.image.color: #c9bdaa
 window.inactive.button.hover.bg: flat solid
-window.inactive.button.hover.bg.color: #2a3042
-window.inactive.button.hover.image.color: #ffffff
+window.inactive.button.hover.bg.color: #ebe1d4
+window.inactive.button.hover.image.color: #2b2621
 window.inactive.button.pressed.bg: flat solid
-window.inactive.button.pressed.bg.color: #3a4258
-window.inactive.button.pressed.image.color: #ffffff
+window.inactive.button.pressed.bg.color: #e3d7c7
+window.inactive.button.pressed.image.color: #2b2621
 window.inactive.button.disabled.bg: parentrelative
-window.inactive.button.disabled.image.color: #5f6270
-menu.border.width: 0
+window.inactive.button.disabled.image.color: #c9bdaa
+menu.border.width: 1
+menu.border.color: #e3d7c7
 menu.overlap: 0
 menu.title.bg: flat solid
-menu.title.bg.color: #10131c
-menu.title.text.color: #ffffff
+menu.title.bg.color: #f6f1ea
+menu.title.text.color: #2b2621
 menu.title.text.justify: center
 menu.items.bg: flat solid
-menu.items.bg.color: #161a26
-menu.items.text.color: #e6e6e6
-menu.items.disabled.text.color: #5f6270
+menu.items.bg.color: #ffffff
+menu.items.text.color: #2b2621
+menu.items.disabled.text.color: #c9bdaa
 menu.items.active.bg: flat solid
-menu.items.active.bg.color: #2a3042
-menu.items.active.text.color: #ffffff
-menu.separator.color: #2a3042
-osd.border.width: 0
+menu.items.active.bg.color: #f1e8dc
+menu.items.active.text.color: #2b2621
+menu.separator.color: #ebe1d4
+osd.border.width: 1
+osd.border.color: #e3d7c7
 osd.bg: flat solid
-osd.bg.color: #161a26
+osd.bg.color: #ffffff
 osd.label.bg: parentrelative
-osd.label.text.color: #ffffff
+osd.label.text.color: #2b2621
 osd.hilight.bg: flat solid
-osd.hilight.bg.color: #3a4258
+osd.hilight.bg.color: #e3d7c7
 osd.unhilight.bg: flat solid
-osd.unhilight.bg.color: #10131c
+osd.unhilight.bg.color: #f6f1ea
 `;
 
-export const GTK2_SETTINGS = `gtk-theme-name="Adwaita-dark"
-gtk-icon-theme-name="Papirus-Dark"
-gtk-font-name="DejaVu Sans 10"
+export const GTK2_SETTINGS = `gtk-theme-name="Adwaita"
+gtk-icon-theme-name="Papirus"
+gtk-font-name="Poppins 10"
 `;
 
 export const GTK_SETTINGS = `[Settings]
-gtk-theme-name=Adwaita-dark
-gtk-icon-theme-name=Papirus-Dark
-gtk-font-name=DejaVu Sans 10
-gtk-application-prefer-dark-theme=1
+gtk-theme-name=Adwaita
+gtk-icon-theme-name=Papirus
+gtk-font-name=Poppins 10
+gtk-application-prefer-dark-theme=0
 `;
 
 export const LXTERMINAL_CONF = `[general]
@@ -351,6 +355,7 @@ export function inputSerializer(run: (args: string[]) => Promise<void>) {
 
 export type Desktop = {
   env: NodeJS.ProcessEnv;
+  appEnv: NodeJS.ProcessEnv;
   input: (event: Exclude<InputEvent, { kind: "navigate" }>) => void;
   stream: (send: (message: ComputerToServer) => boolean, pressure: () => number, url: () => string) => { start: () => void; stop: () => void };
   close: () => void;
@@ -370,11 +375,11 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
   }
   const config = join(home, ".config", "openbox");
   mkdirSync(config, { recursive: true });
-  writeFileSync(join(config, "menu.xml"), OPENBOX_MENU.replaceAll("HOME_DIR", home));
+  writeFileSync(join(config, "menu.xml"), OPENBOX_MENU);
   writeFileSync(join(config, "rc.xml"), OPENBOX_RC);
   const applications = join(home, ".local", "share", "applications");
   mkdirSync(applications, { recursive: true });
-  for (const [file, entry] of Object.entries(desktopLaunchers(home))) writeFileSync(join(applications, file), entry);
+  for (const [file, entry] of Object.entries(desktopLaunchers())) writeFileSync(join(applications, file), entry);
   const tint2 = join(home, ".config", "tint2");
   mkdirSync(tint2, { recursive: true });
   writeFileSync(join(tint2, "tint2rc"), tint2Config(home));
@@ -392,12 +397,14 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
   const bin = join(home, ".local", "bin");
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, "open-newest"), OPEN_NEWEST, { mode: 0o755 });
+  writeFileSync(join(bin, "open-app"), openAppScript(home), { mode: 0o755 });
+  writeFileSync(join(bin, "install-app"), INSTALL_APP, { mode: 0o755 });
   const office = join(home, ".config", "libreoffice", "4", "user");
   mkdirSync(office, { recursive: true });
   writeFileSync(join(office, "registrymodifications.xcu"), LIBREOFFICE_SETTINGS);
   const appEnv = desktopAppEnv(process.env, home);
   appEnv.PATH = `${bin}:${appEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`;
-  spawn("hsetroot", ["-add", WALLPAPER.top, "-add", WALLPAPER.bottom, "-gradient", "0"], { env: appEnv, stdio: "ignore" }).on("error", () => {});
+  spawn("hsetroot", ["-add", WALLPAPER.bottom, "-add", WALLPAPER.top, "-gradient", "0"], { env: appEnv, stdio: "ignore" }).on("error", () => {});
   children.push(spawn("openbox", ["--config-file", join(config, "rc.xml")], { env: appEnv, stdio: "ignore" }));
   const panel = spawn("tint2", ["-c", join(tint2, "tint2rc")], { env: appEnv, stdio: "ignore" });
   panel.on("error", () => log("desktop", "tint2 is missing; the desktop has no app bar"));
@@ -407,6 +414,7 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
 
   return {
     env,
+    appEnv,
     input(event) {
       const args = xdotoolArgs(event);
       if (!args) return;

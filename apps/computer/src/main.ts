@@ -21,6 +21,7 @@ import { turnStateFile } from "./turn-state.ts";
 import { openVault, validCredentialName } from "./vault.ts";
 import { createRecorder } from "./recorder.ts";
 import { startScreencastControl } from "./screencast.ts";
+import { startHome } from "./home.ts";
 import { log, openLink } from "@understudy/runtime";
 
 const BUILD = process.env.UNDERSTUDY_VERSION || "dev";
@@ -43,11 +44,15 @@ async function main() {
   const stateDir = join(home, ".understudy");
 
   const desktop = desktopEnabled() ? await startDesktop(home).catch(() => null) : null;
+  const homePage = desktop ? startHome(home, desktop.appEnv) : null;
   const browser = await launchBrowser(join(home, "browser-profile"), desktop?.env);
   log("main", "browser ready");
 
   let send: (message: ComputerToServer) => boolean = () => false;
-  const outbox = (message: ComputerToServer) => send(message);
+  const outbox = (message: ComputerToServer) => {
+    if (message.type === "state") homePage?.setState(message.state, message.note);
+    return send(message);
+  };
   let markReady: () => void = () => {};
   const ready = new Promise<void>((resolve) => {
     markReady = resolve;
@@ -138,7 +143,7 @@ async function main() {
     const brains = await login.status();
     const model = agent.model();
     link.send({ type: "hello", agentId, version: PROTOCOL_VERSION, build: BUILD, brains, ...(model ? { model } : {}) });
-    link.send({ type: "state", state: agent.state() });
+    outbox({ type: "state", state: agent.state() });
     memorySync.publish();
     files.publish();
     sendCredentials();
@@ -224,6 +229,9 @@ async function main() {
           const outcome = await checkPage(browser, { url: message.url, part: message.part }, readRules(rulesFile(home)));
           link.send({ type: "watch_result", watchId: message.watchId, ...outcome });
         }).catch((error) => log("watch", `check failed: ${(error as Error).message}`));
+        return;
+      case "profile":
+        homePage?.setProfile({ name: message.name, look: message.look, ...(message.ownerName ? { ownerName: message.ownerName } : {}) });
         return;
       case "set_rules":
         writeRules(rulesFile(home), message.rules);
