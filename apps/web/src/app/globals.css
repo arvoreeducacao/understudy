@@ -902,6 +902,7 @@ button.ac-figure:focus-visible { outline: 2px solid var(--sky); outline-offset: 
 .ac-run-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ac-run time { flex: none; font-size: 11.5px; color: var(--smoke); }
 .ac-out { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 12px; background: rgb(255 255 255 / .04); border: 1px solid var(--glass-edge); color: var(--mist); font-size: 12.5px; text-decoration: none; transition: background .15s; min-width: 0; }
+button.ac-out { width: 100%; text-align: left; cursor: pointer; font: inherit; font-size: 12.5px; }
 .ac-out:hover { background: rgb(255 255 255 / .08); }
 .ac-out:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
 .ac-out-kind { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff; font-size: 9.5px; font-weight: 700; background: #5b6472; }

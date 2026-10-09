@@ -54,7 +54,7 @@ function ArtifactTile({ item, onOpen }: { item: ArtifactSummary; onOpen: () => v
   );
 }
 
-function useArtifactList(agentId: string) {
+export function useArtifactList(agentId: string) {
   const [items, setItems] = useState<ArtifactSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
   const load = useCallback(() => {
