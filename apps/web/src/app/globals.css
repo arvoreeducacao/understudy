@@ -929,6 +929,7 @@ button.ac-figure:focus-visible { outline: 2px solid var(--sky); outline-offset: 
 .pc-control { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 12px; padding: 7px 7px 7px 12px; border-radius: 99px; background: rgb(16 18 26 / .88); border: 1px solid var(--line); box-shadow: 0 20px 40px -20px rgb(0 0 0 / .7); font-size: 13px; color: var(--mist); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .pc-control strong { color: #fff; font-weight: 600; }
 .pc-control .btn { padding: 6px 14px; }
+.pc-control-sep { width: 1px; height: 22px; background: var(--line); }
 .pc-you { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #8aa8ff, #e79ab0); color: #10121a; font-weight: 700; font-size: 9.5px; }
 .btn.pc-agent-btn { background: var(--agent); color: #14100c; border: 0; }
 .computer-panel.pc-frame.is-full { padding: 16px; background: var(--void); }
