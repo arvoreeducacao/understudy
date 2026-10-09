@@ -782,7 +782,7 @@ test("the desktop maps viewer input to X events and splits the screen stream int
   assert.equal(desktopEnabled({ UNDERSTUDY_DESKTOP: "0" }), false);
   assert.ok(chromiumArgs("/p").includes("--headless=new"));
   const headed = chromiumArgs("/p", true);
-  assert.ok(!headed.includes("--headless=new") && !headed.includes("--kiosk") && headed.includes("--keep-alive-for-test") && headed.includes("--window-size=1440,856") && headed.filter((arg) => arg === "about:blank").length === 1);
+  assert.ok(!headed.includes("--headless=new") && !headed.includes("--kiosk") && headed.includes("--keep-alive-for-test") && headed.includes("--window-size=1440,826") && headed.at(-1) === "http://127.0.0.1:7690/" && !headed.includes("about:blank"));
 });
 
 test("background jobs run, report output, stop, and are capped", async () => {

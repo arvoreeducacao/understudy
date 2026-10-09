@@ -1,15 +1,9 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { DESKTOP_APPS } from "./apps.ts";
 import { DISPLAY, SCREEN } from "./desktop.ts";
 
-const APPS: Record<string, string[]> = {
-  browser: ["open-browser"],
-  terminal: ["lxterminal"],
-  files: ["pcmanfm"],
-  writer: ["libreoffice", "--writer"],
-  calc: ["libreoffice", "--calc"],
-  impress: ["libreoffice", "--impress"],
-};
+const APPS: Record<string, string[]> = Object.fromEntries(DESKTOP_APPS.map((app) => [app.id, ["open-app", app.id]]));
 
 const point = { x: { type: "number", description: `0 to ${SCREEN.width - 1}, left to right` }, y: { type: "number", description: `0 to ${SCREEN.height - 1}, top to bottom` } };
 

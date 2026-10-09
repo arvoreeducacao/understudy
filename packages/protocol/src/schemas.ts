@@ -155,6 +155,12 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("credential_delete"), name: text }),
   z.object({ type: z.literal("stop") }),
   z.object({ type: z.literal("ping"), at: time }),
+  z.object({
+    type: z.literal("profile"),
+    name: z.string().max(100),
+    ownerName: z.string().max(100).optional(),
+    look: z.object({ body: z.string().max(40), color: z.string().max(20), eyes: z.string().max(40), acc: z.string().max(40).optional(), accColor: z.string().max(20).optional() }),
+  }),
 ]);
 
 export const ComputerSpecSchema = z.object({ agentId: id, token: z.string().min(1), image: text, serverUrl: z.string().min(1) });

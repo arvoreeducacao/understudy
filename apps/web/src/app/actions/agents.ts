@@ -10,6 +10,7 @@ import { effectiveModel, isModel } from "@/lib/models";
 import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
 import { cleanRules } from "@/server/rules";
+import { computerProfile } from "@/server/computer-profile";
 import { agentTabPath } from "@/lib/workspace-tabs";
 import { toolsFrom, parseLook, ownAgent } from "./shared";
 
@@ -52,6 +53,8 @@ export async function updateAgentTools(agentId: string, form: FormData) {
       updatedAt: new Date(),
     })
     .where(eq(schema.agents.id, agentId));
+  const profile = await computerProfile(agentId);
+  if (profile) getHub()?.sendToComputer(agentId, profile);
   revalidatePath(`/agents/${agentId}`, "layout");
 }
 

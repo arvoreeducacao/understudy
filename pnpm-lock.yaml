@@ -10,6 +10,9 @@ importers:
 
   apps/computer:
     dependencies:
+      '@understudy/characters':
+        specifier: workspace:*
+        version: link:../../packages/characters
       '@understudy/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

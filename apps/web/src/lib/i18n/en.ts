@@ -589,6 +589,8 @@ export const en = {
     liveLabel: (name: string) => `${name}'s computer · live`,
     takeControl: "Take control",
     releaseControl: "Give control back",
+    fullScreen: "Full screen",
+    exitFullScreen: "Exit full screen",
     inControl: "You are in control: click and type on the screen.",
     teach: "Teach a task",
     recipes: "Tasks",

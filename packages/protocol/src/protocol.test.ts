@@ -14,6 +14,8 @@ import {
 test("valid messages parse from objects, strings and bytes", () => {
   assert.deepEqual(parseServerToComputer({ type: "viewers", count: 2 }), { ok: true, message: { type: "viewers", count: 2 } });
   assert.equal(parseServerToComputer('{"type":"ping","at":1}').ok, true);
+  assert.equal(parseServerToComputer('{"type":"profile","name":"Pip","ownerName":"Ana","look":{"body":"cloud","color":"#3ECF8E","eyes":"happy","acc":"none"}}').ok, true);
+  assert.equal(parseServerToComputer(JSON.stringify({ type: "profile", name: "x".repeat(101), look: { body: "cloud", color: "#3ECF8E", eyes: "happy" } })).ok, false);
   assert.equal(parseServerToComputer(new TextEncoder().encode('{"type":"stop"}')).ok, true);
   assert.equal(parseComputerToServer({ type: "hello", agentId: "a", version: "1", brains: [{ brain: "claude", loggedIn: true }] }).ok, true);
   assert.equal(parseServerToHost({ type: "computer_ensure", spec: { agentId: "a", token: "t", image: "", serverUrl: "http://p" } }).ok, true);

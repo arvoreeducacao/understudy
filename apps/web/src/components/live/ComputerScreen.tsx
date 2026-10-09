@@ -9,7 +9,7 @@ import type { Frame } from "./useAgentSocket";
 
 const t = messages.live;
 
-const MOVE_INTERVAL_MS = 40;
+const MOVE_INTERVAL_MS = 16;
 
 export function ComputerScreen({
   subscribeFrames,

@@ -10,6 +10,7 @@ import { activeThread, relayActivity, relayAgentChat, streamDelta } from "../sla
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
+import { computerProfile } from "../computer-profile";
 
 type Handlers = {
   [K in ComputerToServer["type"]]: (hub: Hub, agentId: string, message: Extract<ComputerToServer, { type: K }>) => Promise<void> | void;
@@ -28,6 +29,8 @@ export const computerHandlers: Handlers = {
     const model = effectiveModel(agent?.model);
     if (agent && (model ?? "") !== (message.model ?? "")) hub.sendToComputer(agentId, { type: "set_model", model: model ?? "" });
     if (agent) hub.sendToComputer(agentId, { type: "set_rules", rules: agent.rules ?? [] });
+    const profile = agent ? await computerProfile(agentId) : null;
+    if (profile) hub.sendToComputer(agentId, profile);
     if (agent && !message.brains.some((b) => b.brain === agent.brain)) {
       if (agent.brain === "codex") {
         await db.update(schema.agents).set({ brain: "claude", updatedAt: new Date() }).where(eq(schema.agents.id, agentId));

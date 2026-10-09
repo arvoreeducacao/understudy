@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "playwright-core";
 import { log } from "@understudy/runtime";
 import { PANEL_HEIGHT, SCREEN } from "./desktop.ts";
+import { HOME_URL } from "./home.ts";
 
 export const CDP_PORT = 9222;
 export const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}`;
@@ -52,7 +53,7 @@ export function chromiumArgs(profileDir: string, headed = false): string[] {
     "--disable-infobars",
     "--disable-session-crashed-bubble",
     "--hide-crash-restore-bubble",
-    "about:blank",
+    HOME_URL,
   ];
 }
 

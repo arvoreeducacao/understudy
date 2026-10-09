@@ -32,7 +32,7 @@ Everything above runs locally with the scripted brain and fictional data (Northw
 
 ## What it does
 
-- **One computer per understudy.** A Linux desktop with Chromium, a terminal, LibreOffice, Python with pandas, OCR, pandoc and ffmpeg. It installs what else it needs.
+- **One computer per understudy.** A Linux desktop with a home screen that shows the agent, Chromium, a terminal, LibreOffice, Python with pandas and DuckDB, OCR, pandoc, ffmpeg, image tools and HyperFrames for video. Blender, GIMP and Inkscape install on demand. It works from the terminal first and opens apps on screen to show results. It installs what else it needs.
 - **Learns by watching.** Record a task in the understudy's browser, or from your own Chrome with the extension, narrating by voice or text. Or just describe it.
 - **Runs on its own.** Schedules, per-task webhooks and email addresses, and watching a page for changes.
 - **Asks before the irreversible.** The computer inspects the real element before every click and pauses pay, send, submit and delete-like actions for the owner. Owners add their own rules: maximum amounts, allowed email domains, blocked sites.
