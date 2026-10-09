@@ -19,7 +19,7 @@ RUN apt-get update \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       xvfb openbox xdotool x11-utils xauth \
-      tint2 lxterminal pcmanfm hsetroot papirus-icon-theme gnome-themes-extra \
+      tint2 picom lxterminal pcmanfm hsetroot papirus-icon-theme gnome-themes-extra \
       libreoffice-writer libreoffice-calc libreoffice-impress \
       python3 python3-pip python3-pandas python3-openpyxl \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-por \

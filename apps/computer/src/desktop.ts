@@ -235,6 +235,18 @@ osd.unhilight.bg: flat solid
 osd.unhilight.bg.color: #f6f1ea
 `;
 
+export const PICOM_CONF = `backend = "xrender";
+vsync = false;
+corner-radius = 12;
+shadow = true;
+shadow-radius = 18;
+shadow-opacity = 0.18;
+shadow-offset-x = -14;
+shadow-offset-y = -8;
+shadow-exclude = [ "class_g = 'Tint2'" ];
+fading = false;
+`;
+
 export const GTK2_SETTINGS = `gtk-theme-name="Adwaita"
 gtk-icon-theme-name="Papirus"
 gtk-font-name="Poppins 10"
@@ -424,6 +436,10 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
   appEnv.PATH = `${bin}:${appEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`;
   spawn("hsetroot", ["-add", WALLPAPER.bottom, "-add", WALLPAPER.top, "-gradient", "0"], { env: appEnv, stdio: "ignore" }).on("error", () => {});
   children.push(spawn("openbox", ["--config-file", join(config, "rc.xml")], { env: appEnv, stdio: "ignore" }));
+  writeFileSync(join(home, ".config", "picom.conf"), PICOM_CONF);
+  const compositor = spawn("picom", ["--config", join(home, ".config", "picom.conf")], { env: appEnv, stdio: "ignore" });
+  compositor.on("error", () => log("desktop", "picom is missing; windows have square corners"));
+  children.push(compositor);
   const panel = spawn("tint2", ["-c", join(tint2, "tint2rc")], { env: appEnv, stdio: "ignore" });
   panel.on("error", () => log("desktop", "tint2 is missing; the desktop has no app bar"));
   children.push(panel);
