@@ -1,4 +1,5 @@
-import { Maximize2, Minimize2, X } from "lucide-react";
+import { GraduationCap, Maximize2, Minimize2, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AgentState } from "@understudy/protocol";
 import { AgentFigure } from "@/components/AgentFigure";
@@ -115,6 +116,15 @@ export function ComputerPanel({
               <button type="button" className="btn pri" onClick={() => setControlling(true)}>
                 {a.takeOver}
               </button>
+              {!full && (
+                <>
+                  <span className="pc-control-sep" aria-hidden />
+                  <Link href={`/agents/${agent.id}/teach`} className="btn sec">
+                    <GraduationCap size={14} aria-hidden />
+                    {t.teach}
+                  </Link>
+                </>
+              )}
             </>
           )}
         </div>
