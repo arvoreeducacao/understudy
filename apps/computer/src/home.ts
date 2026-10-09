@@ -53,6 +53,10 @@ export function statusLine(state: AgentState, note?: string): string {
   return state === "working" && detail ? `${base} · ${detail}` : base;
 }
 
+export function greeting(profile: Profile): string {
+  return profile.ownerName ? `Welcome back, ${profile.ownerName}` : "Welcome back";
+}
+
 export function homeFigure(profile: Profile, state: AgentState): string {
   const look = profile.look;
   return figure({ shape: look.body, color: look.color, face: FACE_FOR_STATE[state] ?? look.eyes, acc: look.acc ?? "none", accColor: look.accColor }, "home");
@@ -72,7 +76,6 @@ const DOODLES = [
 ];
 
 export function renderHome(profile: Profile, state: AgentState, note: string | undefined, home: string, exists: (path: string) => boolean = existsSync): string {
-  const owner = profile.ownerName ? `, ${escapeHtml(profile.ownerName)}` : "";
   const title = profile.name ? escapeHtml(profile.name) : "Understudy";
   const doodles = DOODLES.map((doodle) => `<svg class="doodle" style="left:${doodle.x}%;top:${doodle.y}%" viewBox="0 0 40 40"><path d="${doodle.d}"/></svg>`).join("");
   const apps = DESKTOP_APPS.map((app) => {
@@ -118,7 +121,7 @@ ${doodles}
 <div class="bubble" id="bubble">This is my computer. Watch me work, or take control when you need to.<button id="hide" aria-label="Hide">×</button></div>
 <div class="char" id="char">${homeFigure(profile, state)}</div>
 <div class="clock" id="clock"></div>
-<div class="hello">Welcome back${owner}</div>
+<div class="hello" id="hello">${escapeHtml(greeting(profile))}</div>
 <div class="grid">${apps}</div>
 </main>
 <script>
@@ -148,6 +151,8 @@ async function poll() {
     const status = await response.json();
     document.getElementById("status").textContent = status.line;
     document.getElementById("dot").style.background = status.dot;
+    document.getElementById("hello").textContent = status.hello;
+    document.title = status.title;
     if (status.figure !== last) {
       last = status.figure;
       document.getElementById("char").innerHTML = status.figure;
@@ -188,7 +193,7 @@ export function startHome(home: string, appEnv: NodeJS.ProcessEnv): HomePage {
     const path = (request.url ?? "/").split("?")[0];
     if (request.method === "GET" && path === "/") return reply(response, 200, "text/html; charset=utf-8", renderHome(profile, state, note, home));
     if (request.method === "GET" && path === "/status") {
-      return reply(response, 200, "application/json", JSON.stringify({ line: statusLine(state, note), dot: DOT[state] ?? DOT.calm, figure: homeFigure(profile, state) }));
+      return reply(response, 200, "application/json", JSON.stringify({ line: statusLine(state, note), dot: DOT[state] ?? DOT.calm, figure: homeFigure(profile, state), hello: greeting(profile), title: profile.name || "Understudy" }));
     }
     const launch = path.match(/^\/launch\/([a-z]+)$/);
     if (launch) {

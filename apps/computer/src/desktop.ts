@@ -124,7 +124,20 @@ export function desktopLaunchers(): Record<string, string> {
 
 export function tint2Config(home: string): string {
   const apps = DOCK_APPS.map((id) => `launcher_item_app = ${home}/.local/share/applications/${id}.desktop`).join("\n");
-  return `panel_items = LT
+  return `rounded = 18
+border_width = 1
+border_sides = TBLR
+background_color = #ffffff 100
+border_color = #e3d7c7 100
+rounded = 11
+border_width = 0
+background_color = #000000 0
+border_color = #000000 0
+rounded = 11
+border_width = 0
+background_color = #f1e8dc 100
+border_color = #000000 0
+panel_items = LT
 panel_size = 100% ${DOCK_HEIGHT}
 panel_shrink = 1
 panel_margin = 0 ${DOCK_GAP}
@@ -135,20 +148,6 @@ panel_layer = top
 panel_dock = 0
 strut_policy = follow_size
 font_shadow = 0
-disable_transparency = 0
-rounded = 18
-border_width = 1
-border_sides = TBLR
-background_color = #ffffff 78
-border_color = #e3d7c7 100
-rounded = 11
-border_width = 0
-background_color = #000000 0
-border_color = #000000 0
-rounded = 11
-border_width = 0
-background_color = #f1e8dc 100
-border_color = #000000 0
 launcher_padding = 2 0 8
 launcher_background_id = 0
 launcher_icon_size = 40

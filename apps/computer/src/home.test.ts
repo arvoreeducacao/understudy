@@ -68,6 +68,8 @@ test("the home server serves the page and opens an app through open-app", async 
     assert.match(index.body, /Welcome back, &lt;Ana&gt;/);
     const status = JSON.parse((await call("GET", "/status")).body);
     assert.equal(status.line, "Working · making slides");
+    assert.equal(status.hello, "Welcome back, <Ana>");
+    assert.equal(status.title, "Pip");
     assert.equal((await call("POST", "/launch/terminal")).status, 403);
     assert.equal((await call("POST", "/launch/terminal", { host: "evil.example" })).status, 421);
     assert.equal((await call("POST", "/launch/nope", { "x-understudy-home": "1" })).status, 403);
@@ -117,6 +119,7 @@ test("install-app refuses unknown apps and pins every download to a checksum", (
 test("the dock floats, holds the everyday apps and the menu reaches every app", () => {
   const config = tint2Config("/home/agent");
   assert.match(config, /panel_shrink = 1/);
+  assert.ok(config.indexOf("background_color") < config.indexOf("panel_background_id"));
   assert.equal(config.match(/launcher_item_app/g)?.length, DOCK_APPS.length);
   for (const app of DESKTOP_APPS) assert.match(OPENBOX_MENU, new RegExp(`open-app ${app.id}<`));
 });
