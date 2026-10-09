@@ -78,6 +78,7 @@ export function openLink<In, Out>(options: LinkOptions<In>): Link<Out> {
 
     current.on("unexpected-response", (_request, response) => {
       log("link", `server refused the socket with HTTP ${response.statusCode}`);
+      current.terminate();
     });
 
     current.on("error", (error) => {
