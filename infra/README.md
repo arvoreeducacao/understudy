@@ -82,6 +82,8 @@ This repository only publishes images. `.github/workflows/publish.yml` runs the 
 
 Deploying is done from a private repository of your own, so your account, cluster and secrets never appear in public logs. Copy `infra/github/deploy.yml` to `.github/workflows/deploy.yml` in that repository and run `aws/05-github.sh` with `GITHUB_REPO` pointing at it. Every ten minutes, or on demand, the workflow finds the latest published commit, copies the three images to your ECR, restarts the host with `host/deploy.sh`, rolls the panel out with `k8s/apply.sh` and marks the web image `deployed`, so a commit is deployed once. A manual run can deploy a given commit, or force the current one again.
 
+GitHub can delay scheduled runs for a long time or skip them, so the schedule is only a fallback. To deploy as soon as images are published, set the repository variable `DEPLOY_REPO` (`owner/name` of your deploy repository, and `DEPLOY_WORKFLOW` if its file is not `deploy.yml`) and the secret `DEPLOY_DISPATCH_TOKEN` on the source repository. The token needs only `Actions: write` on the deploy repository: a fine-grained personal access token limited to that repository, or a GitHub App installation token. The publish workflow runs only on pushes to `main`, so pull requests from forks never see it. Without `DEPLOY_REPO`, the step is skipped.
+
 ## Reach the VM
 
 ```

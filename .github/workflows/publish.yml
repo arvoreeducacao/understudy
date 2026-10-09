@@ -114,3 +114,21 @@ jobs:
             done
             docker buildx imagetools create -t "${base}:${SHA}" -t "${base}:main" -t "${base}:latest" ${sources}
           done
+
+  deploy:
+    needs: publish
+    if: vars.DEPLOY_REPO != ''
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+          DEPLOY_REPO: ${{ vars.DEPLOY_REPO }}
+          DEPLOY_WORKFLOW: ${{ vars.DEPLOY_WORKFLOW || 'deploy.yml' }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DEPLOY_REPO is set but the DEPLOY_DISPATCH_TOKEN secret is missing, so nothing was deployed"
+            exit 0
+          fi
+          gh workflow run "$DEPLOY_WORKFLOW" -R "$DEPLOY_REPO" -f tag="$SHA"
+          echo "::notice::asked $DEPLOY_REPO to deploy $SHA"
