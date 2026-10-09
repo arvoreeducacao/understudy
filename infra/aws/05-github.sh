@@ -41,7 +41,7 @@ policy=$(cat <<JSON
     {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
     {
       "Effect": "Allow",
-      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage"],
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:DescribeImages", "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage"],
       "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-*"
     },
     {"Effect": "Allow", "Action": ["sts:AssumeRole", "sts:TagSession"], "Resource": "${EKS_DEPLOY_ROLE_ARN}"},
@@ -66,6 +66,8 @@ for name in NAME_PREFIX AWS_REGION EKS_CLUSTER K8S_NAMESPACE PUBLIC_HOST ALB_GRO
   gh variable set "$name" -R "$GITHUB_REPO" --body "${!name}"
 done
 gh variable set ECR_REGISTRY -R "$GITHUB_REPO" --body "$(ecr_registry)"
+gh variable set SOURCE_REPO -R "$GITHUB_REPO" --body "${SOURCE_REPO:-arvoreeducacao/understudy}"
+gh variable set IMAGE_SOURCE -R "$GITHUB_REPO" --body "${IMAGE_SOURCE:-ghcr.io/arvoreeducacao}"
 gh secret set CERTIFICATE_ARN -R "$GITHUB_REPO" --body "$CERTIFICATE_ARN"
 gh secret set AWS_DEPLOY_ROLE -R "$GITHUB_REPO" --body "$role_arn"
 gh secret set AWS_EKS_ROLE -R "$GITHUB_REPO" --body "$EKS_DEPLOY_ROLE_ARN"

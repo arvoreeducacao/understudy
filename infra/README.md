@@ -24,7 +24,8 @@ Copy `config.example.env` to `config.env` (gitignored) and fill it in. Every scr
 |---|---|
 | `NAME_PREFIX` | Prefix of every resource name and value of the `Project` tag |
 | `AWS_REGION`, `AWS_ACCOUNT_ID` | Where everything lives |
-| `GITHUB_REPO`, `DEPLOY_BRANCHES` | Repository and branches allowed to deploy through GitHub OIDC |
+| `GITHUB_REPO`, `DEPLOY_BRANCHES` | Your private deploy repository and the branches allowed to deploy through GitHub OIDC |
+| `SOURCE_REPO`, `IMAGE_SOURCE` | Where the code and the published images come from; default `arvoreeducacao/understudy` and `ghcr.io/arvoreeducacao` |
 | `PUBLIC_HOST` | Panel hostname; the panel URL is `https://$PUBLIC_HOST` |
 | `CERTIFICATE_ARN` | ACM certificate that covers `PUBLIC_HOST` |
 | `ALB_GROUP` | Ingress group of the ALB; use a dedicated one, the idle timeout is ALB-wide |
@@ -68,7 +69,7 @@ Every script is idempotent: it finds what already exists by name and tag and cre
 | `aws/03-host.sh` | Instance role (SSM, pull from the three registries, read `/<prefix>/host/*`), Ubuntu 24.04 VM with Docker (`host-user-data.sh`) |
 | `aws/04-rds.sh` | Postgres 16, encrypted, private, password kept by RDS in Secrets Manager, reachable only from `EKS_NODE_SG` |
 | `aws/06-inbound-email.sh` | SES receiving for `INBOUND_EMAIL_DOMAIN`: encrypted S3 bucket with `INBOUND_EMAIL_RETENTION_DAYS` expiry, SNS topic subscribed to the panel, receipt rule set, MX and DKIM records (created in Cloudflare when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_NAME` are set, printed otherwise), and the `<prefix>-web` role the panel's service account assumes to read mail. Run it again after the panel is deployed so the SNS subscription is confirmed |
-| `aws/05-github.sh` | `github-actions-<prefix>-deploy` role and the repository variables and secrets the workflow reads |
+| `aws/05-github.sh` | `github-actions-<prefix>-deploy` role and the variables and secrets the deploy workflow reads, set on your private deploy repository |
 | `k8s/apply.sh` | Namespace, deploy role, ConfigMap with the RDS CA bundle (the panel verifies the database certificate), Service, Ingress, and a placeholder that answers `/api/health` until the first web image; with `IMAGE` set it deploys the web image and removes the placeholder |
 | `k8s/secret.sh` | Secret `<prefix>-env` (database URL, random auth secret and host token, public URL, email rules); copies the host token to SSM `/<prefix>/host/token` |
 | `host/deploy.sh [tag]` | Through SSM: pulls the computer and host images on the VM and (re)starts the host container with the Docker socket |
@@ -77,7 +78,9 @@ Random values are kept across runs: `k8s/secret.sh` reuses what the Secret alrea
 
 ## Continuous deployment
 
-`.github/workflows/deploy.yml` builds `apps/web`, `apps/computer` and `apps/host` on every push to the deploy branches, pushes them tagged with the commit, the branch and `latest`, rolls the panel out with `k8s/apply.sh` and restarts the host with `host/deploy.sh`. An app without a Dockerfile is skipped. The web image is built for `NODE_ARCH`; computer and host for `linux/amd64`.
+This repository only publishes images. `.github/workflows/publish.yml` runs the tests, builds `apps/web` (amd64 and arm64), `apps/computer` and `apps/host` (amd64) on every push to `main` and publishes them as `ghcr.io/arvoreeducacao/understudy-<app>`, tagged with the commit, `main` and `latest`. Nothing here holds cloud credentials.
+
+Deploying is done from a private repository of your own, so your account, cluster and secrets never appear in public logs. Copy `infra/github/deploy.yml` to `.github/workflows/deploy.yml` in that repository and run `aws/05-github.sh` with `GITHUB_REPO` pointing at it. Every ten minutes, or on demand, the workflow finds the latest published commit, copies the three images to your ECR, restarts the host with `host/deploy.sh`, rolls the panel out with `k8s/apply.sh` and marks the web image `deployed`, so a commit is deployed once. A manual run can deploy a given commit, or force the current one again.
 
 ## Reach the VM
 
