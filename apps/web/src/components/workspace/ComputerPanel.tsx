@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { useState } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentState } from "@understudy/protocol";
 import { ComputerScreen } from "@/components/live/ComputerScreen";
 import type { AgentLink, Frame } from "@/components/live/useAgentSocket";
@@ -24,6 +25,19 @@ export function ComputerPanel({
 }) {
   const { live, send } = link;
   const [controlling, setControlling] = useState(false);
+  const [full, setFull] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setFull(document.fullscreenElement === panelRef.current && panelRef.current !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  function toggleFull() {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void panelRef.current?.requestFullscreen?.().catch(() => {});
+  }
 
   const statusText = live.online
     ? `${messages.states[state]}${live.note ? ` · ${live.note}` : ""}`
@@ -32,7 +46,7 @@ export function ComputerPanel({
       : t.offline;
 
   return (
-    <div className="flex flex-col gap-2.5 h-full min-h-0">
+    <div ref={panelRef} className={`computer-panel flex flex-col gap-2.5 h-full min-h-0 ${full ? "is-full" : ""}`}>
       <div className="flex items-center gap-2.5 text-[12.5px] text-ash flex-wrap">
         <span className={`pill ${live.online ? STATE_PILL[state] : ""}`}>
           <span className="dot" />
@@ -50,11 +64,14 @@ export function ComputerPanel({
               {controlling ? t.releaseControl : t.takeControl}
             </button>
           )}
-          {owner && (
+          {owner && !full && (
             <Link href={`/agents/${agent.id}/teach`} className="btn sec">
               {t.teach}
             </Link>
           )}
+          <button type="button" className="btn sec icon-only" onClick={toggleFull} aria-label={full ? t.exitFullScreen : t.fullScreen} title={full ? t.exitFullScreen : t.fullScreen}>
+            {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
+          </button>
         </div>
       </div>
       {controlling && <div className="text-coral text-[12px]">{t.inControl}</div>}

@@ -13,6 +13,8 @@ export const PANEL_HEIGHT = DOCK_HEIGHT + DOCK_GAP;
 export const WALLPAPER = { top: "#fffaf4", bottom: "#efe4d6" };
 
 const FRAME_RATE = 5;
+export const INTERACTIVE_FRAME_RATE = 15;
+export const INTERACTIVE_WINDOW_MS = 4000;
 const MAX_PENDING_BYTES = 4 * 1024 * 1024;
 
 export function desktopEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -353,6 +355,23 @@ export function inputSerializer(run: (args: string[]) => Promise<void>) {
     });
 }
 
+export function frameGate(now: () => number = Date.now) {
+  let lastInput = Number.NEGATIVE_INFINITY;
+  let lastSent = Number.NEGATIVE_INFINITY;
+  return {
+    touched() {
+      lastInput = now();
+    },
+    shouldSend() {
+      const at = now();
+      const interactive = at - lastInput < INTERACTIVE_WINDOW_MS;
+      if (!interactive && at - lastSent < 1000 / FRAME_RATE - 5) return false;
+      lastSent = at;
+      return true;
+    },
+  };
+}
+
 export type Desktop = {
   env: NodeJS.ProcessEnv;
   appEnv: NodeJS.ProcessEnv;
@@ -411,6 +430,7 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
   children.push(panel);
   log("desktop", `desktop on ${DISPLAY}`);
   const enqueue = inputSerializer((args) => runXdotool(args, env));
+  const gate = frameGate();
 
   return {
     env,
@@ -418,6 +438,7 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
     input(event) {
       const args = xdotoolArgs(event);
       if (!args) return;
+      gate.touched();
       void enqueue(args);
     },
     stream(send, pressure, url) {
@@ -427,7 +448,7 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
           if (ffmpeg) return;
           const started = spawn(
             "ffmpeg",
-            ["-loglevel", "error", "-f", "x11grab", "-draw_mouse", "1", "-framerate", String(FRAME_RATE), "-video_size", `${SCREEN.width}x${SCREEN.height}`, "-i", DISPLAY, "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"],
+            ["-loglevel", "error", "-f", "x11grab", "-draw_mouse", "1", "-framerate", String(INTERACTIVE_FRAME_RATE), "-video_size", `${SCREEN.width}x${SCREEN.height}`, "-i", DISPLAY, "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"],
             { env, stdio: ["ignore", "pipe", "ignore"] },
           );
           ffmpeg = started;
@@ -437,7 +458,7 @@ export async function startDesktop(home: string): Promise<Desktop | null> {
             const { frames, rest } = splitJpegs(buffer);
             buffer = rest.length > 8 * 1024 * 1024 ? Buffer.alloc(0) : rest;
             const latest = frames.at(-1);
-            if (!latest || pressure() > MAX_PENDING_BYTES) return;
+            if (!latest || pressure() > MAX_PENDING_BYTES || !gate.shouldSend()) return;
             send({ type: "frame", jpegBase64: latest.toString("base64"), width: SCREEN.width, height: SCREEN.height, url: url(), desktop: true });
           });
           started.on("exit", () => {

@@ -589,6 +589,8 @@ export const ptBR: Messages = {
     liveLabel: (name: string) => `Computador de ${name} · ao vivo`,
     takeControl: "Assumir o controle",
     releaseControl: "Devolver o controle",
+    fullScreen: "Tela cheia",
+    exitFullScreen: "Sair da tela cheia",
     inControl: "Você está no controle: clique e digite na tela.",
     teach: "Ensinar uma tarefa",
     recipes: "Receitas",

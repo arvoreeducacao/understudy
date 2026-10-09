@@ -120,3 +120,19 @@ test("the dock floats, holds the everyday apps and the menu reaches every app", 
   assert.equal(config.match(/launcher_item_app/g)?.length, DOCK_APPS.length);
   for (const app of DESKTOP_APPS) assert.match(OPENBOX_MENU, new RegExp(`open-app ${app.id}<`));
 });
+
+test("the screen speeds up while someone is using the mouse and calms down after", async () => {
+  const { frameGate, INTERACTIVE_WINDOW_MS } = await import("./desktop.ts");
+  let clock = 0;
+  const gate = frameGate(() => clock);
+  const sentOver = (ms: number) => {
+    let sent = 0;
+    for (const end = clock + ms; clock < end; clock += 1000 / 15) if (gate.shouldSend()) sent++;
+    return sent;
+  };
+  assert.ok(sentOver(1000) <= 6);
+  gate.touched();
+  assert.ok(sentOver(1000) >= 14);
+  clock += INTERACTIVE_WINDOW_MS;
+  assert.ok(sentOver(1000) <= 6);
+});
