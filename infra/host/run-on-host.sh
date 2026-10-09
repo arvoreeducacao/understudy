@@ -14,6 +14,8 @@ token=$(aws ssm get-parameter --region "$region" --name "/${prefix}/host/token" 
 docker pull "$computer_image"
 docker pull "$host_image"
 docker tag "$computer_image" "$computer_latest"
+capacity=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${prefix}-host" 2>/dev/null | sed -n 's/^UNDERSTUDY_HOST_CAPACITY=//p' || true)
+capacity="${7:-$capacity}"
 docker rm -f "${prefix}-host" >/dev/null 2>&1 || true
 docker run -d \
   --name "${prefix}-host" \
@@ -23,6 +25,7 @@ docker run -d \
   -e UNDERSTUDY_SERVER_URL="$server_url" \
   -e UNDERSTUDY_COMPUTER_IMAGE="$computer_latest" \
   -e UNDERSTUDY_HOST_ID="$host_id" \
+  -e UNDERSTUDY_HOST_CAPACITY="$capacity" \
   "$host_image" >/dev/null
 docker image prune -f >/dev/null
 docker ps --filter "name=${prefix}-host" --format '{{.Names}} {{.Image}} {{.Status}}'
