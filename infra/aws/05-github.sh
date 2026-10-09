@@ -62,10 +62,11 @@ fi
 aws iam put-role-policy --role-name "$DEPLOY_ROLE" --policy-name "${NAME_PREFIX}-deploy" --policy-document "$policy"
 role_arn=$(aws iam get-role --role-name "$DEPLOY_ROLE" --query Role.Arn --output text)
 
-for name in NAME_PREFIX AWS_REGION EKS_CLUSTER K8S_NAMESPACE PUBLIC_HOST ALB_GROUP NODE_ARCH; do
+for name in NAME_PREFIX AWS_REGION K8S_NAMESPACE PUBLIC_HOST ALB_GROUP NODE_ARCH; do
   gh variable set "$name" -R "$GITHUB_REPO" --body "${!name}"
 done
-gh variable set ECR_REGISTRY -R "$GITHUB_REPO" --body "$(ecr_registry)"
+gh secret set ECR_REGISTRY -R "$GITHUB_REPO" --body "$(ecr_registry)"
+gh secret set EKS_CLUSTER -R "$GITHUB_REPO" --body "$EKS_CLUSTER"
 gh secret set CERTIFICATE_ARN -R "$GITHUB_REPO" --body "$CERTIFICATE_ARN"
 gh secret set AWS_DEPLOY_ROLE -R "$GITHUB_REPO" --body "$role_arn"
 gh secret set AWS_EKS_ROLE -R "$GITHUB_REPO" --body "$EKS_DEPLOY_ROLE_ARN"

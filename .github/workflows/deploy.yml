@@ -60,6 +60,10 @@ jobs:
             runner: ubuntu-latest
     runs-on: ${{ matrix.runner }}
     steps:
+      - env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: echo "::add-mask::${ECR_REGISTRY%%.*}"
+
       - uses: actions/checkout@v4
 
       - id: check
@@ -93,9 +97,9 @@ jobs:
             UNDERSTUDY_VERSION=${{ github.sha }}
           push: true
           tags: |
-            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.sha }}
-            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.ref_name }}
-            ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:latest
+            ${{ secrets.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.sha }}
+            ${{ secrets.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:${{ github.ref_name }}
+            ${{ secrets.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-${{ matrix.app }}:latest
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 
@@ -104,6 +108,10 @@ jobs:
     if: vars.NAME_PREFIX != ''
     runs-on: ubuntu-latest
     steps:
+      - env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: echo "::add-mask::${ECR_REGISTRY%%.*}"
+
       - uses: actions/checkout@v4
 
       - id: check
@@ -133,9 +141,9 @@ jobs:
           ALB_GROUP: ${{ vars.ALB_GROUP }}
           NODE_ARCH: ${{ vars.NODE_ARCH }}
           CERTIFICATE_ARN: ${{ secrets.CERTIFICATE_ARN }}
-          IMAGE: ${{ vars.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-web:${{ github.sha }}
+          IMAGE: ${{ secrets.ECR_REGISTRY }}/${{ vars.NAME_PREFIX }}-web:${{ github.sha }}
         run: |
-          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region "${{ vars.AWS_REGION }}"
+          aws eks update-kubeconfig --name "${{ secrets.EKS_CLUSTER }}" --region "${{ vars.AWS_REGION }}"
           bash infra/k8s/apply.sh
 
   deploy-host:
@@ -143,6 +151,10 @@ jobs:
     if: vars.NAME_PREFIX != ''
     runs-on: ubuntu-latest
     steps:
+      - env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: echo "::add-mask::${ECR_REGISTRY%%.*}"
+
       - uses: actions/checkout@v4
 
       - id: check
@@ -160,5 +172,5 @@ jobs:
           NAME_PREFIX: ${{ vars.NAME_PREFIX }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
-          ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: bash infra/host/deploy.sh "${{ github.sha }}"
