@@ -11,6 +11,7 @@ if (url) process.env.DATABASE_URL = url;
 process.env.BETTER_AUTH_SECRET ??= "test-secret-test-secret-test-secret";
 process.env.UNDERSTUDY_PUBLIC_URL = "http://localhost:3997";
 process.env.UNDERSTUDY_ARTIFACT_MAX_BYTES = String(1024 * 1024);
+process.env.UNDERSTUDY_ARTIFACT_AGENT_MAX_BYTES = String(3 * 1024 * 1024);
 delete process.env.UNDERSTUDY_ARTIFACT_S3_BUCKET;
 
 const agentId = "agt_artifacts_a";
@@ -188,10 +189,10 @@ test("an edit request puts the exact version back on the computer and names it",
   const result = await publishArtifact(hub as never, agentId, { path: "outbox/page.html", title: "Landing page" });
   assert.ok(result.ok);
   if (!result.ok) return;
-  const prepared = await prepareEdit(hub as never, agentId, { artifactId: result.artifactId, version: 1, quote: "  v1 ", page: 9 });
+  const prepared = await prepareEdit(hub as never, agentId, { artifactId: result.artifactId, version: 1, quote: "  v1 \n\n ok ", page: 9 });
   assert.ok(prepared);
   assert.equal(prepared!.path, `inbox/artifacts/${result.artifactId}/v1/page.html`);
-  assert.deepEqual(prepared!.card.edit, { quote: "v1" });
+  assert.deepEqual(prepared!.card.edit, { quote: "v1 ok" });
   const put = hub.sent.find((m) => m.type === "file_put");
   assert.ok(put && put.type === "file_put");
   assert.equal(put.path, `artifacts/${result.artifactId}/v1/page.html`);
@@ -232,7 +233,7 @@ test("the owner's chat edit reaches the computer as a structured request", { ski
   assert.equal(refused.length, 3);
 });
 
-test("a public link shows only the newest version until it is revoked or expires", { skip }, async () => {
+test("a public link shows only the version that was shared until it is revoked or expires", { skip }, async () => {
   const { publishArtifact, createShareLink, sharedArtifact, revokeShareLinks, activeShareLinks } = await import("./service");
   const { getDb, schema } = await import("@/lib/db");
   disk.set("outbox/chart.svg", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'));
@@ -242,8 +243,9 @@ test("a public link shows only the newest version until it is revoked or expires
   if (!first.ok) return;
   await publishArtifact(hub as never, agentId, { path: "outbox/chart.svg", title: "Answers by week", artifactId: first.artifactId });
   const [owner] = await getDb().select().from(schema.user).where(like(schema.user.email, "owner@artifacts.test"));
-  assert.equal(await createShareLink(otherAgentId, first.artifactId, owner.id), null);
-  const link = await createShareLink(agentId, first.artifactId, owner.id);
+  assert.equal(await createShareLink(otherAgentId, first.artifactId, 2, owner.id), null);
+  assert.equal(await createShareLink(agentId, first.artifactId, 9, owner.id), null);
+  const link = await createShareLink(agentId, first.artifactId, 2, owner.id);
   assert.ok(link);
   assert.match(link!.url, /^http:\/\/localhost:3997\/shared\/[A-Za-z0-9_-]{32}$/);
   const token = link!.url.split("/").pop()!;
@@ -254,7 +256,13 @@ test("a public link shows only the newest version until it is revoked or expires
   assert.ok(shared);
   assert.equal(shared!.agentName, "Maker");
   assert.equal(shared!.agentId, "");
+  assert.equal(shared!.id, "");
   assert.deepEqual(shared!.versions.map((v) => v.version), [2]);
+  disk.set("outbox/chart.svg", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><text>private notes</text></svg>'));
+  await publishArtifact(hub as never, agentId, { path: "outbox/chart.svg", title: "Answers by week", artifactId: first.artifactId });
+  const afterNewVersion = await sharedArtifact(token);
+  assert.equal(afterNewVersion!.version.version, 2);
+  assert.doesNotMatch(await (await fetch(`${base}${pathOf(afterNewVersion!.contentUrl)}`)).text(), /private notes/);
   const svg = await fetch(`${base}${pathOf(shared!.contentUrl)}`);
   assert.equal(svg.headers.get("content-type"), "image/svg+xml");
   assert.match(svg.headers.get("content-security-policy") ?? "", /sandbox$/);
@@ -264,6 +272,16 @@ test("a public link shows only the newest version until it is revoked or expires
   assert.equal(await revokeShareLinks(agentId, first.artifactId), 1);
   assert.equal(await sharedArtifact(token), null);
   assert.equal(await sharedArtifact("not-a-token"), null);
+});
+
+test("an understudy cannot publish past its storage quota", { skip }, async () => {
+  const { publishArtifact } = await import("./service");
+  const hub = fakeHub();
+  disk.set("outbox/big.html", Buffer.alloc(900 * 1024, 65));
+  const results = [];
+  for (let i = 0; i < 4; i++) results.push(await publishArtifact(hub as never, otherAgentId, { path: "outbox/big.html", title: `Big ${i}` }));
+  assert.equal(results.filter((r) => r.ok).length, 3);
+  assert.match(results.at(-1)!.ok ? "" : (results.at(-1) as { error: string }).error, /already use/);
 });
 
 test("deleting an agent's artifacts removes their stored bytes", { skip }, async () => {

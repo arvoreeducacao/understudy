@@ -1,5 +1,5 @@
 {
-  "id": "c96a34cc-0b9d-4cbd-8a10-9cd2b5c6d17f",
+  "id": "4925697a-4076-453a-b694-f9e0b04b778c",
   "prevId": "ab0240c7-0123-4ee4-a0a4-a67231bd16a4",
   "version": "7",
   "dialect": "postgresql",
@@ -832,6 +832,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "token_hash": {
           "name": "token_hash",
           "type": "text",
@@ -949,6 +955,12 @@
         "version": {
           "name": "version",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },

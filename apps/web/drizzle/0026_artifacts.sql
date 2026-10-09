@@ -8,6 +8,7 @@ CREATE TABLE "artifact_blobs" (
 CREATE TABLE "artifact_links" (
 	"id" text PRIMARY KEY NOT NULL,
 	"artifact_id" text NOT NULL,
+	"version" integer NOT NULL,
 	"token_hash" text NOT NULL,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -19,6 +20,7 @@ CREATE TABLE "artifact_versions" (
 	"id" text PRIMARY KEY NOT NULL,
 	"artifact_id" text NOT NULL,
 	"version" integer NOT NULL,
+	"kind" text NOT NULL,
 	"note" text DEFAULT '' NOT NULL,
 	"name" text NOT NULL,
 	"source_path" text,

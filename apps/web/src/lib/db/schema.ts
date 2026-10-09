@@ -589,6 +589,7 @@ export const artifactVersions = pgTable(
       .notNull()
       .references(() => artifacts.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
+    kind: text("kind").$type<ArtifactKind>().notNull(),
     note: text("note").notNull().default(""),
     name: text("name").notNull(),
     sourcePath: text("source_path"),
@@ -614,6 +615,7 @@ export const artifactLinks = pgTable(
     artifactId: text("artifact_id")
       .notNull()
       .references(() => artifacts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
     tokenHash: text("token_hash").notNull(),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

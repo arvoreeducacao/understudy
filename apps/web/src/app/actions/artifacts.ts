@@ -44,10 +44,11 @@ export async function artifactLinks(agentId: string, artifactId: string) {
   return activeShareLinks(agentId, artifactId);
 }
 
-export async function shareArtifact(agentId: string, artifactId: string): Promise<ShareLink> {
+export async function shareArtifact(agentId: string, artifactId: string, version: number): Promise<ShareLink> {
   const { user } = await ownAgent(agentId);
   checkId(artifactId);
-  const link = await createShareLink(agentId, artifactId, user.id);
+  if (!Number.isInteger(version) || version < 1) throw new Error(messages.common.notFound);
+  const link = await createShareLink(agentId, artifactId, version, user.id);
   if (!link) throw new Error(messages.common.notFound);
   return link;
 }

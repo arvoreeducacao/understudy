@@ -57,6 +57,10 @@ export const env = {
     const n = Number(process.env.UNDERSTUDY_ARTIFACT_MAX_BYTES);
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : ARTIFACT_MAX_BYTES;
   },
+  get artifactAgentMaxBytes() {
+    const n = Number(process.env.UNDERSTUDY_ARTIFACT_AGENT_MAX_BYTES);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1024 * 1024 * 1024;
+  },
   get artifactBucket() {
     const bucket = process.env.UNDERSTUDY_ARTIFACT_S3_BUCKET?.trim();
     if (!bucket) return null;

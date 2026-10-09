@@ -103,13 +103,13 @@ function VersionMenu({ view, onSelect }: { view: ArtifactView; onSelect: (versio
   );
 }
 
-function SharePanel({ agentId, artifactId, onClose }: { agentId: string; artifactId: string; onClose: () => void }) {
-  const [state, setState] = useState<{ url?: string; until?: string; note?: string; busy?: boolean }>({});
+function SharePanel({ agentId, artifactId, version, onClose }: { agentId: string; artifactId: string; version: number; onClose: () => void }) {
+  const [state, setState] = useState<{ url?: string; until?: string; shared?: number[]; note?: string; busy?: boolean }>({});
   useEffect(() => {
     let alive = true;
     artifactLinks(agentId, artifactId)
       .then((links) => {
-        if (alive && links.length) setState((s) => ({ ...s, until: links.map((l) => l.expiresAt).sort().at(-1) }));
+        if (alive && links.length) setState((s) => ({ ...s, until: links.map((l) => l.expiresAt).sort().at(-1), shared: [...new Set(links.map((l) => l.version))].sort((a, b) => a - b) }));
       })
       .catch(() => {});
     return () => {
@@ -130,8 +130,12 @@ function SharePanel({ agentId, artifactId, onClose }: { agentId: string; artifac
           <X size={15} aria-hidden />
         </button>
       </div>
-      <p className="art-pop-body">{t.shareBody}</p>
-      {state.until && !state.url && <p className="art-pop-body" suppressHydrationWarning>{t.linkActive(whenOf(state.until))}</p>}
+      <p className="art-pop-body">{t.shareBody(version)}</p>
+      {state.until && !state.url && (
+        <p className="art-pop-body" suppressHydrationWarning>
+          {t.linkActive((state.shared ?? []).map((v) => `v${v}`).join(", "), whenOf(state.until))}
+        </p>
+      )}
       {state.url && <input className="art-link" readOnly value={state.url} onFocus={(e) => e.currentTarget.select()} aria-label={t.shareTitle} />}
       <div className="art-pop-actions">
         {state.until && (
@@ -161,7 +165,7 @@ function SharePanel({ agentId, artifactId, onClose }: { agentId: string; artifac
             onClick={async () => {
               setState((s) => ({ ...s, busy: true }));
               try {
-                const link = await shareArtifact(agentId, artifactId);
+                const link = await shareArtifact(agentId, artifactId, version);
                 setState({ url: link.url, until: link.expiresAt });
                 await copy(link.url);
               } catch {
@@ -457,7 +461,7 @@ export function ArtifactViewer({
         {editing && (
           <EditBox agentName={agentName} quote={editing.quote} page={editing.page} onCancel={() => setEditing(null)} onSend={(text) => sendEdit(text, editing.quote, editing.page)} />
         )}
-        {sharing && owner && <SharePanel agentId={view.agentId} artifactId={view.id} onClose={() => setSharing(false)} />}
+        {sharing && owner && <SharePanel key={view.version.id} agentId={view.agentId} artifactId={view.id} version={view.version.version} onClose={() => setSharing(false)} />}
         {notice && (
           <div className="art-toast" role="status">
             {notice}

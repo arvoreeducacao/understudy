@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import {
   ARTIFACT_MAX_PAGES,
   ARTIFACT_NOTE_MAX,
@@ -20,6 +20,7 @@ import { blobStore, pageKey, sourceKey, versionKeys, type BlobStore } from "./st
 import { contentToken, newShareToken, SHARE_LINK_DAYS, shareTokenHash, validShareToken } from "./tokens";
 
 export const MARKDOWN_INLINE_MAX = 512 * 1024;
+export const PUBLIC_TOKEN_SECONDS = 10 * 60;
 
 type Ask = Pick<Hub, "askComputer">;
 
@@ -92,6 +93,8 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
   if (attachment.size > max) return { ok: false, error: `the file is ${formatBytes(attachment.size)}; artifacts can be at most ${formatBytes(max)}` };
   const source = await readWholeFile(hub, agentId, attachment.path, max);
   if (!source.data) return { ok: false, error: source.error ?? "could not read the file" };
+  const used = await agentArtifactBytes(agentId);
+  if (used + source.data.length > env.artifactAgentMaxBytes) return { ok: false, error: `this understudy's artifacts already use ${formatBytes(used)} of ${formatBytes(env.artifactAgentMaxBytes)}; ask your owner to delete old ones` };
   let pages: Buffer[] = [];
   if (kind === "pages") {
     const rendered = await renderPages(hub, agentId, attachment.path);
@@ -101,8 +104,9 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
 
   const artifactId = existing?.id ?? newId("art");
   const version = existing ? existing.latestVersion + 1 : 1;
-  await store.put(sourceKey(artifactId, version), source.data, "application/octet-stream");
-  for (const [index, page] of pages.entries()) await store.put(pageKey(artifactId, version, index + 1), page, "image/jpeg");
+  const versionId = newId("arv");
+  await store.put(sourceKey(artifactId, versionId), source.data, "application/octet-stream");
+  for (const [index, page] of pages.entries()) await store.put(pageKey(artifactId, versionId, index + 1), page, "image/jpeg");
 
   const now = new Date();
   try {
@@ -113,9 +117,10 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
         await tx.insert(schema.artifacts).values({ id: artifactId, agentId, title, kind, latestVersion: 1, createdAt: now, updatedAt: now });
       }
       await tx.insert(schema.artifactVersions).values({
-        id: newId("arv"),
+        id: versionId,
         artifactId,
         version,
+        kind,
         note,
         name: attachment.name,
         sourcePath: attachment.path,
@@ -126,11 +131,20 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
       });
     });
   } catch {
-    await store.remove(versionKeys(artifactId, version, pages.length)).catch(() => {});
+    await store.remove(versionKeys(artifactId, versionId, pages.length)).catch(() => {});
     return { ok: false, error: "another version of this artifact was published at the same time; publish again" };
   }
   const card: MessageArtifact = { artifactId, version, title, kind, name: attachment.name, pages: pages.length };
   return { ok: true, artifactId, version, card };
+}
+
+export async function agentArtifactBytes(agentId: string) {
+  const [row] = await getDb()
+    .select({ total: sql<string>`coalesce(sum(${schema.artifactVersions.size}), 0)` })
+    .from(schema.artifactVersions)
+    .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactVersions.artifactId))
+    .where(eq(schema.artifacts.agentId, agentId));
+  return Number(row?.total ?? 0);
 }
 
 export type ArtifactSummary = { id: string; title: string; kind: ArtifactKind; latestVersion: number; updatedAt: string; name: string; pages: number; thumbUrl: string | null };
@@ -155,8 +169,8 @@ function contentBase() {
   return `${env.artifactOrigin ?? ""}/api/artifacts/c/`;
 }
 
-export function contentUrls(versionId: string, pages: number, now = Date.now()) {
-  const token = contentToken(versionId, now);
+export function contentUrls(versionId: string, pages: number, now = Date.now(), seconds?: number) {
+  const token = contentToken(versionId, now, seconds);
   const base = `${contentBase()}${token}`;
   return { contentUrl: base, downloadUrl: `${base}?download=1`, pageUrls: Array.from({ length: pages }, (_, i) => `${base}/page/${i + 1}`) };
 }
@@ -179,17 +193,17 @@ export async function listArtifacts(agentId: string, limit = 200): Promise<Artif
     return {
       id: artifact.id,
       title: artifact.title,
-      kind: artifact.kind,
+      kind: version.kind,
       latestVersion: artifact.latestVersion,
       updatedAt: artifact.updatedAt.toISOString(),
       name: version.name,
       pages: version.pages,
-      thumbUrl: artifact.kind === "image" ? urls.contentUrl : artifact.kind === "pages" ? (urls.pageUrls[0] ?? null) : null,
+      thumbUrl: version.kind === "image" ? urls.contentUrl : version.kind === "pages" ? (urls.pageUrls[0] ?? null) : null,
     };
   });
 }
 
-export async function loadArtifactView(agentId: string, artifactId: string, version?: number, store: BlobStore = blobStore()): Promise<ArtifactView | null> {
+export async function loadArtifactView(agentId: string, artifactId: string, version?: number, store: BlobStore = blobStore(), tokenSeconds?: number): Promise<ArtifactView | null> {
   const db = getDb();
   const [artifact] = await db.select().from(schema.artifacts).where(and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.agentId, agentId)));
   if (!artifact) return null;
@@ -197,28 +211,28 @@ export async function loadArtifactView(agentId: string, artifactId: string, vers
   const chosen = rows.find((row) => row.version === version) ?? rows[0];
   if (!chosen) return null;
   let markdown: string | null = null;
-  if (artifact.kind === "markdown") {
-    const blob = await store.get(sourceKey(artifactId, chosen.version));
+  if (chosen.kind === "markdown") {
+    const blob = await store.get(sourceKey(artifactId, chosen.id));
     markdown = blob ? blob.data.subarray(0, MARKDOWN_INLINE_MAX).toString("utf8") : "";
   }
   return {
     id: artifact.id,
     agentId,
     title: artifact.title,
-    kind: artifact.kind,
+    kind: chosen.kind,
     latestVersion: artifact.latestVersion,
     version: versionView(chosen),
     versions: rows.map(versionView),
-    ...contentUrls(chosen.id, chosen.pages),
+    ...contentUrls(chosen.id, chosen.pages, Date.now(), tokenSeconds),
     markdown,
   };
 }
 
-export type ContentVersion = { artifactId: string; agentId: string; kind: ArtifactKind; version: number; name: string; pages: number };
+export type ContentVersion = { versionId: string; artifactId: string; agentId: string; kind: ArtifactKind; version: number; name: string; pages: number };
 
 export async function contentVersion(versionId: string): Promise<ContentVersion | null> {
   const [row] = await getDb()
-    .select({ artifactId: schema.artifacts.id, agentId: schema.artifacts.agentId, kind: schema.artifacts.kind, version: schema.artifactVersions.version, name: schema.artifactVersions.name, pages: schema.artifactVersions.pages })
+    .select({ versionId: schema.artifactVersions.id, artifactId: schema.artifacts.id, agentId: schema.artifacts.agentId, kind: schema.artifactVersions.kind, version: schema.artifactVersions.version, name: schema.artifactVersions.name, pages: schema.artifactVersions.pages })
     .from(schema.artifactVersions)
     .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactVersions.artifactId))
     .where(eq(schema.artifactVersions.id, versionId));
@@ -238,29 +252,33 @@ export async function prepareEdit(hub: Pick<Hub, "sendToComputer">, agentId: str
   const { artifact, version } = row;
   let path = version.sourcePath;
   if (version.size <= FILE_MAX_BYTES) {
-    const blob = await store.get(sourceKey(artifact.id, version.version));
+    const blob = await store.get(sourceKey(artifact.id, version.id));
     const relative = `artifacts/${artifact.id}/v${version.version}/${version.name}`;
     if (blob && hub.sendToComputer(agentId, { type: "file_put", path: relative, base64: blob.data.toString("base64") })) path = `inbox/${relative}`;
   }
   const page = edit.page && edit.page <= version.pages ? edit.page : undefined;
-  const quote = edit.quote?.trim() || undefined;
+  const quote = edit.quote?.replace(/\s+/g, " ").trim() || undefined;
   return {
     title: artifact.title,
     path,
-    card: { artifactId: artifact.id, version: version.version, title: artifact.title, kind: artifact.kind, name: version.name, pages: version.pages, edit: { ...(quote ? { quote } : {}), ...(page ? { page } : {}) } },
+    card: { artifactId: artifact.id, version: version.version, title: artifact.title, kind: version.kind, name: version.name, pages: version.pages, edit: { ...(quote ? { quote } : {}), ...(page ? { page } : {}) } },
   };
 }
 
-export type ShareLink = { url: string; expiresAt: string };
+export type ShareLink = { url: string; expiresAt: string; version: number };
 
-export async function createShareLink(agentId: string, artifactId: string, userId: string, now = new Date()): Promise<ShareLink | null> {
+export async function createShareLink(agentId: string, artifactId: string, version: number, userId: string, now = new Date()): Promise<ShareLink | null> {
   const db = getDb();
-  const [artifact] = await db.select({ id: schema.artifacts.id }).from(schema.artifacts).where(and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.agentId, agentId)));
-  if (!artifact) return null;
+  const [row] = await db
+    .select({ version: schema.artifactVersions.version })
+    .from(schema.artifactVersions)
+    .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactVersions.artifactId))
+    .where(and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.agentId, agentId), eq(schema.artifactVersions.version, version)));
+  if (!row) return null;
   const token = newShareToken();
   const expiresAt = new Date(now.getTime() + SHARE_LINK_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.artifactLinks).values({ id: newId("arl"), artifactId, tokenHash: shareTokenHash(token), createdBy: userId, createdAt: now, expiresAt });
-  return { url: `${env.publicUrl}/shared/${token}`, expiresAt: expiresAt.toISOString() };
+  await db.insert(schema.artifactLinks).values({ id: newId("arl"), artifactId, version, tokenHash: shareTokenHash(token), createdBy: userId, createdAt: now, expiresAt });
+  return { url: `${env.publicUrl}/shared/${token}`, expiresAt: expiresAt.toISOString(), version };
 }
 
 export async function revokeShareLinks(agentId: string, artifactId: string, now = new Date()) {
@@ -277,34 +295,33 @@ export async function revokeShareLinks(agentId: string, artifactId: string, now 
 
 export async function activeShareLinks(agentId: string, artifactId: string, now = new Date()) {
   const rows = await getDb()
-    .select({ id: schema.artifactLinks.id, expiresAt: schema.artifactLinks.expiresAt })
+    .select({ id: schema.artifactLinks.id, version: schema.artifactLinks.version, expiresAt: schema.artifactLinks.expiresAt })
     .from(schema.artifactLinks)
     .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactLinks.artifactId))
     .where(and(eq(schema.artifactLinks.artifactId, artifactId), eq(schema.artifacts.agentId, agentId), isNull(schema.artifactLinks.revokedAt), gt(schema.artifactLinks.expiresAt, now)));
-  return rows.map((row) => ({ id: row.id, expiresAt: row.expiresAt.toISOString() }));
+  return rows.map((row) => ({ id: row.id, version: row.version, expiresAt: row.expiresAt.toISOString() }));
 }
 
 export async function sharedArtifact(token: string, now = new Date(), store: BlobStore = blobStore()): Promise<(ArtifactView & { agentName: string }) | null> {
   if (!validShareToken(token)) return null;
   const db = getDb();
   const [link] = await db
-    .select({ artifactId: schema.artifactLinks.artifactId, agentId: schema.artifacts.agentId, agentName: schema.agents.name })
+    .select({ artifactId: schema.artifactLinks.artifactId, version: schema.artifactLinks.version, agentId: schema.artifacts.agentId, agentName: schema.agents.name })
     .from(schema.artifactLinks)
     .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactLinks.artifactId))
     .innerJoin(schema.agents, eq(schema.agents.id, schema.artifacts.agentId))
     .where(and(eq(schema.artifactLinks.tokenHash, shareTokenHash(token)), isNull(schema.artifactLinks.revokedAt), gt(schema.artifactLinks.expiresAt, now)));
   if (!link) return null;
-  const view = await loadArtifactView(link.agentId, link.artifactId, undefined, store);
-  if (!view) return null;
-  const latest = view.versions.filter((v) => v.version === view.latestVersion);
-  return { ...view, agentId: "", versions: latest, agentName: link.agentName };
+  const view = await loadArtifactView(link.agentId, link.artifactId, link.version, store, PUBLIC_TOKEN_SECONDS);
+  if (!view || view.version.version !== link.version) return null;
+  return { ...view, id: "", agentId: "", latestVersion: link.version, versions: [view.version], agentName: link.agentName };
 }
 
 export async function removeAgentArtifactBlobs(agentId: string, store: BlobStore = blobStore()) {
   const rows = await getDb()
-    .select({ artifactId: schema.artifactVersions.artifactId, version: schema.artifactVersions.version, pages: schema.artifactVersions.pages })
+    .select({ artifactId: schema.artifactVersions.artifactId, versionId: schema.artifactVersions.id, pages: schema.artifactVersions.pages })
     .from(schema.artifactVersions)
     .innerJoin(schema.artifacts, eq(schema.artifacts.id, schema.artifactVersions.artifactId))
     .where(eq(schema.artifacts.agentId, agentId));
-  await store.remove(rows.flatMap((row) => versionKeys(row.artifactId, row.version, row.pages)));
+  await store.remove(rows.flatMap((row) => versionKeys(row.artifactId, row.versionId, row.pages)));
 }

@@ -3,6 +3,7 @@ import { artifactContentPolicy, artifactContentType, withBridge, type ArtifactKi
 import { env } from "@/lib/env";
 import { contentDisposition } from "../files/routes";
 import { RateLimiter } from "../rate-limit";
+import { clientIp } from "../webhook";
 import { contentVersion } from "./service";
 import { blobStore, pageKey, sourceKey, type BlobStore } from "./storage";
 import { readContentToken } from "./tokens";
@@ -32,7 +33,7 @@ const BASE_HEADERS = {
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": PERMISSIONS_POLICY,
   "Cross-Origin-Resource-Policy": "cross-origin",
-  "Cache-Control": "private, max-age=3600",
+  "Cache-Control": "private, max-age=3600, immutable",
 };
 
 const INERT_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox";
@@ -57,27 +58,32 @@ export async function handleArtifactContent(req: IncomingMessage, res: ServerRes
   if (!route) return notFound(res);
   const versionId = readContentToken(route.token);
   if (!versionId) return notFound(res);
-  if (!limiter.allow(`content:${versionId}`, 30, 300)) {
+  if (!limiter.allow(`content:${clientIp(req)}:${versionId}`, 4, 80)) {
     res.writeHead(429, { "Cache-Control": "no-store" });
     return res.end();
   }
   const version = await contentVersion(versionId);
   if (!version) return notFound(res);
   const frameAncestors = [env.publicUrl];
+  const etag = `"${versionId}${route.page ? `-${route.page}` : ""}${url.searchParams.get("download") === "1" ? "-d" : ""}"`;
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304, { ETag: etag, "Cache-Control": BASE_HEADERS["Cache-Control"] });
+    return res.end();
+  }
 
   if (route.page !== null) {
     if (route.page < 1 || route.page > version.pages) return notFound(res);
-    const blob = await store.get(pageKey(version.artifactId, version.version, route.page));
+    const blob = await store.get(pageKey(version.artifactId, version.versionId, route.page));
     if (!blob) return notFound(res);
-    res.writeHead(200, { ...BASE_HEADERS, "Content-Type": "image/jpeg", "Content-Length": String(blob.data.length), "Content-Security-Policy": INERT_POLICY });
+    res.writeHead(200, { ...BASE_HEADERS, ETag: etag, "Content-Type": "image/jpeg", "Content-Length": String(blob.data.length), "Content-Security-Policy": INERT_POLICY });
     return res.end(req.method === "HEAD" ? undefined : blob.data);
   }
 
-  const blob = await store.get(sourceKey(version.artifactId, version.version));
+  const blob = await store.get(sourceKey(version.artifactId, version.versionId));
   if (!blob) return notFound(res);
   const download = url.searchParams.get("download") === "1";
   const headers = contentHeaders(version.kind, version.name, download, frameAncestors);
   const body = version.kind === "html" && !download ? Buffer.from(withBridge(blob.data.toString("utf8")), "utf8") : blob.data;
-  res.writeHead(200, { ...headers, "Content-Length": String(body.length) });
+  res.writeHead(200, { ...headers, ETag: etag, "Content-Length": String(body.length) });
   res.end(req.method === "HEAD" ? undefined : body);
 }

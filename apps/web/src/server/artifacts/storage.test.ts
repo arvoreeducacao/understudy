@@ -5,12 +5,13 @@ import { objectUrl, pageKey, s3Store, sourceKey, validBlobKey, versionKeys } fro
 const config = { bucket: "understudy-artifacts", region: "us-east-1", endpoint: "http://127.0.0.1:9000", accessKeyId: "minio-test", secretAccessKey: "minio-test-secret", sessionToken: undefined };
 
 test("blob keys are fixed paths under the artifact and version", () => {
-  assert.equal(sourceKey("art_abcdef12", 3), "artifacts/art_abcdef12/3/source");
-  assert.equal(pageKey("art_abcdef12", 3, 2), "artifacts/art_abcdef12/3/page-2.jpg");
-  assert.deepEqual(versionKeys("art_abcdef12", 1, 2), ["artifacts/art_abcdef12/1/source", "artifacts/art_abcdef12/1/page-1.jpg", "artifacts/art_abcdef12/1/page-2.jpg"]);
-  assert.equal(validBlobKey("artifacts/art_abcdef12/1/source"), true);
+  assert.equal(sourceKey("art_abcdef12", "arv_version01"), "artifacts/art_abcdef12/arv_version01/source");
+  assert.equal(pageKey("art_abcdef12", "arv_version01", 2), "artifacts/art_abcdef12/arv_version01/page-2.jpg");
+  assert.deepEqual(versionKeys("art_abcdef12", "arv_version01", 2), ["artifacts/art_abcdef12/arv_version01/source", "artifacts/art_abcdef12/arv_version01/page-1.jpg", "artifacts/art_abcdef12/arv_version01/page-2.jpg"]);
+  assert.equal(validBlobKey("artifacts/art_abcdef12/arv_version01/source"), true);
+  assert.equal(validBlobKey("artifacts/art_abcdef12/3/source"), false);
   assert.equal(validBlobKey("artifacts/../secrets"), false);
-  assert.equal(validBlobKey("artifacts/art_abcdef12/1/source/../../x"), false);
+  assert.equal(validBlobKey("artifacts/art_abcdef12/arv_version01/source/../../x"), false);
   assert.throws(() => objectUrl(config, "other/key"));
 });
 
@@ -32,19 +33,19 @@ test("the S3 store signs path-style requests that MinIO and S3 both accept", asy
     return new Response(null, { status: 204 });
   }) as typeof fetch;
   const store = s3Store(config, fetcher);
-  await store.put("artifacts/art_abcdef12/1/source", Buffer.from("<h1>hi</h1>"), "application/octet-stream");
+  await store.put("artifacts/art_abcdef12/arv_version01/source", Buffer.from("<h1>hi</h1>"), "application/octet-stream");
   const put = seen[0];
-  assert.equal(put.url, "http://127.0.0.1:9000/understudy-artifacts/artifacts/art_abcdef12/1/source");
+  assert.equal(put.url, "http://127.0.0.1:9000/understudy-artifacts/artifacts/art_abcdef12/arv_version01/source");
   assert.match(put.headers.get("authorization") ?? "", /^AWS4-HMAC-SHA256 Credential=minio-test\/\d{8}\/us-east-1\/s3\/aws4_request/);
   assert.ok(put.headers.get("x-amz-content-sha256"));
-  const got = await store.get("artifacts/art_abcdef12/1/source");
+  const got = await store.get("artifacts/art_abcdef12/arv_version01/source");
   assert.equal(got?.data.toString(), "<h1>hi</h1>");
-  assert.equal(await store.get("artifacts/art_abcdef12/2/source"), null);
-  await store.remove(["artifacts/art_abcdef12/1/source"]);
-  assert.equal(await store.get("artifacts/art_abcdef12/1/source"), null);
+  assert.equal(await store.get("artifacts/art_abcdef12/arv_version02/source"), null);
+  await store.remove(["artifacts/art_abcdef12/arv_version01/source"]);
+  assert.equal(await store.get("artifacts/art_abcdef12/arv_version01/source"), null);
 });
 
 test("a refused upload is an error, not a silent success", async () => {
   const store = s3Store(config, (async () => new Response("denied", { status: 403 })) as typeof fetch);
-  await assert.rejects(store.put("artifacts/art_abcdef12/1/source", Buffer.from("x"), "text/plain"), /403/);
+  await assert.rejects(store.put("artifacts/art_abcdef12/arv_version01/source", Buffer.from("x"), "text/plain"), /403/);
 });

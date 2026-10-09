@@ -14,22 +14,22 @@ export type BlobStore = {
 
 export type BucketConfig = NonNullable<typeof env.artifactBucket>;
 
-const KEY = /^artifacts\/art_[A-Za-z0-9_-]{6,80}\/\d{1,6}\/(source|page-\d{1,4}\.jpg)$/;
+const KEY = /^artifacts\/art_[A-Za-z0-9_-]{6,80}\/arv_[A-Za-z0-9_-]{6,80}\/(source|page-\d{1,4}\.jpg)$/;
 
 export function validBlobKey(key: string) {
   return KEY.test(key);
 }
 
-export function sourceKey(artifactId: string, version: number) {
-  return `artifacts/${artifactId}/${version}/source`;
+export function sourceKey(artifactId: string, versionId: string) {
+  return `artifacts/${artifactId}/${versionId}/source`;
 }
 
-export function pageKey(artifactId: string, version: number, page: number) {
-  return `artifacts/${artifactId}/${version}/page-${page}.jpg`;
+export function pageKey(artifactId: string, versionId: string, page: number) {
+  return `artifacts/${artifactId}/${versionId}/page-${page}.jpg`;
 }
 
-export function versionKeys(artifactId: string, version: number, pages: number) {
-  return [sourceKey(artifactId, version), ...Array.from({ length: pages }, (_, i) => pageKey(artifactId, version, i + 1))];
+export function versionKeys(artifactId: string, versionId: string, pages: number) {
+  return [sourceKey(artifactId, versionId), ...Array.from({ length: pages }, (_, i) => pageKey(artifactId, versionId, i + 1))];
 }
 
 export function objectUrl(config: Pick<BucketConfig, "endpoint" | "bucket">, key: string) {
