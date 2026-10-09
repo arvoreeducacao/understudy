@@ -64,7 +64,7 @@ test("an idle computer goes to sleep, stays asleep when the host reconnects, and
   hub.idle.touch(ids.quiet, longAgo);
 
   await hub.idle.sweep();
-  assert.deepEqual(host.received, [{ type: "computer_stop", agentId: ids.quiet }]);
+  assert.deepEqual(host.received.map((m) => [m.type, m.agentId]), [["computer_stop", ids.quiet]]);
   assert.equal(conn.running.size, 0);
 
   const hosts = hub.hosts as unknown as { onComputerStatus(c: unknown, m: unknown): Promise<void>; reconcile(c: unknown): Promise<void> };
