@@ -8,7 +8,8 @@ import type { AgentLink, Frame } from "@/components/live/useAgentSocket";
 import { cleanLook, type Look } from "@/lib/look";
 import { currentLocale, messages } from "@/lib/messages";
 import { STATE_PILL } from "@/lib/state-pill";
-import { fileKind, latestOutputs } from "@/lib/outputs";
+import { fileKind, latestDeliveries } from "@/lib/outputs";
+import { openArtifact, useArtifactList } from "@/components/artifacts/ArtifactsPanel";
 import { fileUrl } from "@/lib/uploader";
 import { advancedTabs, type WorkspaceTab } from "@/lib/workspace-tabs";
 import { TAB_ICONS } from "./AgentWorkspace";
@@ -106,7 +107,10 @@ export function AgentCard({
   const status = live.online ? messages.states[state] : messages.live.offline;
   const note = live.online && live.note ? live.note : null;
   const recent = runs.slice(0, 3);
-  const outputs = files ? latestOutputs(files) : [];
+  const { items: artifacts } = useArtifactList(agent.id);
+  const outputs = latestDeliveries(artifacts ?? [], files ?? []);
+  const hasArtifacts = (artifacts?.length ?? 0) > 0;
+  const when = (at: number) => new Date(at).toLocaleString(currentLocale(), { dateStyle: "medium", timeStyle: "short" });
   const more = owner ? (["memory", "jobs", "logins", "settings", ...advancedTabs(true)] as WorkspaceTab[]) : [];
   const figure = <AgentFigure size={92} look={agent.look} state={state} count={approvals} />;
 
@@ -196,32 +200,60 @@ export function AgentCard({
         )}
       </div>
 
-      {files && (
+      {(files || hasArtifacts) && (
         <div className="ac-section">
           <div className="ac-section-head">
             <h3>{a.outputs}</h3>
-            {files.length > 0 && (
-              <button type="button" onClick={() => onOpen("files")}>
-                {a.allFiles}
+            {hasArtifacts ? (
+              <button type="button" onClick={() => onOpen("artifacts")}>
+                {a.seeAll}
               </button>
+            ) : (
+              files &&
+              files.length > 0 && (
+                <button type="button" onClick={() => onOpen("files")}>
+                  {a.allFiles}
+                </button>
+              )
             )}
           </div>
           {outputs.length === 0 ? (
             <p className="ac-empty">{a.noOutputs(agent.name)}</p>
           ) : (
             <ul className="ac-list">
-              {outputs.map((file) => {
-                const kind = fileKind(file.path);
-                const name = file.path.split("/").pop() ?? file.path;
+              {outputs.map((item) => {
+                if (item.kind === "artifact") {
+                  const kind = fileKind(item.artifact.name);
+                  return (
+                    <li key={item.key}>
+                      <button type="button" className="ac-out" onClick={() => openArtifact({ artifactId: item.artifact.id, version: null })} title={item.artifact.title}>
+                        <span className={`ac-out-kind ${kind.tone}`} aria-hidden>
+                          {kind.label}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="ac-out-name">{item.artifact.title}</span>
+                          <span className="ac-out-when" suppressHydrationWarning>
+                            {when(item.at)}
+                            {item.artifact.latestVersion > 1 ? ` · v${item.artifact.latestVersion}` : ""}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                }
+                const kind = fileKind(item.file.path);
+                const name = item.file.path.split("/").pop() ?? item.file.path;
                 return (
-                  <li key={file.path}>
-                    <a className="ac-out" href={fileUrl(agent.id, `outbox/${file.path}`, { download: true })} download title={file.path}>
+                  <li key={item.key}>
+                    <a className="ac-out" href={fileUrl(agent.id, `outbox/${item.file.path}`, { download: true })} download title={item.file.path}>
                       <span className={`ac-out-kind ${kind.tone}`} aria-hidden>
                         {kind.label}
                       </span>
                       <span className="min-w-0">
                         <span className="ac-out-name">{name}</span>
-                        <span className="ac-out-when">{new Date(file.updatedAt).toLocaleString(currentLocale(), { dateStyle: "medium", timeStyle: "short" })}</span>
+                        <span className="ac-out-when" suppressHydrationWarning>
+                          {when(item.at)}
+                        </span>
                       </span>
                     </a>
                   </li>
