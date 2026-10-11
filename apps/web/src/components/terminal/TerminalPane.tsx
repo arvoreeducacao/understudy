@@ -2,6 +2,9 @@ import "@xterm/xterm/css/xterm.css";
 import { RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentLink } from "@/components/live/useAgentSocket";
+import { KeyBar } from "@/components/live/KeyBar";
+import { terminalCtrl, terminalSequence, type BarKey } from "@/components/live/remote-keys";
+import { COARSE_POINTER, useMediaQuery } from "@/components/useMediaQuery";
 import { messages } from "@/lib/messages";
 
 const t = messages.terminal;
@@ -36,6 +39,10 @@ export function TerminalPane({ agentId, agentName, link, active }: { agentId: st
   const idRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed" | "offline">("connecting");
   const [ready, setReady] = useState(false);
+  const [ctrl, setCtrl] = useState(false);
+  const ctrlRef = useRef(false);
+  ctrlRef.current = ctrl;
+  const coarse = useMediaQuery(COARSE_POINTER);
   const storageKey = `understudy-terminal-${agentId}`;
 
   useEffect(
@@ -96,7 +103,13 @@ export function TerminalPane({ agentId, agentName, link, active }: { agentId: st
       fitRef.current = fit;
       fitVisible();
       term.onData((data) => {
-        if (idRef.current) send({ type: "terminal_input", terminalId: idRef.current, data });
+        if (!idRef.current) return;
+        if (ctrlRef.current && data.length === 1) {
+          setCtrl(false);
+          send({ type: "terminal_input", terminalId: idRef.current, data: terminalCtrl(data) });
+          return;
+        }
+        send({ type: "terminal_input", terminalId: idRef.current, data });
       });
       term.onResize(({ cols, rows }) => {
         if (idRef.current) send({ type: "terminal_resize", terminalId: idRef.current, cols, rows });
@@ -123,6 +136,12 @@ export function TerminalPane({ agentId, agentName, link, active }: { agentId: st
     if (active && ready) termRef.current?.focus();
   }, [active, ready]);
 
+  function pressKey(key: BarKey) {
+    setCtrl(false);
+    if (idRef.current) send({ type: "terminal_input", terminalId: idRef.current, data: terminalSequence(key) });
+    termRef.current?.focus();
+  }
+
   return (
     <div className="ws-panel h-full">
       <div className="flex items-center gap-3 flex-wrap">
@@ -141,6 +160,7 @@ export function TerminalPane({ agentId, agentName, link, active }: { agentId: st
       <div className="flex-1 min-h-[320px] rounded-xl border border-line bg-ink p-2">
         <div ref={hostRef} className="h-full w-full" aria-label={t.subtitle(agentName)} />
       </div>
+      {coarse && live.online && <KeyBar ctrl={ctrl} onCtrl={setCtrl} onKey={pressKey} />}
     </div>
   );
 }
