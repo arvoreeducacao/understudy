@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
+import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
 import { gatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
@@ -16,7 +17,7 @@ export type BrainEvent =
   | { kind: "tool"; name: string; input: Record<string, unknown> }
   | { kind: "tool_result"; name: string; isError: boolean; text: string };
 
-export type TurnResult = { ok: boolean; sessionId: string | null; text: string; error?: string; usage?: Usage };
+export type TurnResult = { ok: boolean; sessionId: string | null; text: string; error?: string; usage?: Usage; needsLogin?: boolean };
 
 export function addUsage(total: Usage | undefined, more: Usage | undefined): Usage | undefined {
   if (!more) return total;
@@ -279,8 +280,73 @@ export function codexFailure(line: string): string | null {
   }
 }
 
-export function startTurn(config: BrainConfig, request: TurnRequest): Turn {
+export type TurnOptions = {
+  spawnTurn?: (config: BrainConfig, request: TurnRequest) => Turn;
+  lock?: BrainLock;
+  retryDelaysMs?: number[];
+  clearStaleLock?: () => boolean;
+};
+
+export function startTurn(config: BrainConfig, request: TurnRequest, options: TurnOptions = {}): Turn {
   if (fakeBrainEnabled()) return startFakeTurn(config, request);
+  const spawnOne = options.spawnTurn ?? spawnTurn;
+  const credentialsDir = request.brain === "claude" ? claudeConfigDir(config.home) : join(config.home, ".codex");
+  const lock = options.lock ?? brainLock(credentialsDir);
+  const delays = options.retryDelaysMs ?? REFRESH_RETRY_DELAYS_MS;
+  const clearStale = options.clearStaleLock ?? (() => request.brain === "claude" && clearStaleRefreshLock(credentialsDir));
+  let cancelled = false;
+  let active: Turn | null = null;
+  let wake: (() => void) | null = null;
+  const pause = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        wake = null;
+        resolve();
+      }, ms);
+      wake = () => {
+        clearTimeout(timer);
+        wake = null;
+        resolve();
+      };
+    });
+  const done = lock.run(async (): Promise<TurnResult> => {
+    let usage: Usage | undefined;
+    for (let attempt = 0; ; attempt++) {
+      if (cancelled) return { ok: false, sessionId: request.resume ?? null, text: "", error: "stopped", ...(usage ? { usage } : {}) };
+      if (clearStale()) log("brain", "removed a sign-in refresh lock left behind by an earlier process");
+      let worked = false;
+      const turn = spawnOne(config, {
+        ...request,
+        onEvent: (event) => {
+          if (event.kind !== "session") worked = true;
+          request.onEvent(event);
+        },
+      });
+      active = turn;
+      const result = await turn.done;
+      active = null;
+      usage = addUsage(usage, result.usage);
+      const race = !result.ok && !worked && !cancelled && isRefreshRace(result.error);
+      if (race && attempt < delays.length) {
+        log("brain", `${request.brain} could not refresh its sign-in because another process held it; retrying in ${Math.round(delays[attempt] / 1000)}s`);
+        await pause(delays[attempt]);
+        continue;
+      }
+      const signedOut = !result.ok && !cancelled && (race || isSignedOut(result.error));
+      return { ...result, ...(usage ? { usage } : {}), ...(signedOut ? { needsLogin: true, error: signInAgainMessage(request.brain) } : {}) };
+    }
+  });
+  return {
+    done,
+    cancel() {
+      cancelled = true;
+      wake?.();
+      active?.cancel();
+    },
+  };
+}
+
+export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
   mkdirSync(config.workDir, { recursive: true });
   let child: ChildProcess;
   if (request.brain === "claude") {

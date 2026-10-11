@@ -275,7 +275,10 @@ export function createAgent(options: {
       current.turn = started;
       if (current.cancelled) started.cancel();
     }
-    return started.done;
+    return started.done.then((result) => {
+      if (result.needsLogin) options.send({ type: "login_done", brain: persisted.brain, ok: false, message: result.error });
+      return result;
+    });
   };
 
   const closeDay = async (job: Job, session: ChatSession) => {
@@ -299,7 +302,7 @@ export function createAgent(options: {
     const message = job.fromAgent ? teammateMessage(job.fromAgent.name, job.text) : said;
     const fresh = () => memory.briefing({ input: job.fromAgent ? message : `Message from ${job.from}:\n${said}` });
     let result = await turn({ job, prompt: session ? message : fresh(), resume: session?.id ?? null });
-    if (!result.ok && session && !cancelled()) {
+    if (!result.ok && session && !cancelled() && !result.needsLogin) {
       log("agent", "resuming the chat failed, starting a fresh one");
       result = await turn({ job, prompt: fresh(), resume: null });
     }
@@ -326,13 +329,15 @@ export function createAgent(options: {
     markTurn({ mode: "recipe" });
     let recipe: Recipe | null = null;
     let error = "";
+    let signedOut = false;
     for (let attempt = 0; attempt < 2 && !recipe && !cancelled(); attempt++) {
       const base = job.description ? recipePromptFromText(job.description) : recipePrompt(job.events, { ownerBrowser: job.ownerBrowser });
       const prompt = attempt === 0 ? base : `${base}\n\nYour previous answer was not valid JSON (${error}). Answer with the JSON object only.`;
       const result = await turn({ job, prompt, resume: null, chatty: false, transcript: join(memory.runDir(job.recordingId), "recipe-transcript.jsonl") });
       if (!result.ok) {
         error = result.error ?? "the brain failed";
-        if (/not logged in|please run \/login|authentication/i.test(error)) break;
+        signedOut = !!result.needsLogin || /not logged in|please run \/login|authentication/i.test(error);
+        if (signedOut) break;
         continue;
       }
       try {
@@ -343,7 +348,7 @@ export function createAgent(options: {
     }
     if (cancelled()) return;
     if (!recipe) {
-      const reason = /not logged in|please run \/login|authentication/i.test(error)
+      const reason = signedOut
         ? `The ${persisted.brain} brain is not logged in. Connect it in the agent's setup, then teach again.`
         : `I could not turn this into a recipe: ${error}`;
       options.send({ type: "recipe_failed", recordingId: job.recordingId, error: reason.slice(0, 500) });

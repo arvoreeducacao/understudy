@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Brain, ComputerToServer } from "@understudy/protocol";
+import { brainLock, claudeConfigDir, clearStaleRefreshLock } from "./brain-lock.ts";
 import { fakeBrainEnabled } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
 
@@ -80,6 +81,19 @@ export function prepareClaudeHome(home: string, workDir: string): void {
   mkdirSync(join(home, ".claude"), { recursive: true });
 }
 
+export const CLAUDE_STATUS_TIMEOUT_MS = 60 * 1000;
+
+export async function readClaudeStatus(env: NodeJS.ProcessEnv, home: string, exec = run): Promise<BrainStatus> {
+  if (clearStaleRefreshLock(claudeConfigDir(home, env))) log("login", "removed a sign-in refresh lock left behind by an earlier process");
+  const result = await exec("claude", ["auth", "status", "--json"], env, CLAUDE_STATUS_TIMEOUT_MS);
+  try {
+    const parsed = JSON.parse(result.out.slice(result.out.indexOf("{")));
+    return { brain: "claude", loggedIn: !!parsed.loggedIn, account: parsed.email ?? undefined };
+  } catch {
+    return { brain: "claude", loggedIn: false };
+  }
+}
+
 export function createLoginManager(options: {
   home: string;
   workDir: string;
@@ -93,16 +107,15 @@ export function createLoginManager(options: {
   const tmux = (...args: string[]) => run("tmux", ["-L", TMUX_SOCKET, ...args], env);
   const pane = async () => stripAnsi((await tmux("capture-pane", "-t", CLAUDE_SESSION, "-p", "-J", "-S", "-200")).out);
 
-  const claudeStatus = async (): Promise<BrainStatus> => {
+  const claudeLock = brainLock(claudeConfigDir(options.home, env));
+  let lastClaudeStatus: BrainStatus | null = null;
+
+  const claudeStatus = async (whenBusy: "wait" | "reuse" = "wait"): Promise<BrainStatus> => {
     if (fakeBrainEnabled(env)) return { brain: "claude", loggedIn: true, account: "fake-brain" };
     if (apiKeyMode("claude", env)) return { brain: "claude", loggedIn: true, account: "api-key" };
-    const result = await run("claude", ["auth", "status", "--json"], env);
-    try {
-      const parsed = JSON.parse(result.out.slice(result.out.indexOf("{")));
-      return { brain: "claude", loggedIn: !!parsed.loggedIn, account: parsed.email ?? undefined };
-    } catch {
-      return { brain: "claude", loggedIn: false };
-    }
+    if (whenBusy === "reuse" && claudeLock.busy()) return lastClaudeStatus ?? { brain: "claude", loggedIn: true };
+    lastClaudeStatus = await claudeLock.run(() => readClaudeStatus(env, options.home));
+    return lastClaudeStatus;
   };
 
   const codexStatus = async (): Promise<BrainStatus> => {
@@ -263,7 +276,7 @@ export function createLoginManager(options: {
       if (brain === "claude") await codeClaude(code);
     },
     async status() {
-      return options.codexAvailable() ? Promise.all([claudeStatus(), codexStatus()]) : [await claudeStatus()];
+      return options.codexAvailable() ? Promise.all([claudeStatus("reuse"), codexStatus()]) : [await claudeStatus("reuse")];
     },
   };
 }
