@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseInline, parseMarkdown, safeHref } from "./markdown";
+import { columnAlign, parseInline, parseMarkdown, parseMarkdownSources, safeHref } from "./markdown";
 
 test("bold, italics and inline code become nodes instead of raw markers", () => {
   assert.deepEqual(parseInline("a **b** *c* `d`"), [
@@ -68,4 +68,44 @@ test("single newlines inside a paragraph become breaks", () => {
 test("headings, quotes and rules are recognized", () => {
   const kinds = parseMarkdown("## Title\n> quoted\n\n---\ntext").map((b) => b.kind);
   assert.deepEqual(kinds, ["heading", "quote", "rule", "paragraph"]);
+});
+
+test("pipe tables need a separator row and keep the column alignment", () => {
+  const [table] = parseMarkdown("| Person | Deals | Status |\n|---|--:|:-:|\n| **Maya** | 12 | on track |\n| Ada | 7 |");
+  assert.deepEqual(table, {
+    kind: "table",
+    align: [null, "right", "center"],
+    header: [[{ kind: "text", value: "Person" }], [{ kind: "text", value: "Deals" }], [{ kind: "text", value: "Status" }]],
+    rows: [
+      [[{ kind: "strong", children: [{ kind: "text", value: "Maya" }] }], [{ kind: "text", value: "12" }], [{ kind: "text", value: "on track" }]],
+      [[{ kind: "text", value: "Ada" }], [{ kind: "text", value: "7" }], []],
+    ],
+  });
+});
+
+test("pipes without a separator row stay a paragraph", () => {
+  assert.deepEqual(parseMarkdown("| a | b |\n| c | d |").map((b) => b.kind), ["paragraph"]);
+  assert.deepEqual(parseMarkdown("a | b\n|---|").map((b) => b.kind), ["paragraph"]);
+});
+
+test("a table can follow a paragraph line and ends at a blank line", () => {
+  const blocks = parseMarkdown("Here they are:\nname | score\n--- | ---\nNorthwind | 3\n\nThat's all.");
+  assert.deepEqual(blocks.map((b) => b.kind), ["paragraph", "table", "paragraph"]);
+  assert.equal(blocks[1].kind === "table" && blocks[1].rows.length, 1);
+});
+
+test("escaped pipes stay inside a cell", () => {
+  const [table] = parseMarkdown("| expr |\n|---|\n| a \\| b |");
+  assert.deepEqual(table.kind === "table" && table.rows[0][0], [{ kind: "text", value: "a | b" }]);
+});
+
+test("columns of numbers align right unless the separator says otherwise", () => {
+  const [table] = parseMarkdown("| Team | Revenue | Share | Code |\n|---|---|:--|---|\n| North | $1,200 | 40% | A1 |\n| South | 980 | 60% | 12 |");
+  assert.ok(table.kind === "table");
+  assert.deepEqual([0, 1, 2, 3].map((c) => columnAlign(table, c)), ["left", "right", "left", "left"]);
+});
+
+test("each block keeps the exact markdown it came from", () => {
+  const sources = parseMarkdownSources("# Plan\n\nSome *text*\nmore\n\n\n- a\n- b\n\n| x |\n|---|\n| 1 |\n").map((entry) => entry.source);
+  assert.deepEqual(sources, ["# Plan", "Some *text*\nmore", "- a\n- b", "| x |\n|---|\n| 1 |"]);
 });

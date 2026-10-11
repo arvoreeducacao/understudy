@@ -288,6 +288,19 @@ test("when Slack cannot stream, the final answer is posted once as a normal mess
   }
 });
 
+test("a streamed structured answer is swapped for rich blocks once it is finished", { skip }, async () => {
+  const { streamDelta, relayAgentChat } = await import("./slack-threads");
+  const before = slackCalls.length;
+  slackPostTs = "778.1";
+  const text = "## Pipeline\n**Open:** 12\n**Won:** 4";
+  await streamDelta(ids.ana, "st_3", "## Pipeline\n**Open:** 12");
+  await relayAgentChat(ids.ana, text, "st_3");
+  const calls = slackCalls.slice(before);
+  assert.deepEqual(calls.map((c) => c.method), ["chat.startStream", "chat.appendStream", "chat.stopStream", "chat.update"]);
+  assert.equal(calls[3].body.ts, "778.1");
+  assert.deepEqual((calls[3].body.blocks as { type: string }[]).map((b) => b.type), ["header", "section"]);
+});
+
 test("an owner whose Slack email differs from the panel email links their Slack account once and is then reached and recognized", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { linkSlackUser, readSlackLinkToken, unlinkSlackUser } = await import("./slack-link");

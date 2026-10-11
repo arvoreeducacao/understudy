@@ -19,7 +19,7 @@ function wasmPath() {
   return createRequire(import.meta.url).resolve("@resvg/resvg-wasm/index_bg.wasm");
 }
 
-function init() {
+export function initResvg() {
   ready ??= readFile(wasmPath()).then((bytes) => initWasm(bytes));
   return ready;
 }
@@ -36,7 +36,7 @@ export async function figurePng(look: Look, size: number, options: { padding?: n
   const key = JSON.stringify([cleanLook(look), size, options]);
   const hit = cache.get(key);
   if (hit) return hit;
-  await init();
+  await initResvg();
   const png = Buffer.from(new Resvg(figureSvg(look, options), { fitTo: { mode: "width", value: size } }).render().asPng());
   if (cache.size > 500) cache.delete(cache.keys().next().value as string);
   cache.set(key, png);

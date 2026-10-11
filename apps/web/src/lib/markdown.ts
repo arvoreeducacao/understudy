@@ -15,7 +15,10 @@ export type Block =
   | { kind: "code"; lang: string; value: string; open: boolean }
   | { kind: "list"; ordered: boolean; start: number; items: ListItem[] }
   | { kind: "quote"; children: Block[] }
+  | { kind: "table"; align: TableAlign[]; header: Inline[][]; rows: Inline[][][] }
   | { kind: "rule" };
+
+export type TableAlign = "left" | "center" | "right" | null;
 
 const SAFE_PROTOCOLS = ["http:", "https:", "mailto:"];
 
@@ -131,6 +134,58 @@ const ORDERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
 const QUOTE = /^ {0,3}>\s?(.*)$/;
 const RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 
+const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+function tableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+  const cells: string[] = [];
+  let current = "";
+  for (let i = 0; i < trimmed.length; i += 1) {
+    if (trimmed[i] === "\\" && trimmed[i + 1] === "|") {
+      current += "|";
+      i += 1;
+    } else if (trimmed[i] === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else current += trimmed[i];
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function tableColumns(lines: string[], at: number) {
+  const head = lines[at];
+  const divider = lines[at + 1];
+  if (!head?.includes("|") || divider === undefined || !divider.includes("|") || !TABLE_DIVIDER.test(divider)) return 0;
+  const columns = tableCells(head).length;
+  return columns > 0 && tableCells(divider).length === columns ? columns : 0;
+}
+
+function alignOf(cell: string): TableAlign {
+  const left = cell.startsWith(":");
+  const right = cell.endsWith(":");
+  return left && right ? "center" : right ? "right" : left ? "left" : null;
+}
+
+function tableRow(line: string, columns: number): Inline[][] {
+  const cells = tableCells(line).slice(0, columns);
+  while (cells.length < columns) cells.push("");
+  return cells.map((cell) => parseInline(cell));
+}
+
+const NUMERIC_CELL = /^[-+(]?[$€£¥]?\s?[-+]?\d[\d.,\s]*(%|[kKmMbB]|[a-zA-Z$€£¥]{1,3})?\)?$/;
+
+export function inlineText(nodes: Inline[]): string {
+  return nodes.map((node) => (node.kind === "text" || node.kind === "code" ? node.value : node.kind === "break" ? "\n" : inlineText(node.children))).join("");
+}
+
+export function columnAlign(block: Extract<Block, { kind: "table" }>, column: number): "left" | "center" | "right" {
+  const set = block.align[column];
+  if (set) return set;
+  const values = block.rows.map((row) => inlineText(row[column] ?? []).trim()).filter(Boolean);
+  return values.length > 0 && values.every((value) => NUMERIC_CELL.test(value)) ? "right" : "left";
+}
+
 function depthOf(indent: string) {
   return Math.min(3, Math.floor(indent.replace(/\t/g, "  ").length / 2));
 }
@@ -139,9 +194,16 @@ function startsBlock(line: string) {
   return FENCE.test(line) || HEADING.test(line) || BULLET.test(line) || ORDERED.test(line) || QUOTE.test(line) || RULE.test(line);
 }
 
+export type SourcedBlock = { block: Block; source: string };
+
 export function parseMarkdown(source: string): Block[] {
+  return parseMarkdownSources(source).map((entry) => entry.block);
+}
+
+export function parseMarkdownSources(source: string): SourcedBlock[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
+  const starts: number[] = [];
   let i = 0;
 
   while (i < lines.length) {
@@ -151,6 +213,7 @@ export function parseMarkdown(source: string): Block[] {
       i += 1;
       continue;
     }
+    starts.push(i);
 
     const fence = FENCE.exec(line);
     if (fence) {
@@ -193,6 +256,20 @@ export function parseMarkdown(source: string): Block[] {
       continue;
     }
 
+    const columns = tableColumns(lines, i);
+    if (columns) {
+      const header = tableRow(line, columns);
+      const align = tableCells(lines[i + 1]).map(alignOf);
+      const rows: Inline[][][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|") && !FENCE.test(lines[i])) {
+        rows.push(tableRow(lines[i], columns));
+        i += 1;
+      }
+      blocks.push({ kind: "table", align, header, rows });
+      continue;
+    }
+
     const bullet = BULLET.exec(line);
     const ordered = ORDERED.exec(line);
     if (bullet || ordered) {
@@ -222,12 +299,12 @@ export function parseMarkdown(source: string): Block[] {
 
     const body: string[] = [line];
     i += 1;
-    while (i < lines.length && lines[i].trim() && !startsBlock(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !startsBlock(lines[i]) && !tableColumns(lines, i)) {
       body.push(lines[i]);
       i += 1;
     }
     blocks.push({ kind: "paragraph", children: parseInline(body.join("\n")) });
   }
 
-  return blocks;
+  return blocks.map((block, k) => ({ block, source: lines.slice(starts[k], starts[k + 1] ?? lines.length).join("\n").trimEnd() }));
 }
