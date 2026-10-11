@@ -208,6 +208,7 @@ test("a finished upload is attached to the owner's chat message and the agent is
   const ctx = {
     hub: {
       uploads: hub.uploads,
+      proposals: { repeatOf: async () => null },
       addMessage: async (_a: string, _r: string, text: string, _run: unknown, _author: unknown, _via: unknown, _stream: unknown, attachments?: Attachment[]) => void added.push({ text, attachments }),
       deliver: async (_a: string, message: ServerToComputer) => (delivered.push(message), { status: "sent" }),
     },
