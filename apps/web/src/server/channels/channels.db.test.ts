@@ -212,3 +212,38 @@ test("a rotated address stops working", { skip }, async () => {
   const outcomes = await processEmail(hub as never, { config: inboundConfig, findTask: async () => null, findChannel: (local) => channelByAddress("email", local), fetchRaw: async () => raw }, raw, [old], null);
   assert.deepEqual(outcomes.map((o) => o.result), ["unknown_address"]);
 });
+
+test("an approval during an email conversation reaches the owner by email and the link answers it once", { skip }, async () => {
+  const { parseEmail } = await import("../inbound-email/parse");
+  const { answerByLink, approvalForLink } = await import("./approval-answer");
+  const { setEmailSenders } = await import("./settings");
+  await setEmailSenders(ids.agent, "example.org");
+  const { hub, ws } = await connected();
+  await receive(hub, mail({ From: "buyer@example.org", To: address, Subject: "Order", "Message-ID": "<o1@example.org>" }, "Please place the order."));
+  const approvalId = await hub.approvals.create(ids.agent, { summary: "Place order #7 for 120.00", fields: [{ label: "Amount", value: "120.00" }] }, "mcp");
+  await settle(150);
+  const mailToOwner = outbox.find((sent) => sent.envelope.to[0] === OWNER);
+  assert.ok(mailToOwner);
+  assert.equal(outbox.filter((sent) => sent.envelope.to[0] === "buyer@example.org").length, 0);
+  const parsed = await parseEmail(mailToOwner.raw, 1_000_000);
+  assert.match(parsed.text, /Place order #7 for 120\.00/);
+  assert.match(parsed.text, /Amount: 120\.00/);
+  const token = parsed.text.match(/\/answer\/([A-Za-z0-9_.-]+)/)?.[1] as string;
+  assert.ok(token);
+  assert.equal((await approvalForLink(token))?.id, approvalId);
+  assert.equal(await approvalForLink(`${token.slice(0, -2)}xx`), null);
+  assert.deepEqual(await answerByLink(hub, token, true, "go ahead"), { ok: true, status: "approved" });
+  assert.deepEqual(await answerByLink(hub, token, false, undefined), { ok: false, status: "approved" });
+  const { getDb, schema } = await import("@/lib/db");
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approvalId));
+  assert.equal(row.answeredBy, ids.owner);
+  assert.equal(row.note, "go ahead");
+  assert.ok(ws.received.length > 0);
+});
+
+test("approvals are not emailed when the conversation is not on email", { skip }, async () => {
+  const { hub } = await connected();
+  await hub.approvals.create(ids.agent, { summary: "Send the report" }, "mcp");
+  await settle(100);
+  assert.equal(outbox.length, 0);
+});

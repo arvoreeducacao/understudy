@@ -64,6 +64,7 @@ A channel is another place where people hold a conversation with an understudy, 
 
 - **Inbound**: the channel's endpoint authenticates the provider, maps the address to the understudy, classifies the sender (owner, allowed, unknown) and either holds the message for the owner, drops it, or delivers it as a normal `chat`. A message from anyone but the owner carries `external: { channel, sender }`, and the computer briefs the brain with it quoted as data and the rule that it never authorizes anything.
 - **Reply route**: delivering a channel message records the thread in `channel_routes` for 30 minutes and ends any Slack reply window; a panel message clears it, and a later Slack message wins over it. While a route is active, the understudy's chat replies and `share_file` files are buffered on the thread and sent as one reply when its turn ends (state back to calm, waiting or stuck), or after 90 seconds at the latest.
+- **Approvals**: while the route is on email, a new approval is also emailed to the owner (in the owner's own thread, never the outside sender's) with a link to `/answer/<token>`, an HMAC over the approval id and an expiry. Opening it only renders the request; the answer is a POST, recorded as the owner's.
 - **Adapters**: each kind implements `send` (and says whether its server settings are complete) in `apps/web/src/server/channels`. Email is the first: inbound through the existing `/api/inbound/email` path, outbound through SES or SMTP, threaded with `In-Reply-To` and `References`.
 
 ## Rooms
