@@ -29,10 +29,11 @@ test("the owner is recognised by exact address and others only by the allowed li
 });
 
 test("outbound mail is off unless SES or an SMTP URL is configured", () => {
-  assert.deepEqual(outboundConfig({}), { mode: "off" });
-  assert.deepEqual(outboundConfig({ UNDERSTUDY_OUTBOUND_EMAIL: "ses", AWS_REGION: "eu-west-1" }), { mode: "ses", region: "eu-west-1" });
-  assert.deepEqual(outboundConfig({ UNDERSTUDY_OUTBOUND_EMAIL: "smtps://user:pass@smtp.example.com:465" }), { mode: "smtp", url: "smtps://user:pass@smtp.example.com:465" });
-  assert.deepEqual(outboundConfig({ UNDERSTUDY_OUTBOUND_EMAIL: "http://example.com" }), { mode: "off" });
+  const env = (values: Record<string, string>) => values as unknown as NodeJS.ProcessEnv;
+  assert.deepEqual(outboundConfig(env({})), { mode: "off" });
+  assert.deepEqual(outboundConfig(env({ UNDERSTUDY_OUTBOUND_EMAIL: "ses", AWS_REGION: "eu-west-1" })), { mode: "ses", region: "eu-west-1" });
+  assert.deepEqual(outboundConfig(env({ UNDERSTUDY_OUTBOUND_EMAIL: "smtps://user:pass@smtp.example.com:465" })), { mode: "smtp", url: "smtps://user:pass@smtp.example.com:465" });
+  assert.deepEqual(outboundConfig(env({ UNDERSTUDY_OUTBOUND_EMAIL: "http://example.com" })), { mode: "off" });
 });
 
 test("a composed reply threads under the original and cannot smuggle headers through the name or subject", async () => {

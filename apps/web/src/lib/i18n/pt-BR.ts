@@ -617,6 +617,7 @@ export const ptBR: Messages = {
     queued: "O computador está reconectando. A mensagem está esperando e chega assim que ele voltar.",
     startingQueued: "Ligando o computador. A mensagem está esperando e chega assim que ele ligar.",
     queueExpired: "O computador não voltou em 30 minutos, então uma mensagem que esperava foi descartada. Mande de novo.",
+    computerOffline: "O computador deste agente está desligado agora.",
     connecting: "Conectando no computador…",
     waitingFrame: "Esperando a tela do computador…",
     offline: "Computador desligado",
@@ -1080,6 +1081,7 @@ export const ptBR: Messages = {
       trigger === "schedule" ? `Começou a rodada agendada: ${title}` : trigger === "test" ? `Começou um teste: ${title}` : trigger === "webhook" ? `Começou por outro sistema: ${title}` : trigger === "email" ? `Começou por um e-mail: ${title}` : `Começou: ${title}`,
     finishedOk: (summary: string) => `Terminou: ${summary}`,
     finishedFail: (summary: string) => `Não terminou: ${summary}`,
+    computerOffline: "O computador estava desligado.",
   },
   briefing: {
     header: "*Seus agentes nas últimas 24 horas*",

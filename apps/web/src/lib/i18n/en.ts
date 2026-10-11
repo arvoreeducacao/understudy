@@ -617,6 +617,7 @@ export const en = {
     queued: "Your computer is reconnecting. The message is waiting and arrives as soon as it is back.",
     startingQueued: "Starting the computer. The message is waiting and arrives as soon as it is on.",
     queueExpired: "The computer did not come back within 30 minutes, so a waiting message was dropped. Send it again.",
+    computerOffline: "This understudy's computer is off right now.",
     connecting: "Connecting to the computer…",
     waitingFrame: "Waiting for the computer screen…",
     offline: "Computer off",
@@ -1080,6 +1081,7 @@ export const en = {
       trigger === "schedule" ? `Scheduled run started: ${title}` : trigger === "test" ? `Test started: ${title}` : trigger === "webhook" ? `Started by another system: ${title}` : trigger === "email" ? `Started by an email: ${title}` : `Started: ${title}`,
     finishedOk: (summary: string) => `Done: ${summary}`,
     finishedFail: (summary: string) => `Did not finish: ${summary}`,
+    computerOffline: "The computer was off.",
   },
   briefing: {
     header: "*Your understudies, last 24 hours*",
