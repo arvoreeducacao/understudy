@@ -11,7 +11,7 @@ import type {
   Recipe,
   RecordedEvent,
 } from "@understudy/protocol";
-import type { BrainStatus, MessageArtifact } from "@/lib/db/schema";
+import type { BrainStatus, MessageArtifact, ProposalOrigin, ProposalStatus } from "@/lib/db/schema";
 
 export type ChatEntry = {
   id: string;
@@ -22,7 +22,21 @@ export type ChatEntry = {
   streamId?: string | null;
   attachments?: Attachment[];
   artifact?: MessageArtifact;
+  proposal?: ProposalView;
   at: string;
+};
+
+export type ProposalView = {
+  id: string;
+  agentId: string;
+  recipe: Recipe;
+  cron: string | null;
+  timezone: string;
+  reason: string;
+  origin: ProposalOrigin;
+  status: ProposalStatus;
+  recipeId: string | null;
+  createdAt: string;
 };
 
 export type ApprovalView = {
@@ -57,6 +71,7 @@ export type ServerToViewer =
   | { type: "recipe"; recordingId: string; recipeId: string; recipe: Recipe }
   | { type: "approval"; approval: ApprovalView }
   | { type: "approval_closed"; id: string; status: string }
+  | { type: "proposal"; proposal: ProposalView }
   | { type: "run_finished"; runId: string; ok: boolean; summary: string }
   | { type: "login_prompt"; brain: Brain; url?: string; code?: string; message: string }
   | { type: "login_done"; brain: Brain; ok: boolean; account?: string; message?: string }

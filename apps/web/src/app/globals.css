@@ -420,6 +420,29 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 .cx-approval-summary { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--mist); overflow-wrap: anywhere; }
 .cx-approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .cx-approval-actions .btn { min-width: 92px; }
+.cx-proposal { background: linear-gradient(180deg, rgb(99 161 255 / .08), rgb(99 161 255 / .02)), rgb(14 15 22 / .8); border-color: rgb(99 161 255 / .26); box-shadow: 0 0 0 4px rgb(99 161 255 / .04), 0 18px 40px -24px rgb(0 0 0 / .9); }
+.cx-proposal.is-answered { background: rgb(14 15 22 / .6); border-color: var(--line); box-shadow: none; animation: none; }
+.cx-proposal-icon { background: rgb(99 161 255 / .14); color: var(--sky); }
+.cx-proposal.is-answered .cx-proposal-icon { background: rgb(255 255 255 / .06); color: var(--ash); }
+.cx-proposal-recipe { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: rgb(255 255 255 / .03); border: 1px solid var(--line); }
+.cx-proposal-name { font-size: 13.5px; font-weight: 600; color: #fff; overflow-wrap: anywhere; }
+.cx-proposal-trigger { font-size: 12px; color: var(--smoke); overflow-wrap: anywhere; }
+.cx-proposal-steps { margin: 4px 0 0; padding-left: 20px; list-style: decimal; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.45; color: var(--mist); }
+.cx-proposal-steps li { overflow-wrap: anywhere; }
+.cx-proposal-steps li::marker { color: var(--smoke); }
+.cx-proposal-ask { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 0 6px; border-radius: 99px; font-size: 10.5px; line-height: 17px; vertical-align: 1px; color: var(--amber); background: rgb(242 180 90 / .12); white-space: nowrap; }
+.cx-proposal-more { align-self: flex-start; padding: 0; border: 0; background: none; font-size: 12px; color: var(--sky); cursor: pointer; }
+.cx-proposal-more:hover { text-decoration: underline; }
+.cx-proposal-meta { margin: 6px 0 0; display: grid; gap: 4px; font-size: 12.5px; }
+.cx-proposal-meta > div { display: grid; grid-template-columns: minmax(80px, auto) 1fr; gap: 12px; }
+.cx-proposal-meta dt { color: var(--smoke); }
+.cx-proposal-meta dd { margin: 0; min-width: 0; color: var(--mist); overflow-wrap: anywhere; }
+.cx-proposal-note { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--smoke); }
+.cx-proposal { container-type: inline-size; }
+@container (max-width: 440px) { .cx-proposal-actions { display: grid; grid-template-columns: 1fr 1fr; } .cx-proposal-actions .btn { min-width: 0; justify-content: center; } .cx-proposal-actions .btn.pri { grid-column: 1 / -1; order: -1; } }
+.cx-proposal-outcome { display: flex; align-items: center; gap: 10px; }
+.cx-proposal-link { font-size: 12.5px; color: var(--sky); }
+.cx-proposal-link:hover { text-decoration: underline; }
 
 .cx-composer { flex: none; margin: 8px 12px 12px; padding: 4px 6px 6px; border-radius: 20px; background: rgb(14 16 24 / .78); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), 0 12px 30px -20px rgb(0 0 0 / .9); cursor: text; transition: border-color .15s, box-shadow .15s; container-type: inline-size; }
 .cx-composer:focus-within { border-color: rgb(255 255 255 / .24); box-shadow: inset 0 1px 0 rgb(255 255 255 / .05), 0 0 0 4px rgb(255 255 255 / .04), 0 12px 30px -20px rgb(0 0 0 / .9); }
@@ -518,7 +541,7 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 @keyframes cx-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes cx-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
 @keyframes cx-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .cx-agent, .cx-user, .cx-approval, .cx-steps-list { animation: none; } .cx-shimmer { animation: none; color: var(--ash); background: none; } .cx-spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cx-agent, .cx-user, .cx-approval, .cx-proposal, .cx-steps-list { animation: none; } .cx-shimmer { animation: none; color: var(--ash); background: none; } .cx-spin { animation: none; } }
 
 .cx-show-ws { position: relative; flex: none; display: none; place-items: center; width: 36px; height: 36px; border-radius: 99px; color: var(--ash); background: var(--glass); border: 1px solid var(--glass-edge); cursor: pointer; transition: background .15s, color .15s; }
 .cx-show-ws:hover { color: var(--mist); background: rgb(255 255 255 / .1); }

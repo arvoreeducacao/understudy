@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Brain, AgentState, FileEntry, JobInfo, MemoryFile, RecordedEvent, Recipe } from "@understudy/protocol";
 import type { BrainStatus } from "@/lib/db/schema";
-import type { ApprovalView, ChatEntry, ServerToViewer, ViewerToServer } from "@/server/hub-types";
+import type { ApprovalView, ChatEntry, ProposalView, ServerToViewer, ViewerToServer } from "@/server/hub-types";
 
 export type Frame = { jpegBase64: string; width: number; height: number; url: string; desktop?: boolean };
 
@@ -39,6 +39,7 @@ export type Handlers = {
   onRecorded?: (event: RecordedEvent, seq: number, recordingId: string) => void;
   onApproval?: (approval: ApprovalView) => void;
   onApprovalClosed?: (id: string, status: string) => void;
+  onProposal?: (proposal: ProposalView) => void;
   onRunFinished?: (runId: string, ok: boolean, summary: string) => void;
   onMemory?: (files: MemoryFile[]) => void;
   onFiles?: (files: FileEntry[]) => void;
@@ -160,6 +161,9 @@ export function useAgentSocket(agentId: string, initial: Initial, handlers: Hand
             return;
           case "approval_closed":
             each((h) => h.onApprovalClosed?.(message.id, message.status));
+            return;
+          case "proposal":
+            each((h) => h.onProposal?.(message.proposal));
             return;
           case "run_finished":
             each((h) => h.onRunFinished?.(message.runId, message.ok, message.summary));

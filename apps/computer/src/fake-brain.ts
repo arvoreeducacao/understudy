@@ -269,6 +269,22 @@ export function startFakeTurn(config: BrainConfig, request: TurnRequest): Turn {
       emit({ kind: "text", text });
       return { ok: true, sessionId, text, usage };
     }
+    if (prompt.includes("call propose_task now")) {
+      const gatekeeper = await openGatekeeper(config.serverUrl, config.token, controller.signal);
+      const repeated = /asked you for this kind of work (\d+) times/.exec(prompt);
+      const args = {
+        title: "Repeat this request",
+        why: repeated ? `You asked me for this ${repeated[1]} times.` : "This took several steps and may be needed again.",
+        origin: repeated ? "repeated" : "multi_step",
+        trigger: "whenever the owner asks",
+        steps: [{ text: "Do what the owner asked in the chat" }, { text: "Share the result with the owner in the chat" }],
+      };
+      emit({ kind: "tool", name: "mcp__gatekeeper__propose_task", input: args });
+      const answer = await gatekeeper.call("propose_task", args);
+      emit({ kind: "tool_result", name: "mcp__gatekeeper__propose_task", isError: /^not proposed/i.test(answer), text: answer });
+      emit({ kind: "text", text: "DONE" });
+      return { ok: true, sessionId, text: "DONE", usage };
+    }
     const publish = prompt.match(/^publish the file (\S+) as "([^"]{1,120})"/im);
     const edit = prompt.match(/artifact_id (art_[A-Za-z0-9_-]+)\), version \d+\.\nThat version is saved on your computer at "([^"]+)"/);
     if (publish || edit) {

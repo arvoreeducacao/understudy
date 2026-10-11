@@ -145,6 +145,7 @@ export function AgentInside({
         setDrafts((d) => (d.some((x) => x.streamId === streamId) ? d.map((x) => (x.streamId === streamId ? { streamId, text } : x)) : [...d, { streamId, text }])),
       onApproval: (approval) => setApprovals((a) => (a.some((x) => x.id === approval.id) ? a : [...a, approval])),
       onApprovalClosed: (id) => setApprovals((a) => a.filter((x) => x.id !== id)),
+      onProposal: (proposal) => setChat((c) => c.map((e) => (e.proposal?.id === proposal.id ? { ...e, proposal } : e))),
       onRunFinished: () => router.refresh(),
     },
   );
@@ -349,7 +350,7 @@ export function AgentInside({
           {rows.map((row) => {
             if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
             if (row.kind === "steps") return <StepsGroup key={row.key} entries={row.entries} active={working && row === lastRow && drafts.length === 0} />;
-            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} onOpenArtifact={workspace.show} />;
+            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} onOpenArtifact={workspace.show} canAnswerProposal={owner} />;
           })}
           {drafts.map((d) => (
             <StreamingRow key={d.streamId} text={d.text} agentName={agent.name} look={agent.look} />

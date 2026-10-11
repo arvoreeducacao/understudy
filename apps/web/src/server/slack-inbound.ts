@@ -134,10 +134,15 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   }
   const assistant = isDm && Boolean(event.thread_ts);
   if (assistant && threadTs && !threadAgentId) await setThreadTitle(event.channel, threadTs, text).catch((error) => log("slack_title_error", { error: String(error) }));
-  await hub.addMessage(agent.id, "user", text, null, user.id, "slack");
+  const messageId = await hub.addMessage(agent.id, "user", text, null, user.id, "slack");
   await setThread(agent.id, { channel: event.channel, threadTs, assistant, slackUser: event.user, slackTeam: teamId });
   log("slack_message_routed", { agentId: agent.id, dm: isDm, assistant });
-  const result = await hub.deliver(agent.id, { type: "chat", text, from: user.name }, { source: "slack", slack: { channel: event.channel, threadTs } });
+  const repeated = await hub.proposals.repeatOf(agent.id, user.id, text, messageId).catch((error) => (log("repeat_check_error", { error: String(error) }), null));
+  const result = await hub.deliver(
+    agent.id,
+    { type: "chat", text, from: user.name, ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}) },
+    { source: "slack", slack: { channel: event.channel, threadTs } },
+  );
   if (result.status === "queued" && result.starting) await answer(copy.slackApp.starting, agent);
   else await setThreadStatus(agent.id, copy.slackApp.statusThinking).catch((error) => log("slack_status_error", { error: String(error) }));
 }
@@ -189,8 +194,7 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
   }
   reply(res, 200);
   const action = payload.actions?.[0];
-  if (payload.type !== "block_actions" || !action || !["approve", "deny"].includes(action.action_id ?? "")) return;
-  const approvalId = String(action.value ?? "");
+  if (payload.type !== "block_actions" || !action) return;
   const respond = (text: string, replace: boolean) =>
     payload.response_url?.startsWith("https://hooks.slack.com/")
       ? fetch(payload.response_url, {
@@ -199,6 +203,9 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
           body: JSON.stringify(replace ? { replace_original: true, text } : { response_type: "ephemeral", replace_original: false, text }),
         }).catch((error) => log("slack_respond_error", { error: String(error) }))
       : Promise.resolve();
+  if (action.action_id === "proposal_save" || action.action_id === "proposal_dismiss") return answerProposal(hub, payload.user?.id, String(action.value ?? ""), action.action_id === "proposal_save", respond);
+  if (!["approve", "deny"].includes(action.action_id ?? "")) return;
+  const approvalId = String(action.value ?? "");
   const user = await panelUser(payload.user?.id);
   const [approval] = approvalId
     ? await getDb().select({ id: schema.approvals.id, agentId: schema.approvals.agentId, summary: schema.approvals.summary }).from(schema.approvals).where(eq(schema.approvals.id, approvalId))
@@ -214,6 +221,29 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
   const status = ok ? null : await hub.approvalStatus(approval.id);
   const summary = escapeSlack(approval.summary);
   await respond(ok ? copy.slackApp.answered(summary, approved, escapeSlack(user.name)) : status === "cancelled" ? copy.slackApp.stoppedBeforeAnswer(summary) : copy.slackApp.alreadyAnswered(summary), true);
+}
+
+async function answerProposal(hub: Hub, slackUserId: string | undefined, proposalId: string, save: boolean, respond: (text: string, replace: boolean) => Promise<unknown>) {
+  const user = await panelUser(slackUserId);
+  const [proposal] = proposalId
+    ? await getDb()
+        .select({ id: schema.taskProposals.id, recipe: schema.taskProposals.recipe, ownerId: schema.agents.ownerId })
+        .from(schema.taskProposals)
+        .innerJoin(schema.agents, eq(schema.agents.id, schema.taskProposals.agentId))
+        .where(eq(schema.taskProposals.id, proposalId))
+    : [];
+  if (!user || !proposal || proposal.ownerId !== user.id) {
+    log("slack_proposal_refused", { proposalId, known: Boolean(user) });
+    await respond(copy.proposals.cannotAnswer, false);
+    return;
+  }
+  const answered = await hub.proposals.answer(proposal.id, save, user.id).catch((error) => {
+    log("slack_proposal_error", { proposalId, error: String(error) });
+    return undefined;
+  });
+  log("slack_proposal_answered", { proposalId, save, ok: Boolean(answered) });
+  if (answered === undefined) await respond(copy.proposals.failed, false);
+  else if (answered === null) await respond(copy.proposals.slackAlready(escapeSlack(proposal.recipe.title)), false);
 }
 
 async function handleCommand(res: ServerResponse, body: string) {

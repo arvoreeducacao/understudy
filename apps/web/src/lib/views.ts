@@ -1,6 +1,6 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "./db";
-import type { ApprovalView, ChatEntry } from "@/server/hub-types";
+import type { ApprovalView, ChatEntry, ProposalView } from "@/server/hub-types";
 
 export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[]> {
   const rows = await getDb()
@@ -9,9 +9,16 @@ export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[
     .where(eq(schema.messages.agentId, agentId))
     .orderBy(desc(schema.messages.createdAt))
     .limit(limit);
+  const proposalIds = rows.map((m) => m.proposalId).filter((id): id is string => Boolean(id));
+  const proposals = proposalIds.length ? await getDb().select().from(schema.taskProposals).where(inArray(schema.taskProposals.id, proposalIds)) : [];
+  const byId = new Map(proposals.map((row) => [row.id, toProposalView(row)]));
   return rows
     .reverse()
-    .map((m) => ({ id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.artifact ? { artifact: m.artifact } : {}) }));
+    .filter((m) => !m.proposalId || byId.has(m.proposalId))
+    .map((m) => {
+      const proposal = m.proposalId ? byId.get(m.proposalId) : undefined;
+      return { id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.artifact ? { artifact: m.artifact } : {}), ...(proposal ? { proposal } : {}) };
+    });
 }
 
 export async function loadPendingApprovals(agentId: string): Promise<ApprovalView[]> {
@@ -43,4 +50,19 @@ export async function loadRuns(agentId: string, limit = 8) {
     .where(eq(schema.runs.agentId, agentId))
     .orderBy(desc(schema.runs.startedAt))
     .limit(limit);
+}
+
+export function toProposalView(row: typeof schema.taskProposals.$inferSelect): ProposalView {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    recipe: row.recipe,
+    cron: row.cron,
+    timezone: row.timezone,
+    reason: row.reason,
+    origin: row.origin,
+    status: row.status,
+    recipeId: row.recipeId,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
