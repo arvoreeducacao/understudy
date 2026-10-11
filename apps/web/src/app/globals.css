@@ -1243,3 +1243,19 @@ button.ac-out { width: 100%; text-align: left; cursor: pointer; font: inherit; f
   :root[data-keyboard] .ap .ap-side.is-computer .pc-control, :root[data-keyboard] .ap .ap-side.is-computer .pc-rotate { display: none; }
   :root[data-keyboard] .ap .ap-side.is-computer .pc-frame { justify-content: flex-start; }
 }
+
+.cx-readonly { flex: none; margin: 8px 12px 12px; padding: 12px 14px; border-radius: 16px; background: rgb(255 255 255 / .04); border: 1px solid var(--glass-edge); color: var(--ash); font-size: 12.5px; line-height: 1.45; text-align: center; }
+.cx-run-note { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; width: 100%; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--glass-edge); background: rgb(255 255 255 / .03); color: var(--ash); font: inherit; font-size: 12px; line-height: 1.45; text-align: left; cursor: pointer; transition: background .15s; -webkit-tap-highlight-color: transparent; }
+.cx-run-note:hover { background: rgb(255 255 255 / .055); }
+.cx-run-note:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.cx-run-note.is-failed { border-color: rgb(255 99 99 / .24); background: rgb(255 99 99 / .05); }
+.cx-run-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.cx-run-note.is-open .cx-run-text { display: block; }
+.cx-run-note time { padding-top: 1px; color: var(--smoke); font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 1000px) {
+  .ap .cx-head { position: absolute; top: 0; left: 0; right: 0; z-index: 6; background: rgb(11 12 19 / .95); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); border-bottom: 1px solid transparent; transition: border-color .2s; }
+  .ap .cx-col.is-scrolled .cx-head { border-bottom-color: var(--glass-edge); }
+  .ap .cx-list { padding-top: calc(var(--cx-head-h, 64px) + 12px); scroll-padding-top: var(--cx-head-h, 64px); }
+  .ap .cx-readonly { margin-bottom: max(12px, env(safe-area-inset-bottom)); }
+}

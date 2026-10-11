@@ -186,6 +186,9 @@ export function AgentInside({
     : {};
 
   const pinned = useRef(true);
+  const [scrolled, setScrolled] = useState(false);
+  const headRef = useRef<HTMLElement | null>(null);
+  const [headHeight, setHeadHeight] = useState<number | null>(null);
   const { width, dragging, handleProps } = useChatWidth(initialChatWidth);
   const workspace = useWorkspaceVisibility(initialWorkspaceHidden);
   const full = owner && ownerData !== null;
@@ -212,6 +215,24 @@ export function AgentInside({
     const el = listRef.current;
     if (el && pinned.current) el.scrollTo({ top: el.scrollHeight });
   }, [chat.length, approvals.length, drafts, live.state]);
+
+  useEffect(() => {
+    const head = headRef.current;
+    if (!head) return;
+    const observer = new ResizeObserver(() => setHeadHeight(Math.round(head.getBoundingClientRect().height)));
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTo({ top: el.scrollHeight });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const state: AgentState = approvals.length > 0 ? "waiting_you" : live.state;
   const brainName = messages.brains[agent.brain].name;
@@ -293,7 +314,11 @@ export function AgentInside({
       style={{ "--chat-w": `${width}px`, "--agent": accent } as CSSProperties}
     >
       <AgentRail data={rail} currentId={agent.id} current={{ state, note: live.note }} slim={wide && !workspace.hidden} />
-      <section className={`cx-col ${dropping ? "is-dropping" : ""}`} {...dropProps}>
+      <section
+        className={`cx-col ${dropping ? "is-dropping" : ""} ${scrolled ? "is-scrolled" : ""}`}
+        style={headHeight ? ({ "--cx-head-h": `${headHeight}px` } as CSSProperties) : undefined}
+        {...dropProps}
+      >
         {dropping && (
           <div className="fx-drop" aria-hidden>
             <span className="fx-drop-icon">
@@ -303,7 +328,7 @@ export function AgentInside({
             <span>{messages.attachments.dropHint}</span>
           </div>
         )}
-        <header className="cx-head">
+        <header ref={headRef} className="cx-head">
           <Link href="/" aria-label={messages.common.back} className="cx-back">
             <ArrowLeft size={17} aria-hidden />
           </Link>
@@ -350,6 +375,7 @@ export function AgentInside({
           onScroll={(e) => {
             const el = e.currentTarget;
             pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            setScrolled(el.scrollTop > 4);
           }}
         >
           {chat.length === 0 && approvals.length === 0 && drafts.length === 0 && (
@@ -368,7 +394,11 @@ export function AgentInside({
             <ApprovalCard key={approval.id} approval={approval} canAnswer={access !== "viewer"} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
           ))}
         </div>
-        {owner && <Composer agentName={agent.name} draft={draft} setDraft={setDraft} onSubmit={submit} speech={speech} attachments={attachments} />}
+        {owner ? (
+          <Composer agentName={agent.name} draft={draft} setDraft={setDraft} onSubmit={submit} speech={speech} attachments={attachments} />
+        ) : (
+          <p className="cx-readonly">{messages.agentPage.readOnly(ownerName.split(" ")[0], agent.name)}</p>
+        )}
         {wide && <div className="cx-resize" {...handleProps} />}
       </section>
 

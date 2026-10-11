@@ -57,6 +57,26 @@ export function DayDivider({ at }: { at: string }) {
   );
 }
 
+const LONG_SYSTEM_LINE = 90;
+
+function SystemRow({ text, at }: { text: string; at: string }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= LONG_SYSTEM_LINE)
+    return (
+      <div className="cx-system" suppressHydrationWarning>
+        <span>{text}</span>
+        <time dateTime={at} title={fullTimeOf(at)}>{timeOf(at)}</time>
+      </div>
+    );
+  const failed = text.startsWith(messages.runs.finishedFail(""));
+  return (
+    <button type="button" className={`cx-run-note ${failed ? "is-failed" : ""} ${open ? "is-open" : ""}`} aria-expanded={open} onClick={() => setOpen((o) => !o)} suppressHydrationWarning>
+      <span className="cx-run-text">{text}</span>
+      <time dateTime={at} title={fullTimeOf(at)}>{timeOf(at)}</time>
+    </button>
+  );
+}
+
 export function MessageRow({
   entry,
   continued,
@@ -73,14 +93,7 @@ export function MessageRow({
   onOpenArtifact?: () => void;
 }) {
   const files = agentId && entry.attachments?.length ? <AttachmentList agentId={agentId} attachments={entry.attachments} /> : null;
-  if (entry.role === "system") {
-    return (
-      <div className="cx-system" suppressHydrationWarning>
-        <span>{entry.text}</span>
-        <time dateTime={entry.at} title={fullTimeOf(entry.at)}>{timeOf(entry.at)}</time>
-      </div>
-    );
-  }
+  if (entry.role === "system") return <SystemRow text={entry.text} at={entry.at} />;
   if (entry.role === "user") {
     return (
       <div className={`cx-user ${continued ? "is-continued" : ""}`}>

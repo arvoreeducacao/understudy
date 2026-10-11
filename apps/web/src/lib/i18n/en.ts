@@ -671,6 +671,7 @@ export const en = {
   agentPage: {
     railLabel: "Understudies",
     switchAgent: "Switch understudy",
+    readOnly: (owner: string, name: string) => `Only ${owner} can talk to ${name}. You can follow along here.`,
     allAgents: "All understudies",
     newAgent: "New understudy",
     cardLabel: (name: string) => `About ${name}`,

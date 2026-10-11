@@ -671,6 +671,7 @@ export const ptBR: Messages = {
   agentPage: {
     railLabel: "Agentes",
     switchAgent: "Trocar de agente",
+    readOnly: (owner: string, name: string) => `Só ${owner} conversa com ${name}. Aqui você acompanha.`,
     allAgents: "Todos os agentes",
     newAgent: "Novo agente",
     cardLabel: (name: string) => `Sobre ${name}`,
