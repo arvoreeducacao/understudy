@@ -24,7 +24,7 @@ function proposeTask(answer: (input: Proposed) => unknown) {
   const calls: Proposed[] = [];
   const hub = { recordings: {}, proposals: { propose: async (_agentId: string, input: Proposed) => (calls.push(input), answer(input)) } };
   const tool = taskTools(hub as never, { id: "agt_x" }).find((t) => t.name === "propose_task")!;
-  return { tool, calls, run: (args: unknown) => (tool.run as (a: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(tool.schema.parse(args)) };
+  return { tool, calls, run: (args: unknown) => (tool.run as unknown as (a: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(tool.schema.parse(args)) };
 }
 
 const draft = {
