@@ -39,7 +39,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="app">
       <SideShell
-        alert={waiting + pendingUsers}
+        waiting={waiting}
+        moreAlert={pendingUsers}
         brand={
         <Link href="/" className="brand">
           <AgentFigure size={28} />

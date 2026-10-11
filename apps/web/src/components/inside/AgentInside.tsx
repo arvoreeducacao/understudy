@@ -1,7 +1,7 @@
 "use client";
 
 import { cleanLook, type Look } from "@/lib/look";
-import { ArrowLeft, Monitor, PanelRight, Paperclip } from "lucide-react";
+import { ArrowLeft, ChevronDown, Monitor, PanelRight, Paperclip } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
@@ -21,6 +21,8 @@ import { AgentWorkspace, useWorkspaceFeeds, type OwnerData } from "@/components/
 import { ComputerPanel } from "@/components/workspace/ComputerPanel";
 import { parseView, tabSearch, type AgentView } from "@/lib/workspace-tabs";
 import { AgentRail, initials, type RailData } from "./AgentRail";
+import { AgentSwitcher } from "./AgentSwitcher";
+import { useVisualViewport } from "@/components/useVisualViewport";
 import type { RunSummary, TaskSummary } from "@/components/workspace/TasksPanel";
 import { ARTIFACT_EVENT } from "@/components/artifacts/artifact-ui";
 import { useAttachments } from "./useAttachments";
@@ -190,6 +192,8 @@ export function AgentInside({
   const { view, hrefFor, select } = useAgentView(full);
   const feeds = useWorkspaceFeeds(listen, ownerData);
   const [customizing, setCustomizing] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  useVisualViewport();
 
   const open = useCallback(
     (next: AgentView) => {
@@ -305,7 +309,12 @@ export function AgentInside({
           </Link>
           <AgentFigure state={state} size={34} look={agent.look} count={approvals.length} />
           <div className="min-w-0 flex-1">
-            <h1 className="cx-title">{agent.name}</h1>
+            <h1 className="cx-title">
+              <button type="button" className="cx-switch" aria-haspopup="dialog" aria-label={`${agent.name}, ${messages.agentPage.switchAgent}`} onClick={() => setSwitching(true)}>
+                <span className="truncate">{agent.name}</span>
+                <ChevronDown size={15} className="cx-switch-chev" aria-hidden />
+              </button>
+            </h1>
             <div className="cx-subtitle">
               <span className={`cx-state ${live.online ? STATE_PILL[state] : ""}`} aria-hidden />
               <span className="truncate">{t.ownerLine(ownerName.split(" ")[0], brainName)}</span>
@@ -367,6 +376,7 @@ export function AgentInside({
         {side()}
       </aside>
 
+      <AgentSwitcher open={switching} onClose={() => setSwitching(false)} data={rail} currentId={agent.id} current={{ state, note: live.note }} />
       {owner && <CustomizeSheet open={customizing} name={agent.name} look={agent.look} onSave={saveLook} onClose={() => setCustomizing(false)} />}
     </div>
   );
