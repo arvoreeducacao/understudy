@@ -155,6 +155,11 @@ else
   aws iam update-assume-role-policy --role-name "$web_role" --policy-document "$trust"
 fi
 aws iam put-role-policy --role-name "$web_role" --policy-name "${NAME_PREFIX}-inbound-email-read" --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::${bucket}/raw/*\"}]}"
+aws iam put-role-policy --role-name "$web_role" --policy-name "${NAME_PREFIX}-channel-email-send" --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"ses:SendEmail\",\"ses:SendRawEmail\"],\"Resource\":\"arn:aws:ses:${AWS_REGION}:${AWS_ACCOUNT_ID}:identity/${INBOUND_EMAIL_DOMAIN}\",\"Condition\":{\"StringLike\":{\"ses:FromAddress\":\"*@${INBOUND_EMAIL_DOMAIN}\"}}}]}"
+sending=$(aws sesv2 get-account --query 'ProductionAccessEnabled' --output text 2>/dev/null || echo unknown)
+if [ "$sending" != "True" ]; then
+  echo "SES sending in $AWS_REGION is in the sandbox: replies only reach verified addresses until production access is granted"
+fi
 web_role_arn=$(aws iam get-role --role-name "$web_role" --query Role.Arn --output text)
 echo "web role $web_role_arn"
 
@@ -174,5 +179,6 @@ panel settings:
   UNDERSTUDY_INBOUND_EMAIL_DOMAIN=${INBOUND_EMAIL_DOMAIN}
   UNDERSTUDY_INBOUND_SNS_TOPIC_ARN=${topic_arn}
   UNDERSTUDY_INBOUND_S3_BUCKET=${bucket}
+  UNDERSTUDY_OUTBOUND_EMAIL=ses
   service account role: ${web_role_arn}
 EOF

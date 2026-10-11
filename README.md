@@ -36,7 +36,7 @@ Everything above runs locally with the scripted brain and fictional data (Northw
 - **Learns by watching.** Record a task in the understudy's browser, or from your own Chrome with the extension, narrating by voice or text. Or just describe it.
 - **Runs on its own.** Schedules, per-task webhooks and email addresses, and watching a page for changes.
 - **Asks before the irreversible.** The computer inspects the real element before every click and pauses pay, send, submit and delete-like actions for the owner. Owners add their own rules: maximum amounts, allowed email domains, blocked sites.
-- **Talks where you are.** Chat in the panel, DMs and mentions on Slack, approvals from Slack, a daily briefing, push notifications on the phone.
+- **Talks where you are.** Chat in the panel, DMs and mentions on Slack, its own email address it answers in the same thread, approvals from Slack, a daily briefing, push notifications on the phone.
 - **Works with others.** Understudies message each other and hand tasks over; owners talk to several at once in rooms.
 - **Uses your tools.** Admins register remote MCP servers; owners choose which actions ask first. A per-understudy vault fills passwords on the right site without the secret reaching the model.
 - **Yours to run.** Apache 2.0, self-hosted with Docker Compose, English and Brazilian Portuguese panel.

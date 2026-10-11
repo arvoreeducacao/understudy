@@ -13,6 +13,8 @@ import { RulesEditor } from "@/components/RulesEditor";
 import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
+import type { ChannelSettings } from "@/server/channels/settings";
+import { ChannelsSection } from "./ChannelsSection";
 import { PanelSection } from "./PanelSection";
 
 export type SettingsData = {
@@ -24,6 +26,7 @@ export type SettingsData = {
   serverDefaultModel: string | null;
   rules: OwnerRule[];
   members: { userId: string; name: string; email: string; role: string }[];
+  channels: ChannelSettings;
 };
 
 function serialize(form: HTMLFormElement) {
@@ -162,6 +165,8 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
           </div>
         )}
       </form>
+
+      <ChannelsSection agentId={values.id} channels={data.channels} />
 
       <PanelSection title={messages.rules.title} hint={t.rulesSummary(data.rules.length)} collapsible>
         <p className="m-0 fld-hint">{messages.rules.short}</p>

@@ -32,6 +32,8 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_INBOUND_EMAIL_DOMAIN` | Domain whose mail starts tasks; each task gets `<task>.<random>@<domain>`. Empty turns inbound email off |
 | `UNDERSTUDY_INBOUND_SNS_TOPIC_ARN`, `UNDERSTUDY_INBOUND_S3_BUCKET` | With Amazon SES receiving: the only SNS topic and S3 bucket the panel accepts mail from |
 | `UNDERSTUDY_INBOUND_TOKEN` | With any other provider: bearer token (24+ characters) for posting raw MIME to `/api/inbound/email` |
+| `UNDERSTUDY_OUTBOUND_EMAIL` | How understudies answer email: `ses` (Amazon SES, with the panel's AWS credentials) or an SMTP URL such as `smtps://user:password@smtp.example.com:465`. Empty turns the email channel off; task addresses keep working |
+| `UNDERSTUDY_OUTBOUND_EMAIL_REGION` | SES region for sending; defaults to `AWS_REGION`, then the inbound topic's region |
 
 **Host**
 
@@ -55,6 +57,18 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_FAKE_BRAIN` | `1` replaces the brain with a scripted one, for testing without any account |
 
 For example, to run every understudy on one Anthropic key, set `ANTHROPIC_API_KEY` and `UNDERSTUDY_COMPUTER_ENV=ANTHROPIC_API_KEY`.
+
+## Talking by email
+
+With an inbound domain and `UNDERSTUDY_OUTBOUND_EMAIL` set, an owner can give each understudy its own address under Settings › Channels (`<name>.<random>@<domain>`, separate from task addresses). Writing to it is like writing in the panel chat: the message joins the understudy's chat and memory, the answer comes back in the same email thread with the files it shared attached (up to 20 MB per reply; larger files are listed instead), and every step that cannot be undone still asks first in the panel or on Slack.
+
+- **The owner** is recognised by their exact account address. With Amazon SES the mail must pass DMARC; with any other provider, authenticating the sender is the provider's job.
+- **Other people** the owner lists (addresses or whole domains) reach the understudy as someone else: their words are quoted as untrusted data, they never count as the owner, and the answer goes back to them.
+- **Anyone else** is held for the owner (Settings › Channels lists the message with Let it through, Always allow and Discard) or ignored, as the owner chooses.
+- Automatic mail (out-of-office, bounces, mailing lists) is dropped, and the understudy's own mail is marked `Auto-Submitted` so two auto-responders do not loop.
+- A message in the panel takes the conversation back from email; the next email takes it over again.
+
+With SES, `infra/aws/06-inbound-email.sh` also allows the panel role to send from the inbound domain (DKIM is already set up there). New SES accounts start in the sandbox, where replies only reach verified addresses until AWS grants production access. With SMTP, the server must be allowed to send from that domain, and its SPF and DKIM should cover it.
 
 ## Starting tasks by email
 

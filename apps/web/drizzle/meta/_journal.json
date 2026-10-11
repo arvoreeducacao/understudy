@@ -190,6 +190,13 @@
       "when": 1791517799292,
       "tag": "0026_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791751204967,
+      "tag": "0027_channels",
+      "breakpoints": true
     }
   ]
 }

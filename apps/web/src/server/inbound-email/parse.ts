@@ -10,6 +10,10 @@ export type ParsedEmail = {
   date: string | null;
   text: string;
   attachments: ParsedAttachment[];
+  messageId: string | null;
+  inReplyTo: string | null;
+  references: string[];
+  automated: boolean;
 };
 
 export const MAX_TEXT_CHARS = 20000;
@@ -47,6 +51,21 @@ function htmlToText(html: string) {
     .trim();
 }
 
+const MESSAGE_ID = /<[^<>\s]{1,300}>/g;
+
+export function messageIds(value: string | null | undefined) {
+  return (value ?? "").match(MESSAGE_ID)?.slice(-50) ?? [];
+}
+
+function automatedMail(headers: { key: string; value: string }[], from: string | null) {
+  const value = (key: string) => headers.find((header) => header.key === key)?.value.trim().toLowerCase() ?? "";
+  const auto = value("auto-submitted");
+  if (auto && auto !== "no") return true;
+  if (["bulk", "junk", "list", "auto_reply"].includes(value("precedence"))) return true;
+  if (value("list-id") || value("list-unsubscribe") || value("x-autoreply") || value("x-autorespond")) return true;
+  return /^(mailer-daemon|postmaster|no-?reply|do-?not-?reply)@/.test(from ?? "");
+}
+
 export async function parseEmail(raw: Buffer | Uint8Array, maxAttachmentBytes: number): Promise<ParsedEmail> {
   const email = await PostalMime.parse(raw, { attachmentEncoding: "base64", maxNestingDepth: 20 });
   const from = mailbox(email.from);
@@ -69,5 +88,9 @@ export async function parseEmail(raw: Buffer | Uint8Array, maxAttachmentBytes: n
     date: email.date ?? null,
     text: body.slice(0, MAX_TEXT_CHARS),
     attachments,
+    messageId: messageIds(email.messageId)[0] ?? null,
+    inReplyTo: messageIds(email.inReplyTo)[0] ?? null,
+    references: messageIds(email.references),
+    automated: automatedMail(email.headers ?? [], from?.address ?? null),
   };
 }

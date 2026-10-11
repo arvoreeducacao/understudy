@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { ArtifactEditSchema, MEMORY_FILE_MAX_BYTES } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import { credentialSite } from "@/lib/credential-site";
+import { clearRoute } from "../channels/store";
 import { mirrorPanelMessage } from "../slack-threads";
 import { messages as copy } from "@/lib/messages";
 import { prepareEdit } from "../artifacts/service";
@@ -44,6 +45,7 @@ export const viewerHandlers: Handlers = {
     if (!text && !attachments.length) return;
     const [user] = await getDb().select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
     await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments, prepared?.card);
+    await clearRoute(agentId);
     const lead = prepared ? copy.artifacts.editMirror(prepared.title, prepared.card.version) : "";
     const mirrored = [lead, text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n");
     mirrorPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("slack_mirror_error", { agentId, error: String(error) }));

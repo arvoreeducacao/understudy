@@ -172,6 +172,7 @@ async function main() {
           text: message.text,
           from: message.from,
           ...(message.fromAgent ? { fromAgent: message.fromAgent } : {}),
+          ...(message.external ? { external: message.external } : {}),
           ...(message.model ? { model: message.model } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           ...(message.artifactEdit ? { artifactEdit: message.artifactEdit } : {}),

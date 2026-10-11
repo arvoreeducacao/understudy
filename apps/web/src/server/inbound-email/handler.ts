@@ -5,6 +5,8 @@ import { sameSecret } from "@/lib/secret-compare";
 import type { Hub } from "../hub";
 import { RateLimiter } from "../rate-limit";
 import { clientIp } from "../webhook";
+import { receiveChannelEmail } from "../channels/email/inbound";
+import { channelByAddress, type AddressedChannel } from "../channels/store";
 import { s3GetObject } from "./aws";
 import { inboundConfig, type InboundConfig } from "./config";
 import { findInboundTask, type InboundTask } from "./lookup";
@@ -18,13 +20,14 @@ const MAX_RAW_BYTES = 30 * 1024 * 1024;
 export type InboundDeps = {
   config: () => InboundConfig;
   findTask: (localPart: string) => Promise<InboundTask | null>;
+  findChannel?: (localPart: string) => Promise<AddressedChannel | null>;
   fetchRaw: (bucket: string, key: string, region: string, maxBytes: number) => Promise<Buffer>;
   fetchCert?: CertFetcher;
   confirm?: typeof confirmSubscription;
   now?: () => number;
 };
 
-const defaultDeps: InboundDeps = { config: inboundConfig, findTask: findInboundTask, fetchRaw: s3GetObject };
+const defaultDeps: InboundDeps = { config: inboundConfig, findTask: findInboundTask, findChannel: (localPart) => channelByAddress("email", localPart), fetchRaw: s3GetObject };
 
 const limiter = new RateLimiter();
 const seen = new Map<string, number>();
@@ -83,7 +86,8 @@ export async function processEmail(hub: Hub, deps: InboundDeps, raw: Buffer, rec
   for (const localPart of localParts) {
     const task = await deps.findTask(localPart);
     if (!task) {
-      outcomes.push({ localPart, result: "unknown_address" });
+      const channel = await deps.findChannel?.(localPart);
+      outcomes.push({ localPart, result: channel ? await receiveChannelEmail(hub, channel, email, problem, now) : "unknown_address" });
       continue;
     }
     if (problem) {

@@ -112,7 +112,7 @@ export const InputEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const ServerToComputerSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(), artifactEdit: ArtifactEditContextSchema.optional() }),
+  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), external: z.object({ channel: z.string().min(1).max(40), sender: z.string().min(1).max(320) }).optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(), artifactEdit: ArtifactEditContextSchema.optional() }),
   z.object({ type: z.literal("room_turn"), roomId: id, prompt: z.string().max(64 * 1024), model: optionalText }),
   z.object({ type: z.literal("input"), event: InputEventSchema }),
   z.object({ type: z.literal("record_start"), recordingId: id }),
