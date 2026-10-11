@@ -57,7 +57,7 @@ export function MemoryBrowser({ link, files, look }: { link: Pick<AgentLink, "li
         </div>
       ) : (
       <div className="grid grid-cols-[240px_minmax(0,1fr)] gap-4 @max-[700px]:grid-cols-1">
-        <div className="card p-3 flex flex-col gap-1 self-start max-h-[70vh] overflow-y-auto scroll-thin @max-[700px]:max-h-[240px]">
+        <div className="card p-3 flex flex-col gap-1 self-start max-h-[70dvh] overflow-y-auto scroll-thin @max-[700px]:max-h-[240px]">
           {groups.map(([folder, list], index) => (
             <div key={folder} className="flex flex-col gap-0.5">
               {folder.startsWith("skills/") && !groups[index - 1]?.[0].startsWith("skills/") && (
@@ -87,7 +87,7 @@ export function MemoryBrowser({ link, files, look }: { link: Pick<AgentLink, "li
             </div>
           ))}
         </div>
-        <div className="card p-4 flex flex-col gap-3 min-h-[50vh] min-w-0">
+        <div className="card p-4 flex flex-col gap-3 min-h-[50dvh] min-w-0">
           {current ? (
             <>
               <div className="flex items-center gap-3 text-[12.5px] text-smoke flex-wrap">
@@ -97,7 +97,7 @@ export function MemoryBrowser({ link, files, look }: { link: Pick<AgentLink, "li
               </div>
               <Textarea
                 size="sm"
-                className="flex-1 font-mono !leading-[1.55] resize-none !min-h-[40vh]"
+                className="flex-1 font-mono !leading-[1.55] resize-none !min-h-[40dvh]"
                 value={draft}
                 readOnly={readOnly}
                 onChange={(e) => {
