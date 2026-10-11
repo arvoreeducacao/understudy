@@ -10,6 +10,8 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { useAgentSocket } from "@/components/live/useAgentSocket";
 import type { BrainStatus } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
+import { PHONE, useMediaQuery } from "@/components/useMediaQuery";
+import { TeachByWords } from "./TeachByWords";
 import { stepsFromEvents } from "./TeachSession";
 
 const t = messages.extension;
@@ -26,7 +28,7 @@ export function TeachChoice({
   const router = useRouter();
   const [events, setEvents] = useState<RecordedEvent[]>(initialEvents);
   const [failure, setFailure] = useState<string | null>(null);
-  const { live } = useAgentSocket(
+  const { live, send } = useAgentSocket(
     agent.id,
     { state: agent.state, note: null, computerStatus: agent.computerStatus, brains: agent.brains },
     {
@@ -46,9 +48,26 @@ export function TeachChoice({
   const processing = live.recordingStatus === "processing" && !failure;
   const actions = steps.filter((step) => step.kind === "action").length;
   const face: AgentState = processing ? "thinking" : events.length ? "listening" : "calm";
+  const phone = useMediaQuery(PHONE);
+
+  if (phone && events.length === 0)
+    return (
+      <TeachByWords
+        agent={agent}
+        face={face}
+        online={live.online}
+        brainReady={live.brains.some((brain) => brain.loggedIn)}
+        processing={processing}
+        failure={failure ? `${t.liveFailed} ${failure}` : null}
+        onSubmit={(text) => {
+          setFailure(null);
+          return send({ type: "teach_text", text });
+        }}
+      />
+    );
 
   return (
-    <div className="sky-page min-h-screen px-6 py-6 max-[700px]:px-4">
+    <div className="sky-page min-h-dvh px-6 py-6 max-[700px]:px-4">
       <div className="max-w-[920px] mx-auto flex flex-col gap-6">
         <Link href={`/agents/${agent.id}`} aria-label={messages.common.back} className="text-ash hover:text-mist no-underline inline-flex self-start">
           <ArrowLeft size={18} aria-hidden />
