@@ -207,3 +207,22 @@ test("the webhook only accepts Telegram's secret header for that channel", { ski
   const { channelSettings } = await import("../settings");
   assert.equal((await channelSettings(ids.agent)).telegram.held.length, 1);
 });
+
+test("Slack and Telegram share one reply path: the conversation that spoke last gets the answer", { skip }, async () => {
+  const { hub } = await connected();
+  await pair(hub);
+  const { currentConversation } = await import("../relay");
+  const { setThread } = await import("../../slack-threads");
+  await setThread(ids.agent, { channel: "D123", threadTs: "1.1", assistant: true });
+  assert.equal((await currentConversation(ids.agent))?.kind, "slack");
+  await send(hub, message(OWNER_TG, "Switching to Telegram"));
+  assert.equal((await currentConversation(ids.agent))?.kind, "telegram");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await setThread(ids.agent, { channel: "D123", threadTs: "1.2", assistant: true });
+  assert.equal((await currentConversation(ids.agent))?.kind, "slack");
+  const { clearRoute } = await import("../store");
+  await clearRoute(ids.agent);
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().delete(schema.slackThreads).where(eq(schema.slackThreads.agentId, ids.agent));
+  assert.equal(await currentConversation(ids.agent), null);
+});

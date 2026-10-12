@@ -2,17 +2,14 @@ import { and, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
-import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { sendPush } from "../push";
 import { notifyApprovalOnChannel } from "../channels/approval-notify";
-import { postApprovalInThread } from "../slack-threads";
+import { slackApprovalMessage } from "../channels/slack/adapter";
 import type { ApprovalView } from "../hub-types";
-import { isOffRecipe } from "@/lib/approval-fields";
-import { agentIdentity, escapeSlack, sendDirectMessage, slackInteractive } from "../slack";
-import { clipPreview, slackPreview } from "../slack-preview";
+import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
 import { log, type Answer } from "./shared";
 
 export class Approvals {
@@ -219,29 +216,6 @@ export class Approvals {
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
       .where(eq(schema.agents.id, agentId));
     if (!owner) return;
-    const link = `${env.publicUrl}/waiting`;
-    const fieldsText = approval.fields.map((f) => `*${escapeSlack(f.label)}:* ${f.value.trim() ? slackPreview(f.value) : `_${copy.approvals.emptyValue}_`}`).join("\n");
-    const clipped = clipPreview(fieldsText);
-    const fields = clipped.clipped ? `${clipped.text}…\n${copy.slack.fullInPanel}` : clipped.text;
-    const text = copy.slack.approvalText(escapeSlack(owner.name), escapeSlack(approval.summary));
-    const interactive = await slackInteractive();
-    const blocks = [
-      ...(isOffRecipe(approval.fields) ? [{ type: "section", text: { type: "mrkdwn", text: `:warning: ${copy.approvals.offRecipe}` } }] : []),
-      { type: "section", text: { type: "mrkdwn", text } },
-      ...(fields ? [{ type: "section", text: { type: "mrkdwn", text: fields } }] : []),
-      {
-        type: "actions",
-        elements: [
-          ...(interactive
-            ? [
-                { type: "button", action_id: "approve", text: { type: "plain_text", text: copy.approvals.approve }, value: approval.id, style: "primary" },
-                { type: "button", action_id: "deny", text: { type: "plain_text", text: copy.approvals.deny }, value: approval.id, style: "danger" },
-              ]
-            : []),
-          { type: "button", action_id: "open", text: { type: "plain_text", text: copy.slack.openPanel }, url: link, ...(interactive ? {} : { style: "primary" }) },
-        ],
-      },
-    ];
     const approvers = await db
       .select({ id: schema.user.id, email: schema.user.email })
       .from(schema.agentMembers)
@@ -253,10 +227,10 @@ export class Approvals {
       url: "/waiting",
       tag: `approval-${approval.id}`,
     }).catch((error) => log("push_error", { error: String(error) }));
-    notifyApprovalOnChannel(this.hub, agentId, approval).catch((error) => log("approval_channel_error", { error: String(error) }));
+    const posted = await notifyApprovalOnChannel(this.hub, agentId, approval).catch((error) => (log("approval_channel_error", { error: String(error) }), null));
+    const { text, blocks } = await slackApprovalMessage(owner.name, approval);
     const as = agentIdentity({ id: agentId, name: owner.name });
-    const inThread = await postApprovalInThread(agentId, blocks, text).catch(() => false);
-    const recipients = inThread ? approvers : [owner, ...approvers];
+    const recipients = posted === "slack" ? approvers : [owner, ...approvers];
     for (const person of recipients) await sendDirectMessage(person, text, blocks, as);
   }
 

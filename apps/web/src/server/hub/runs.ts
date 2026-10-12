@@ -9,7 +9,7 @@ import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { sendPush } from "../push";
-import { finishRunProgress, startRunProgress } from "../slack-threads";
+import { relayRunFinished, relayRunStarted } from "../channels/relay";
 import { log } from "./shared";
 
 export class Runs {
@@ -50,7 +50,7 @@ export class Runs {
       context: context || undefined,
     }, { source: "run", runId });
     log("run_started", { runId, recipeId, trigger, delivery: delivery.status });
-    startRunProgress(recipe.agentId, runId, recipe.recipe.title, steps.steps.map((step) => step.text)).catch((error) => log("slack_progress_error", { error: String(error) }));
+    relayRunStarted(recipe.agentId, runId, recipe.recipe.title, steps.steps.map((step) => step.text)).catch((error) => log("slack_progress_error", { error: String(error) }));
     await db
       .update(schema.agents)
       .set({ state: "working", stateNote: recipe.recipe.title, updatedAt: new Date() })
@@ -91,7 +91,7 @@ export class Runs {
     if (run.recipeId) {
       const [recipe] = await db.select({ recipe: schema.recipes.recipe }).from(schema.recipes).where(eq(schema.recipes.id, run.recipeId));
       if (recipe) {
-        await finishRunProgress(agentId, runId, recipe.recipe.title, recipe.recipe.steps.map((step) => step.text), ok, summary).catch((error) => log("slack_progress_error", { error: String(error) }));
+        await relayRunFinished(agentId, runId, recipe.recipe.title, recipe.recipe.steps.map((step) => step.text), ok, summary).catch((error) => log("slack_progress_error", { error: String(error) }));
       }
     }
   }

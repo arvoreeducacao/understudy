@@ -6,9 +6,7 @@ import { effectiveModel } from "@/lib/models";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { taskLink } from "../task-tools";
-import { activeThread, relayActivity, relayAgentChat, streamDelta } from "../slack-threads";
-import { flushReplies, queueReplyText, routeWins } from "../channels/relay";
-import { activeRoute } from "../channels/store";
+import { currentConversation, flushReplies, relayActivityText, relayDelta, relayReply } from "../channels/relay";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
@@ -61,19 +59,19 @@ export const computerHandlers: Handlers = {
   async chat(hub, agentId, message) {
     if (message.roomId) return hub.rooms.agentSaid(agentId, message.roomId, String(message.text ?? ""));
     const text = String(message.text ?? "").slice(0, 8000);
-    const thread = message.runId ? null : await activeThread(agentId);
-    const route = message.runId ? null : routeWins(await activeRoute(agentId), thread);
+    const conversation = message.runId ? null : await currentConversation(agentId);
     const streamId = message.runId ? undefined : message.streamId;
-    await hub.addMessage(agentId, "agent", text, message.runId, undefined, route ? route.kind : thread ? "slack" : undefined, streamId);
-    if (route) await queueReplyText(route, text).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
-    else if (thread) relayAgentChat(agentId, text, streamId).catch((error) => log("slack_relay_error", { agentId, error: String(error) }));
+    await hub.addMessage(agentId, "agent", text, message.runId, undefined, conversation?.kind, streamId);
+    if (!conversation) return;
+    const relayed = relayReply(conversation, agentId, text, streamId).catch((error) => log("channel_relay_error", { agentId, kind: conversation.kind, error: String(error) }));
+    if (conversation.route) await relayed;
   },
 
   async chat_delta(hub, agentId, message) {
     if (message.roomId) return hub.rooms.delta(agentId, message.roomId, message.streamId, String(message.text ?? "").slice(0, 8000));
     const text = String(message.text ?? "").slice(0, 8000);
     hub.broadcast(agentId, { type: "chat_delta", streamId: message.streamId, text });
-    streamDelta(agentId, message.streamId, text).catch((error) => log("slack_stream_error", { agentId, error: String(error) }));
+    relayDelta(agentId, message.streamId, text).catch((error) => log("channel_stream_error", { agentId, error: String(error) }));
   },
 
   terminal_output(hub, agentId, message) {
@@ -109,7 +107,7 @@ export const computerHandlers: Handlers = {
     const text = String(message.text ?? "").slice(0, 2000);
     if (message.roomId) return hub.rooms.activity(agentId, message.roomId, text);
     await hub.addMessage(agentId, "activity", text, message.runId);
-    relayActivity(agentId, text).catch((error) => log("slack_status_error", { agentId, error: String(error) }));
+    relayActivityText(agentId, text).catch((error) => log("channel_status_error", { agentId, error: String(error) }));
   },
 
   async recorded(hub, agentId, message) {

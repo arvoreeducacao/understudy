@@ -5,12 +5,14 @@ import type { ChannelKind } from "@/lib/db/schema";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import type { ChannelAdapter } from "./adapter";
+import { slackAdapter } from "./slack/adapter";
 import { telegramAdapter } from "./telegram/adapter";
 import { activeRoute, appendPending, pendingThreads, stalePendingThreads, takePending, type ActiveRoute } from "./store";
 
 export const STALE_PENDING_MS = 90 * 1000;
 
 const adapters = new Map<ChannelKind, ChannelAdapter>([
+  ["slack", slackAdapter()],
   ["telegram", telegramAdapter()],
 ]);
 
@@ -26,9 +28,48 @@ function log(event: string, data: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...data }));
 }
 
-export function routeWins(route: ActiveRoute | null, slack: { updatedAt: Date } | null) {
-  if (!route) return null;
-  return !slack || route.updatedAt.getTime() >= slack.updatedAt.getTime() ? route : null;
+export type Conversation = { kind: ChannelKind; adapter: ChannelAdapter; since: Date; route: ActiveRoute | null };
+
+function live() {
+  return [...adapters.values()].filter((adapter) => adapter.live);
+}
+
+export async function currentConversation(agentId: string): Promise<Conversation | null> {
+  const candidates: Conversation[] = [];
+  const route = await activeRoute(agentId);
+  const routed = route ? adapters.get(route.kind) : undefined;
+  if (route && routed) candidates.push({ kind: route.kind, adapter: routed, since: route.updatedAt, route });
+  for (const adapter of live()) {
+    const since = await adapter.live?.activeSince(agentId);
+    if (since) candidates.push({ kind: adapter.kind, adapter, since, route: null });
+  }
+  return candidates.reduce<Conversation | null>((best, next) => (!best || next.since.getTime() > best.since.getTime() ? next : best), null);
+}
+
+export async function relayReply(conversation: Conversation, agentId: string, text: string, streamId?: string) {
+  if (conversation.route) return queueReplyText(conversation.route, text);
+  await conversation.adapter.live?.say(agentId, text, streamId);
+}
+
+export async function relayDelta(agentId: string, streamId: string, text: string) {
+  for (const adapter of live()) await adapter.live?.delta?.(agentId, streamId, text);
+}
+
+export async function relayActivityText(agentId: string, text: string) {
+  const conversation = await currentConversation(agentId);
+  if (conversation && !conversation.route) await conversation.adapter.live?.activity?.(agentId, text);
+}
+
+export async function relayPanelMessage(agentId: string, author: string, text: string) {
+  for (const adapter of live()) await adapter.live?.panelSaid?.(agentId, author, text);
+}
+
+export async function relayRunStarted(agentId: string, runId: string, title: string, steps: string[]) {
+  for (const adapter of live()) await adapter.live?.runStarted?.(agentId, runId, title, steps);
+}
+
+export async function relayRunFinished(agentId: string, runId: string, title: string, steps: string[], ok: boolean, summary: string) {
+  for (const adapter of live()) await adapter.live?.runFinished?.(agentId, runId, title, steps, ok, summary);
 }
 
 export async function queueReplyText(route: ActiveRoute, text: string) {
@@ -50,7 +91,7 @@ async function sendThread(hub: Hub, agentId: string, threadId: string) {
   const adapter = channelAdapter(taken.channel.kind);
   const [agent] = await getDb().select({ name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.id, agentId));
   try {
-    if (!adapter) throw new Error(`no adapter for ${taken.channel.kind}`);
+    if (!adapter?.send) throw new Error(`no adapter for ${taken.channel.kind}`);
     await adapter.send(hub, { agentId, agentName: agent?.name ?? "", channel: taken.channel, thread: taken.thread, reply: { text: taken.text, files: taken.files } });
     log("channel_reply_sent", { agentId, kind: taken.channel.kind, files: taken.files.length });
   } catch (error) {
