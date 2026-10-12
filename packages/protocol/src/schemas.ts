@@ -73,7 +73,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat_delta"), streamId: id, text: z.string().max(64 * 1024), roomId: id.optional() }),
   z.object({ type: z.literal("activity"), runId: optionalText, text, roomId: id.optional() }),
   z.object({ type: z.literal("room_turn_done"), roomId: id, ok: z.boolean(), error: z.string().max(500).optional() }),
-  z.object({ type: z.literal("turn"), origin: id.optional(), followup: id.optional() }),
+  z.object({ type: z.literal("turn"), origin: id.optional(), followup: id.optional(), runId: id.optional(), untrusted: z.literal(true).optional() }),
   z.object({ type: z.literal("recorded"), recordingId: id, event: RecordedEventSchema }),
   z.object({ type: z.literal("recipe"), recordingId: id, recipe: RecipeSchema }),
   z.object({ type: z.literal("recipe_failed"), recordingId: id, error: text }),

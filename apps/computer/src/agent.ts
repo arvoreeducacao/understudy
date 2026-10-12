@@ -517,13 +517,24 @@ export function createAgent(options: {
     setState(ok ? "done" : "stuck", ok ? undefined : summary.slice(0, 300));
   };
 
+  const turnContext = (job: Job) => {
+    if (job.kind === "run") return { runId: job.runId };
+    if (job.kind === "room") return { untrusted: true as const };
+    if (job.kind !== "chat") return {};
+    return {
+      ...(job.origin ? { origin: job.origin } : {}),
+      ...(job.followup ? { followup: job.followup.id } : {}),
+      ...(job.fromAgent || job.external ? { untrusted: true as const } : {}),
+    };
+  };
+
   const pump = async () => {
     if (current || !queue.length) return;
     const job = queue.shift()!;
     current = { job, turn: null, cancelled: false };
     try {
       setState("thinking");
-      options.send({ type: "turn", ...(job.kind === "chat" && job.origin ? { origin: job.origin } : {}), ...(job.kind === "chat" && job.followup ? { followup: job.followup.id } : {}) });
+      options.send({ type: "turn", ...turnContext(job) });
       if (job.kind === "chat") await chat(job);
       else if (job.kind === "room") await room(job);
       else if (job.kind === "recipe") await writeRecipe(job);

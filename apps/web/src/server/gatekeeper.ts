@@ -2,13 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
-import { canAlwaysAllow, effectivePermission, isDestructive, oneLine, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
+import { canAlwaysAllow, effectivePermission, hintsRecordedFor, isDestructive, oneLine, recordedHints, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
@@ -17,6 +17,7 @@ import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
 import { followupTools } from "./followup-tools";
+import { turnRunId, turnUntrusted } from "./followups";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
@@ -76,6 +77,16 @@ async function logCall(agentId: string, tool: string, args: unknown, result: unk
     .insert(schema.toolCalls)
     .values({ id: newId("tc"), agentId, tool, args, result, ok, verdict: verdict ?? null, runId: runId ?? null });
   console.log(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call", agentId, tool, ok, ...(verdict ? { verdict } : {}) }));
+}
+
+export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, serverId: string, tools: Pick<UpstreamTool, "name" | "annotations">[]) {
+  if (tools.length === 0 || hintsRecordedFor(agent.tools.toolHints, serverId)) return;
+  const hints = recordedHints(undefined, serverId, tools);
+  await getDb()
+    .update(schema.agents)
+    .set({ tools: sql`jsonb_set(${schema.agents.tools}, '{toolHints}', coalesce(${schema.agents.tools}->'toolHints', '{}'::jsonb) || ${JSON.stringify({ [serverId]: hints })}::jsonb)` })
+    .where(and(eq(schema.agents.id, agent.id), sql`not (coalesce(${schema.agents.tools}->'toolHints', '{}'::jsonb) ? ${serverId}::text)`));
+  agent.tools = { ...agent.tools, toolHints: { ...(agent.tools.toolHints ?? {}), [serverId]: hints } };
 }
 
 export function actionToolName(tool: string) {
@@ -241,7 +252,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
 
   builtins.push(...(teamTools(hub, agent) as Builtin[]));
   builtins.push(...(taskTools(hub, agent) as Builtin[]));
-  builtins.push(...(followupTools(hub, agent, { outsider, runId: () => runningRunId(agent.id) }) as Builtin[]));
+  builtins.push(...(followupTools(hub, agent, { outsider, untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
 
   const guard = (input: GuardInput) =>
     guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask, waitOutcome, input.extra as Extra);
@@ -294,6 +305,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       upstreams.map(async (upstream) => {
         try {
           const tools = await toolsOf(upstream);
+          await recordFirstHints(agent, upstream.id, tools).catch((error) => console.error(JSON.stringify({ event: "tool_hints_record_error", server: upstream.slug, error: String(error) })));
           return tools
             .map((tool) => ({ tool, permission: permissionOf(upstream, tool) }))
             .filter(({ permission }) => permission !== "never")

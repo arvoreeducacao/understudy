@@ -1204,6 +1204,8 @@ export const ptBR: Messages = {
     booked: (when: string, note: string, task: string | null) => `Retorno marcado para ${when}${task ? ` (tarefa "${task}")` : ""}: ${note}`,
     woke: (note: string) => `Retorno: ${note}`,
     stoppedNotice: (times: number, note: string) => `Olhei ${times} vezes seguidas e não achei nada novo, então parei de acompanhar isto: ${note}. Me diga se devo continuar olhando.`,
+    limitNotice: (times: number, note: string) => `Já olhei isto ${times} vezes, o máximo para um mesmo acompanhamento, então parei: ${note}. Me diga se devo continuar olhando.`,
+    dailyLimitNotice: (cap: number, note: string) => `Já acordei ${cap} vezes para acompanhamentos nas últimas 24 horas, o máximo permitido, então pulei este: ${note}. Me diga se devo olhar.`,
   },
   briefing: {
     header: "*Seus agentes nas últimas 24 horas*",
@@ -1437,6 +1439,9 @@ export const ptBR: Messages = {
     destructive: "Pode apagar",
     hintsChanged: "Mudou",
     hintsChangedHint: "O conector agora descreve esta ação como mais segura do que quando você a viu pela primeira vez, então ela pergunta antes até você escolher.",
+    hintsRiskierHint: "O conector agora descreve esta ação como mais arriscada do que quando você liberou, então ela pergunta antes até você escolher de novo.",
+    hintsNew: "Nova",
+    hintsNewHint: "Esta ação não existia quando você configurou este conector, então ela pergunta antes até você escolher.",
     adminBlocked: "Desligada por quem administra o painel.",
     adminAtMostAsk: "Quem administra o painel exige aprovação nesta.",
     choiceLabel: (tool: string) => `Permissão de ${tool}`,

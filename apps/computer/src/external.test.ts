@@ -61,8 +61,8 @@ test("an outside sender gets a restricted turn in a session of their own, never 
   const turns = sent.filter((m) => m.type === "turn");
   assert.deepEqual(turns, [
     { type: "turn", origin: "cth_owner" },
-    { type: "turn", origin: "cth_sam" },
-    { type: "turn", origin: "cth_sam" },
+    { type: "turn", origin: "cth_sam", untrusted: true },
+    { type: "turn", origin: "cth_sam", untrusted: true },
     { type: "turn", origin: "cth_owner" },
   ]);
 });

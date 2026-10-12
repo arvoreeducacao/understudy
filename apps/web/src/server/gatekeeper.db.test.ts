@@ -420,7 +420,12 @@ test("the owner's conversation books follow-ups through the gatekeeper, and an o
   const listed = await mcp("/api/mcp", "tools/list", {});
   const names = listed.result.tools.map((tool: { name: string }) => tool.name);
   for (const name of ["schedule_followup", "list_followups", "cancel_followup"]) assert.ok(names.includes(name), name);
+  const { forgetTurnWake, noteTurn } = await import("./followups");
+  noteTurn(ids.agent, { untrusted: true });
+  assert.match(await rpc("schedule_followup", { when: "2h", note: "Book this for me" }), /did not come from your owner/);
+  noteTurn(ids.agent, {});
   const booked = await rpc("schedule_followup", { when: "2h", note: "See whether the customer answered the quote" });
+  forgetTurnWake(ids.agent);
   assert.match(booked, /^booked: /);
   const followupId = booked.match(/\[followupId: (\S+)\]/)?.[1];
   assert.ok(followupId);

@@ -40,6 +40,22 @@ export function toolKey(name: string) {
   return name.normalize("NFKC").trim().toLowerCase();
 }
 
+const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0]/g;
+
+const LOOKALIKES: Record<string, string> = {
+  а: "a", в: "b", е: "e", ё: "e", к: "k", м: "m", н: "h", о: "o", р: "p", с: "c", т: "t", у: "y", х: "x", ѕ: "s", і: "i", ї: "i", ј: "j", ԁ: "d", ԛ: "q", ԝ: "w", һ: "h", ӏ: "l", ɡ: "g",
+  α: "a", β: "b", ε: "e", η: "n", ι: "i", κ: "k", ν: "v", ο: "o", ρ: "p", τ: "t", υ: "u", χ: "x", ω: "w", ϲ: "c", ϳ: "j",
+  ı: "i", ȷ: "j", ℓ: "l", "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-", "＿": "_",
+};
+
+export function toolSkeleton(name: string) {
+  return [...toolKey(name).replace(INVISIBLE, "")].map((char) => LOOKALIKES[char] ?? char).join("");
+}
+
+export function plainToolName(name: string) {
+  return /^[\x21-\x7e]+$/.test(name.trim());
+}
+
 function lookup<T>(entries: Record<string, T> | undefined, tool: string): T[] {
   if (!entries) return [];
   const key = toolKey(tool);
@@ -51,6 +67,15 @@ function lookup<T>(entries: Record<string, T> | undefined, tool: string): T[] {
 export function hintsLoosened(seen: ToolHints | undefined, current: ToolHints | undefined) {
   if (!seen) return false;
   return (isReadOnly(current) && !isReadOnly(seen)) || (isDestructive(seen) && !isDestructive(current));
+}
+
+export function hintsTightened(seen: ToolHints | undefined, current: ToolHints | undefined) {
+  if (!seen) return false;
+  return (isReadOnly(seen) && !isReadOnly(current)) || (!isDestructive(seen) && isDestructive(current));
+}
+
+export function hintsRecordedFor(seen: SeenHints | undefined, serverId: string) {
+  return Object.keys(seen?.[serverId] ?? {}).length > 0;
 }
 
 export function trustedHints(seen: ToolHints | undefined, current: ToolHints | undefined): ToolHints | undefined {
@@ -86,10 +111,10 @@ export function stricter(a: ToolPermission, b: ToolPermission): ToolPermission {
 }
 
 export function ceilingFor(server: ConnectorCeiling, tool: string): ToolPermission {
-  const key = toolKey(tool);
-  const listed = (names: string[] | null | undefined) => (names ?? []).some((name) => toolKey(name) === key);
+  const key = toolSkeleton(tool);
+  const listed = (names: string[] | null | undefined) => (names ?? []).some((name) => toolSkeleton(name) === key);
   if (listed(server.neverTools)) return "never";
-  if (server.askAll || listed(server.askTools)) return "ask";
+  if (server.askAll || listed(server.askTools) || !plainToolName(tool)) return "ask";
   return "allow";
 }
 
@@ -112,13 +137,39 @@ export function effectivePermission(input: {
   policy?: ToolPolicy;
   legacyAsk?: string[];
   seen?: SeenHints;
-}): { permission: ToolPermission; source: "admin" | "owner" | "default" } {
+}): { permission: ToolPermission; source: "admin" | "owner" | "default"; changed?: "safer" | "riskier" | "new" } {
   const ceiling = ceilingFor(input.server, input.tool.name);
-  const chosen = ownerChoice(input.policy, input.legacyAsk, input.serverId, input.tool.name);
-  const wanted = chosen ?? defaultPermission(trustedHints(seenHintsFor(input.seen, input.serverId, input.tool.name), input.tool.annotations));
+  const seen = seenHintsFor(input.seen, input.serverId, input.tool.name);
+  const picked = ownerChoice(input.policy, input.legacyAsk, input.serverId, input.tool.name);
+  const riskier = picked === "allow" && hintsTightened(seen, input.tool.annotations);
+  const chosen = riskier ? undefined : picked;
+  const unrecorded = !chosen && !seen && hintsRecordedFor(input.seen, input.serverId);
+  const wanted = chosen ?? (riskier || unrecorded ? "ask" : defaultPermission(trustedHints(seen, input.tool.annotations)));
   const permission = stricter(wanted, ceiling);
   const source = permission !== wanted ? "admin" : chosen ? "owner" : "default";
-  return { permission, source };
+  const changed = riskier || (!chosen && hintsTightened(seen, input.tool.annotations)) ? "riskier" : unrecorded ? "new" : !chosen && hintsLoosened(seen, input.tool.annotations) ? "safer" : undefined;
+  return { permission, source, ...(changed ? { changed } : {}) };
+}
+
+export function withoutStaleAllows(policy: Record<string, ToolPermission>, serverId: string, tools: ToolInfo[], seen: SeenHints | undefined) {
+  const next = { ...policy };
+  for (const tool of tools) if (next[tool.name] === "allow" && hintsTightened(seenHintsFor(seen, serverId, tool.name), tool.annotations)) delete next[tool.name];
+  return next;
+}
+
+export function mergeRecordedHints(input: { stored?: SeenHints; submitted: SeenHints; before?: ToolPolicy; after: ToolPolicy }): SeenHints {
+  const merged: SeenHints = Object.fromEntries(Object.entries(input.stored ?? {}).map(([serverId, tools]) => [serverId, { ...tools }]));
+  for (const [serverId, tools] of Object.entries(input.submitted)) {
+    const first = !hintsRecordedFor(input.stored, serverId);
+    const kept = { ...(merged[serverId] ?? {}) };
+    for (const [tool, hints] of Object.entries(tools)) {
+      const now = input.after[serverId]?.[tool];
+      const chose = isPermission(now) && (now !== input.before?.[serverId]?.[tool] || hintsTightened(kept[tool], hints) || !kept[tool]);
+      if (first || chose) kept[tool] = hintsOnly(hints);
+    }
+    if (Object.keys(kept).length) merged[serverId] = kept;
+  }
+  return merged;
 }
 
 export function canAlwaysAllow(server: ConnectorCeiling, tool: string) {

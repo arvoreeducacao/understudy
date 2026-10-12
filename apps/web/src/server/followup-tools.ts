@@ -16,7 +16,7 @@ const reply = (text: string, isError = false): ToolResult => ({ content: [{ type
 export function followupTools(
   hub: Pick<Hub, "deliver" | "startRun" | "addMessage" | "notifyOwner">,
   agent: { id: string },
-  context: { outsider: () => boolean; runId: () => Promise<string | null>; now?: () => Date },
+  context: { outsider: () => boolean; untrusted?: () => boolean; runId: () => Promise<string | null>; now?: () => Date },
 ): FollowupTool[] {
   const timeZone = followupTimezone();
   return [
@@ -30,7 +30,7 @@ export function followupTools(
         progress: z.string().trim().max(500).optional(),
       }),
       run: (async (args: { when: string; note: string; task?: string; progress?: string }) => {
-        const result = await bookFollowup(hub, agent, args, { runId: await context.runId(), outsider: context.outsider(), now: context.now?.() });
+        const result = await bookFollowup(hub, agent, args, { runId: await context.runId(), outsider: context.outsider(), untrusted: context.untrusted?.() ?? false, now: context.now?.() });
         if (!result.ok) return reply(result.error, true);
         const where = result.taskTitle ? `as a run of your task "${result.taskTitle}"` : "in this conversation";
         return reply(

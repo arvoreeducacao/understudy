@@ -9,7 +9,7 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
-import { recordedHints, withLegacyAsks, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { recordedHints, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
 import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -83,7 +83,11 @@ function here() {
 
 function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; initial: AgentTools; admin: boolean }) {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
-  const [policy, setPolicy] = useState<ToolPolicy>(() => withLegacyAsks(initial.toolPolicy, initial.askTools));
+  const [policy, setPolicy] = useState<ToolPolicy>(() => {
+    const merged = withLegacyAsks(initial.toolPolicy, initial.askTools);
+    for (const server of servers) if (server.tools && merged[server.id]) merged[server.id] = withoutStaleAllows(merged[server.id], server.id, server.tools, initial.toolHints);
+    return merged;
+  });
   const seen: SeenHints = { ...(initial.toolHints ?? {}) };
   for (const server of servers) if (server.tools) seen[server.id] = recordedHints(initial.toolHints, server.id, server.tools, policy[server.id]);
   const flip = (set: Set<string>, value: string) => {
