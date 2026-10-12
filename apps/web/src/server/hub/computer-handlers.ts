@@ -7,6 +7,8 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { taskLink } from "../task-tools";
 import { activeThread, relayActivity, relayAgentChat, streamDelta } from "../slack-threads";
+import { flushReplies, queueReplyText, routeWins } from "../channels/relay";
+import { activeRoute } from "../channels/store";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
@@ -53,15 +55,18 @@ export const computerHandlers: Handlers = {
       .set({ state: message.state, stateNote: message.note ?? null, updatedAt: new Date() })
       .where(eq(schema.agents.id, agentId));
     hub.broadcast(agentId, { type: "state", state: message.state, note: message.note ?? null });
+    if (["calm", "waiting_you", "stuck", "done"].includes(message.state)) void flushReplies(hub, agentId);
   },
 
   async chat(hub, agentId, message) {
     if (message.roomId) return hub.rooms.agentSaid(agentId, message.roomId, String(message.text ?? ""));
     const text = String(message.text ?? "").slice(0, 8000);
     const thread = message.runId ? null : await activeThread(agentId);
+    const route = message.runId ? null : routeWins(await activeRoute(agentId), thread);
     const streamId = message.runId ? undefined : message.streamId;
-    await hub.addMessage(agentId, "agent", text, message.runId, undefined, thread ? "slack" : undefined, streamId);
-    if (thread) relayAgentChat(agentId, text, streamId).catch((error) => log("slack_relay_error", { agentId, error: String(error) }));
+    await hub.addMessage(agentId, "agent", text, message.runId, undefined, route ? route.kind : thread ? "slack" : undefined, streamId);
+    if (route) await queueReplyText(route, text).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
+    else if (thread) relayAgentChat(agentId, text, streamId).catch((error) => log("slack_relay_error", { agentId, error: String(error) }));
   },
 
   async chat_delta(hub, agentId, message) {

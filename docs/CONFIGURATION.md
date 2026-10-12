@@ -32,6 +32,9 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_INBOUND_EMAIL_DOMAIN` | Domain whose mail starts tasks; each task gets `<task>.<random>@<domain>`. Empty turns inbound email off |
 | `UNDERSTUDY_INBOUND_SNS_TOPIC_ARN`, `UNDERSTUDY_INBOUND_S3_BUCKET` | With Amazon SES receiving: the only SNS topic and S3 bucket the panel accepts mail from |
 | `UNDERSTUDY_INBOUND_TOKEN` | With any other provider: bearer token (24+ characters) for posting raw MIME to `/api/inbound/email` |
+| `UNDERSTUDY_CHANNELS` | Per-understudy conversation channels owners may turn on; default `telegram`. See [CHANNELS.md](CHANNELS.md) |
+| `UNDERSTUDY_TELEGRAM_POLL` | `1` makes the panel poll Telegram instead of registering a webhook; automatic when `UNDERSTUDY_PUBLIC_URL` is not HTTPS |
+| `UNDERSTUDY_TELEGRAM_API_URL` | A self-hosted Telegram Bot API server; default `https://api.telegram.org` |
 
 **Host**
 
@@ -55,6 +58,10 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_FAKE_BRAIN` | `1` replaces the brain with a scripted one, for testing without any account |
 
 For example, to run every understudy on one Anthropic key, set `ANTHROPIC_API_KEY` and `UNDERSTUDY_COMPUTER_ENV=ANTHROPIC_API_KEY`.
+
+## Talking on Telegram
+
+Owners connect a bot of their own per understudy under Settings › Channels: create it with @BotFather, paste the token, then open the bot with the Start link shown there so their Telegram account counts as the owner. Nothing is needed on the server. Everything else (allowed people, held messages, approvals with buttons) works as described in [CHANNELS.md](CHANNELS.md).
 
 ## Starting tasks by email
 

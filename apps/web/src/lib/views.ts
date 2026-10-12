@@ -17,7 +17,7 @@ export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[
     .filter((m) => !m.proposalId || byId.has(m.proposalId))
     .map((m) => {
       const proposal = m.proposalId ? byId.get(m.proposalId) : undefined;
-      return { id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.artifact ? { artifact: m.artifact } : {}), ...(proposal ? { proposal } : {}) };
+      return { id: m.id, role: m.role, text: m.text, runId: m.runId, via: m.via, ...(m.sender ? { sender: m.sender } : {}), at: m.createdAt.toISOString(), ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.artifact ? { artifact: m.artifact } : {}), ...(proposal ? { proposal } : {}) };
     });
 }
 

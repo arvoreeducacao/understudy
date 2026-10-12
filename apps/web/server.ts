@@ -17,6 +17,7 @@ import { ownedRoom } from "@/server/hub/rooms";
 import { ROOM_SOCKET } from "@/lib/rooms";
 import { handleWebhook } from "@/server/webhook";
 import { handleInboundEmail } from "@/server/inbound-email/handler";
+import { handleTelegramWebhook, isTelegramRoute, startTelegramPolling } from "@/server/channels/telegram/webhook";
 import { handleFigureRoute, isFigureRoute } from "@/server/figure-png";
 import { handleChartRoute, isChartRoute } from "@/server/chart-png";
 import { handleSlack, isSlackRoute } from "@/server/slack-inbound";
@@ -68,6 +69,7 @@ async function main() {
   scheduler.start();
   hub.watcher.start();
   hub.idle.start();
+  startTelegramPolling(hub);
   const briefings = startBriefings();
   const extension = createExtensionRoutes(hub);
   const fileRoutes = createFileRoutes(hub);
@@ -156,6 +158,16 @@ async function main() {
     if (isChartRoute(url.pathname)) {
       handleChartRoute(req, res, url.pathname).catch((error) => {
         console.error("chart_png_error", error);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        }
+      });
+      return;
+    }
+    if (isTelegramRoute(url.pathname)) {
+      handleTelegramWebhook(hub, req, res, url.pathname).catch((error) => {
+        console.error("telegram_webhook_error", error);
         if (!res.headersSent) {
           res.writeHead(500);
           res.end();

@@ -7,6 +7,7 @@ import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { sendPush } from "../push";
+import { notifyApprovalOnChannel } from "../channels/approval-notify";
 import { postApprovalInThread } from "../slack-threads";
 import type { ApprovalView } from "../hub-types";
 import { isOffRecipe } from "@/lib/approval-fields";
@@ -252,6 +253,7 @@ export class Approvals {
       url: "/waiting",
       tag: `approval-${approval.id}`,
     }).catch((error) => log("push_error", { error: String(error) }));
+    notifyApprovalOnChannel(this.hub, agentId, approval).catch((error) => log("approval_channel_error", { error: String(error) }));
     const as = agentIdentity({ id: agentId, name: owner.name });
     const inThread = await postApprovalInThread(agentId, blocks, text).catch(() => false);
     const recipients = inThread ? approvers : [owner, ...approvers];

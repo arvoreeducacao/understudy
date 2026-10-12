@@ -19,6 +19,7 @@ export type ChatEntry = {
   text: string;
   runId?: string | null;
   via?: string | null;
+  sender?: string | null;
   streamId?: string | null;
   attachments?: Attachment[];
   artifact?: MessageArtifact;

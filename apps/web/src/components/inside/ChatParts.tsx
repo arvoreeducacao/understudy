@@ -41,6 +41,19 @@ function dayLabel(iso: string) {
   return date.toLocaleDateString(currentLocale(), { weekday: "short", day: "numeric", month: "short" });
 }
 
+const CHANNEL_VIAS = new Set(["telegram", "teams", "whatsapp", "sms"]);
+
+function Via({ via }: { via: string | null | undefined }) {
+  if (via === "slack") return <ViaSlack />;
+  if (!via || !CHANNEL_VIAS.has(via)) return null;
+  return (
+    <span className="cx-via">
+      <MessageSquare size={10} aria-hidden />
+      {messages.channels.via(messages.channels.kinds[via] ?? via)}
+    </span>
+  );
+}
+
 function ViaSlack() {
   return (
     <span className="cx-via">
@@ -102,8 +115,8 @@ export function MessageRow({
       <div className={`cx-user ${continued ? "is-continued" : ""}`}>
         {!continued && (
           <div className="cx-meta" suppressHydrationWarning>
-            {entry.via === "slack" && <ViaSlack />}
-            <span className="cx-name">{messages.live.you}</span>
+            <Via via={entry.via} />
+            <span className="cx-name">{entry.sender ?? messages.live.you}</span>
             <time dateTime={entry.at} title={fullTimeOf(entry.at)}>{timeOf(entry.at)}</time>
           </div>
         )}
@@ -121,7 +134,7 @@ export function MessageRow({
           <div className="cx-meta" suppressHydrationWarning>
             <span className="cx-name">{agentName}</span>
             <time dateTime={entry.at} title={fullTimeOf(entry.at)}>{timeOf(entry.at)}</time>
-            {entry.via === "slack" && <ViaSlack />}
+            <Via via={entry.via} />
           </div>
         )}
         {entry.text && <Markdown text={entry.text} />}

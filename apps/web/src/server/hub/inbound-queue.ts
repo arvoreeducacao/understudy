@@ -4,15 +4,17 @@ import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
+import { flushReplies } from "../channels/relay";
+import { appendPending, setRoute } from "../channels/store";
 import { rememberSlackReply, slackGiveUp } from "../slack-inbound";
 import { log } from "./shared";
 
 export const QUEUE_TTL_MS = 30 * 60 * 1000;
 const RECENTLY_SEEN_MS = 3 * 60 * 1000;
 
-export type InboundSource = "panel" | "slack" | "team" | "email" | "run" | "room";
+export type InboundSource = "panel" | "slack" | "team" | "email" | "channel" | "run" | "room";
 
-export type DeliverOptions = { source: InboundSource; slack?: { channel: string; threadTs?: string }; runId?: string };
+export type DeliverOptions = { source: InboundSource; slack?: { channel: string; threadTs?: string }; channelThreadId?: string; runId?: string };
 
 export type DeliverResult = { status: "sent" } | { status: "queued"; starting: boolean };
 
@@ -35,6 +37,7 @@ export class InboundQueue {
         source: options.source,
         slackChannel: options.slack?.channel ?? null,
         slackThreadTs: options.slack?.threadTs ?? null,
+        channelThreadId: options.channelThreadId ?? null,
         runId: options.runId ?? null,
         expiresAt: new Date(now.getTime() + QUEUE_TTL_MS),
       });
@@ -74,6 +77,7 @@ export class InboundQueue {
         const [claimed] = await db.delete(schema.inboundQueue).where(eq(schema.inboundQueue.id, row.id)).returning();
         if (!claimed) continue;
         if (claimed.slackChannel) await rememberSlackReply(agentId, claimed.slackChannel, claimed.slackThreadTs ?? undefined);
+        if (claimed.channelThreadId) await setRoute(agentId, claimed.channelThreadId).catch((error) => log("channel_route_error", { agentId, error: String(error) }));
         if (!this.hub.sendToComputer(agentId, claimed.message as unknown as ServerToComputer)) {
           await db.insert(schema.inboundQueue).values(claimed).onConflictDoNothing();
           break;
@@ -111,6 +115,11 @@ export class InboundQueue {
         .where(and(eq(schema.runs.id, row.runId), eq(schema.runs.agentId, row.agentId), eq(schema.runs.status, "running")));
     }
     if (row.slackChannel) await slackGiveUp(row.agentId, row.slackChannel, row.slackThreadTs ?? undefined).catch((error) => log("slack_give_up_error", { error: String(error) }));
+    if (row.channelThreadId) {
+      await appendPending(row.channelThreadId, { text: copy.channels.gaveUp })
+        .then(() => flushReplies(this.hub, row.agentId))
+        .catch((error) => log("channel_give_up_error", { error: String(error) }));
+    }
     if (row.source === "panel" || row.source === "team") await this.hub.addMessage(row.agentId, "system", copy.live.queueExpired);
     if (row.source === "room" && typeof row.message.roomId === "string") await this.hub.rooms.turnDone(row.agentId, row.message.roomId, false, copy.rooms.computerOff);
   }

@@ -13,13 +13,14 @@ import { defaultModel } from "@/lib/models";
 import { serverOptions } from "@/lib/server-options";
 import { requireAgentAccess } from "@/lib/session";
 import { loadChat, loadPendingApprovals, loadRuns } from "@/lib/views";
+import { channelSettings } from "@/server/channels/settings";
 import { slackEnabled } from "@/server/slack";
 
 type Agent = typeof schema.agents.$inferSelect;
 
 async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promise<OwnerData> {
   const db = getDb();
-  const [files, memory, members, slackAvailable, servers] = await Promise.all([
+  const [files, memory, members, slackAvailable, servers, channels] = await Promise.all([
     db.select().from(schema.agentFiles).where(eq(schema.agentFiles.agentId, agent.id)).orderBy(asc(schema.agentFiles.path)),
     db.select().from(schema.memoryFiles).where(eq(schema.memoryFiles.agentId, agent.id)).orderBy(asc(schema.memoryFiles.path)),
     db
@@ -29,6 +30,7 @@ async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promi
       .where(eq(schema.agentMembers.agentId, agent.id)),
     slackEnabled(),
     serverOptions({ id: agent.ownerId, email }),
+    channelSettings(agent.id),
   ]);
   return {
     files: files.map((f) => ({ path: f.path, size: f.size, updatedAt: f.updatedAt.getTime() })),
@@ -43,6 +45,7 @@ async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promi
       serverDefaultModel: defaultModel(),
       rules: agent.rules ?? [],
       members,
+      channels,
     },
   };
 }
