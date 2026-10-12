@@ -573,6 +573,19 @@ export const agentChannels = pgTable(
   (t) => [uniqueIndex("agent_channels_address_idx").on(t.kind, t.address), uniqueIndex("agent_channels_agent_kind_idx").on(t.agentId, t.kind)],
 );
 
+export const channelSecrets = pgTable(
+  "channel_secrets",
+  {
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => agentChannels.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    value: text("value").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.channelId, t.name] })],
+);
+
 export const channelThreads = pgTable(
   "channel_threads",
   {

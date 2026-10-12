@@ -1,4 +1,4 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import type { Attachment } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import type { ChannelKind, HeldMessage } from "@/lib/db/schema";
@@ -87,4 +87,27 @@ export async function holdMessage(
   await hub.addMessage(channel.agentId, "system", copy.channels.held(copy.channels.kinds[channel.kind] ?? channel.kind, who));
   sendPush([owner.id], { title: copy.channels.heldPush(addressed.agentName, copy.channels.kinds[channel.kind] ?? channel.kind), body: who, url: `/agents/${channel.agentId}?tab=settings`, tag: `held-${channel.id}` }).catch(() => undefined);
   return "held";
+}
+
+export async function openPeerThread(addressed: AddressedChannel, input: { peer: string; peerName: string | null; trusted: boolean; messageId: string }, now = Date.now()): Promise<ChannelThread> {
+  const db = getDb();
+  const [existing] = await db
+    .select()
+    .from(schema.channelThreads)
+    .where(and(eq(schema.channelThreads.channelId, addressed.channel.id), eq(schema.channelThreads.peer, input.peer), eq(schema.channelThreads.status, "open")))
+    .orderBy(desc(schema.channelThreads.updatedAt))
+    .limit(1);
+  if (existing) {
+    const [updated] = await db
+      .update(schema.channelThreads)
+      .set({ lastMessageId: input.messageId, peerName: input.peerName ?? existing.peerName, trusted: input.trusted, updatedAt: new Date(now) })
+      .where(eq(schema.channelThreads.id, existing.id))
+      .returning();
+    return updated;
+  }
+  const [created] = await db
+    .insert(schema.channelThreads)
+    .values({ id: newId("cth"), agentId: addressed.channel.agentId, channelId: addressed.channel.id, peer: input.peer, peerName: input.peerName, trusted: input.trusted, lastMessageId: input.messageId })
+    .returning();
+  return created;
 }

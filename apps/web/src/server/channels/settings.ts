@@ -16,7 +16,9 @@ type Shared = { senders: string; unknown: UnknownSenders; held: HeldView[] };
 
 export type TelegramChannelView = Shared & { available: boolean; connected: boolean; username: string | null; ownerName: string | null; pairLink: string | null; polling: boolean };
 
-export type ChannelSettings = { telegram: TelegramChannelView };
+export type WhatsAppChannelView = Shared & { available: boolean; connected: boolean };
+
+export type ChannelSettings = { telegram: TelegramChannelView; whatsapp: WhatsAppChannelView };
 
 async function heldOf(channel: AgentChannel | null): Promise<HeldView[]> {
   if (!channel) return [];
@@ -44,6 +46,8 @@ function shared(channel: AgentChannel | null, held: HeldView[]): Shared {
 export async function channelSettings(agentId: string): Promise<ChannelSettings> {
   const telegram = await agentChannel(agentId, "telegram");
   const telegramHeld = await heldOf(telegram);
+  const whatsapp = await agentChannel(agentId, "whatsapp");
+  const whatsappHeld = await heldOf(whatsapp);
   const tg = telegram ? telegramSettings(telegram) : null;
   return {
     telegram: {
@@ -55,6 +59,7 @@ export async function channelSettings(agentId: string): Promise<ChannelSettings>
       pairLink: telegram && tg?.username && !tg.ownerUserId ? `https://t.me/${tg.username}?start=${pairCode(telegram.id, tg.pairVersion ?? 1)}` : null,
       polling: tg?.mode === "poll",
     },
+    whatsapp: { ...shared(whatsapp, whatsappHeld), unknown: whatsapp?.unknownSenders ?? "ignore", available: channelEnabled("whatsapp"), connected: Boolean(whatsapp) },
   };
 }
 

@@ -20,6 +20,7 @@ import type { ChatEntry, ServerToViewer, ViewerToServer } from "./hub-types";
 import { computerLimit, RateLimiter } from "./rate-limit";
 import { Watcher } from "./watcher";
 import { flushStale } from "./channels/relay";
+import { WhatsAppSessions } from "./channels/whatsapp/sessions";
 import { Uploads } from "./files/uploads";
 
 export type { Viewer } from "./hub/shared";
@@ -47,6 +48,7 @@ export class Hub {
   readonly idle = new IdleSleeper(this);
   readonly rooms = new Rooms(this);
   readonly uploads = new Uploads();
+  readonly whatsapp = new WhatsAppSessions(this);
   private computers = new Map<string, WebSocket>();
   private fallingAsleep = new Set<string>();
   private viewers = new Map<string, Set<Viewer>>();

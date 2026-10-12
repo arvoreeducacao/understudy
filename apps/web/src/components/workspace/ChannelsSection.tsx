@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { answerHeld, relinkTelegramOwner, saveChannelSenders, saveUnknownSenders, setTelegramChannel } from "@/app/actions/channels";
+import { useEffect, useState, useTransition } from "react";
+import { answerHeld, relinkTelegramOwner, saveChannelSenders, saveUnknownSenders, setTelegramChannel, setWhatsAppChannel, whatsappStatus } from "@/app/actions/channels";
 import { Field, Input } from "@/components/ui/controls";
 import { Segmented } from "@/components/ui/Segmented";
 import type { ChannelKind, UnknownSenders } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
 import type { ChannelSettings, HeldView } from "@/server/channels/settings";
+import type { WhatsAppView } from "@/server/channels/whatsapp/connect";
 import { PanelSection } from "./PanelSection";
 
 function HeldList({ agentId, initial }: { agentId: string; initial: HeldView[] }) {
@@ -175,18 +176,113 @@ function TelegramChannel({ agentId, initial }: { agentId: string; initial: Chann
   );
 }
 
+function WhatsAppChannel({ agentId, initial }: { agentId: string; initial: ChannelSettings["whatsapp"] }) {
+  const t = messages.channels;
+  const [connected, setConnected] = useState(initial.connected);
+  const [view, setView] = useState<WhatsAppView | null>(null);
+  const [pending, start] = useTransition();
+  const waiting = connected && (!view || view.state === "connecting" || view.state === "qr");
+
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    const load = () =>
+      whatsappStatus(agentId).then(
+        (next) => alive && setView(next),
+        () => undefined,
+      );
+    load();
+    const timer = waiting ? setInterval(load, 2500) : null;
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [agentId, connected, waiting]);
+
+  if (!initial.available && !connected) return null;
+
+  function connect() {
+    start(async () => {
+      const result = await setWhatsAppChannel(agentId, true);
+      if (result.ok) {
+        setView(null);
+        setConnected(true);
+      }
+    });
+  }
+
+  function disconnect() {
+    start(async () => {
+      await setWhatsAppChannel(agentId, false);
+      setConnected(false);
+      setView(null);
+    });
+  }
+
+  if (!connected) {
+    return (
+      <div className="flex flex-col gap-2.5">
+        <p className="m-0 fld-hint">{t.whatsappIntro}</p>
+        <p className="m-0 text-[12.5px] text-amber" role="note">
+          {t.whatsappWarning}
+        </p>
+        <button type="button" className="btn sec sm self-start" disabled={pending} onClick={connect}>
+          {t.whatsappConnect}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {view?.state === "qr" && view.qr ? (
+        <div className="flex flex-col gap-2 items-start">
+          <span className="fld-hint">{t.whatsappScan}</span>
+          <img src={view.qr} alt={t.whatsappQrAlt} width={240} height={240} className="rounded-md bg-white p-1" />
+        </div>
+      ) : view?.state === "open" ? (
+        <span className="text-[13px] font-medium">{t.whatsappLinked(view.number ?? "")}</span>
+      ) : view?.state === "closed" || view?.state === "logged_out" ? (
+        <div className="flex flex-col gap-1.5 items-start">
+          <span className="fld-hint">{view.state === "logged_out" ? t.whatsappLostHere : t.whatsappExpired}</span>
+          <button type="button" className="btn pri sm" disabled={pending} onClick={connect}>
+            {t.whatsappNewCode}
+          </button>
+        </div>
+      ) : (
+        <span className="fld-hint">{t.whatsappConnecting}</span>
+      )}
+      {view?.state === "open" && <p className="m-0 fld-hint">{t.whatsappHowToTalk}</p>}
+      <WhoMayWrite agentId={agentId} kind="whatsapp" initial={initial} label={t.whatsappSenders} hint={t.whatsappSendersHint} placeholder="+15550100000, +15550100001" />
+      <button type="button" className="btn sec sm self-start" disabled={pending} onClick={disconnect}>
+        {t.disable}
+      </button>
+    </div>
+  );
+}
+
 export function ChannelsSection({ agentId, channels }: { agentId: string; channels: ChannelSettings }) {
   const t = messages.channels;
-  const { telegram } = channels;
-  if (!telegram.available && !telegram.connected) return null;
-  const on = telegram.connected ? 1 : 0;
-  const waiting = telegram.unknown === "hold" ? telegram.held.length : 0;
+  const { telegram, whatsapp } = channels;
+  const showTelegram = telegram.available || telegram.connected;
+  const showWhatsApp = whatsapp.available || whatsapp.connected;
+  if (!showTelegram && !showWhatsApp) return null;
+  const on = (telegram.connected ? 1 : 0) + (whatsapp.connected ? 1 : 0);
+  const waiting = [telegram, whatsapp].reduce((n, channel) => n + (channel.unknown === "hold" ? channel.held.length : 0), 0);
   return (
     <PanelSection title={t.title} hint={waiting ? `${t.summary(on)} · ${t.heldTitle(waiting)}` : t.summary(on)} collapsible>
-      <div className="flex flex-col gap-2">
-        <span className="fld-label">{t.telegramTitle}</span>
-        <TelegramChannel agentId={agentId} initial={telegram} />
-      </div>
+      {showTelegram && (
+        <div className="flex flex-col gap-2">
+          <span className="fld-label">{t.telegramTitle}</span>
+          <TelegramChannel agentId={agentId} initial={telegram} />
+        </div>
+      )}
+      {showWhatsApp && (
+        <div className="flex flex-col gap-2 pt-2">
+          <span className="fld-label">{t.whatsappTitle}</span>
+          <WhatsAppChannel agentId={agentId} initial={whatsapp} />
+        </div>
+      )}
     </PanelSection>
   );
 }
