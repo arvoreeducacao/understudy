@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -189,4 +189,30 @@ test("a run that needs a new sign-in tells the owner instead of showing the raw 
   assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "login_done"), { type: "login_done", brain: "claude", ok: false, message });
   assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "run_finished"), { type: "run_finished", runId: "r1", ok: false, summary: message });
   assert.deepEqual(sent.filter((sentMessage) => sentMessage.type === "state").at(-1), { type: "state", state: "stuck", note: message });
+});
+
+test("a refresh race reported as a text reply is retried and never shown to the owner", async () => {
+  const events: BrainEvent[] = [];
+  const { spawned, spawnTurn } = scripted([
+    { result: { error: RACE }, events: [{ kind: "session", sessionId: "s0" }, { kind: "text", text: RACE }] },
+    { result: { ok: true, text: "done", sessionId: "s1" }, events: [{ kind: "text", text: "done" }] },
+  ]);
+  const result = await startTurn(config, request(events), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [1], clearStaleLock: () => false }).done;
+  assert.equal(spawned.length, 2);
+  assert.equal(result.ok, true);
+  assert.deepEqual(events, [{ kind: "session", sessionId: "s0" }, { kind: "text", text: "done" }]);
+});
+
+test("the sign-in status comes from the saved login without starting the brain", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-home-"));
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "a", refreshToken: "r", expiresAt: 1 } }));
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "owner@example.com" } }));
+  let started = 0;
+  const status = await readClaudeStatus({ HOME: home }, home, async () => {
+    started++;
+    return { code: 0, out: "{}" };
+  });
+  assert.deepEqual(status, { brain: "claude", loggedIn: true, account: "owner@example.com" });
+  assert.equal(started, 0);
 });
