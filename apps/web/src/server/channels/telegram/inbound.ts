@@ -8,7 +8,8 @@ import type { ParsedAttachment } from "../../inbound-email/parse";
 import { safeFilename } from "../../inbound-email/parse";
 import { RateLimiter } from "../../rate-limit";
 import { deliverToAgent, heldCopy, holdMessage } from "../deliver";
-import { peerListed } from "../peers";
+import { bindPeer, peerListed } from "../peers";
+import { setChannelSenders } from "../settings";
 import { mergeChannelSettings, type AddressedChannel, type ChannelThread } from "../store";
 import { telegramCall, telegramDownload } from "./api";
 import { pairCode, sameValue } from "./keys";
@@ -100,7 +101,10 @@ async function onMessage(hub: Hub, addressed: AddressedChannel, token: string, m
     if (settings.ownerUserId === peer || !code) return "ignored";
   }
   const trusted = settings.ownerUserId === peer;
-  const allowed = trusted || peerListed("telegram", [peer, from.username ?? ""], channel.allowedSenders);
+  const byId = peerListed("telegram", [peer], channel.allowedSenders);
+  const bound = !trusted && !byId && from.username ? bindPeer(channel.allowedSenders, from.username, peer) : null;
+  if (bound !== null) await setChannelSenders(channel.agentId, "telegram", bound);
+  const allowed = trusted || byId || bound !== null;
   if (!allowed && channel.unknownSenders === "ignore") return "sender_not_allowed";
   if (!limiter.allow(`channel-telegram:${channel.id}`, 0.5, 20) || !limiter.allow(`channel-telegram-peer:${channel.id}:${peer}`, 0.2, 10)) return "too_many_messages";
   const attachments = await attachmentsOf(token, message);

@@ -21,6 +21,7 @@ import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
+import { OUTSIDER_TOOLS, outsiderTurn } from "./channels/turns";
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
 const APPROVAL_CALL_CAP_MS = 30 * 60 * 1000;
@@ -302,7 +303,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     const runId = builtin ? null : await runningRunId(agent.id);
     try {
       let result: ToolResult;
-      if (builtin) {
+      if (outsiderTurn(agent.id) && !OUTSIDER_TOOLS.has(name)) {
+        result = text(brainText.outsiderTool, true);
+      } else if (builtin) {
         const parsed = builtin.schema.safeParse(args);
         result = parsed.success ? await builtin.run(parsed.data as never, callExtra) : text(parsed.error.message, true);
       } else {

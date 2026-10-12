@@ -43,14 +43,16 @@ Rules:
 const JOURNAL_SUMMARY_PROMPT = "The day is over. Write one or two short lines summarizing what you and your owner did or decided in this conversation, for your journal. Answer with the lines only, no greeting.";
 
 type Job =
-  | { kind: "chat"; text: string; from: string; fromAgent?: { id: string; name: string }; repeated?: { times: number; since: number }; external?: { channel: string; sender: string }; model?: string; attachments?: Attachment[]; artifactEdit?: ArtifactEditContext }
+  | { kind: "chat"; text: string; from: string; fromAgent?: { id: string; name: string }; repeated?: { times: number; since: number }; external?: { channel: string; sender: string }; origin?: string; model?: string; attachments?: Attachment[]; artifactEdit?: ArtifactEditContext }
   | { kind: "recipe"; recordingId: string; events: RecordedEvent[]; description?: string; ownerBrowser?: boolean }
   | { kind: "room"; roomId: string; prompt: string; model?: string }
   | { kind: "run"; runId: string; recipe: Recipe; approvalsRequired: boolean; context?: string; webhook?: boolean; model?: string };
 
 type ChatSession = { day: string; id: string };
 
-type Persisted = { brain: Brain; model?: string; chat: Partial<Record<Brain, ChatSession>> };
+type Persisted = { brain: Brain; model?: string; chat: Partial<Record<Brain, ChatSession>>; outsiders?: Record<string, ChatSession> };
+
+export const OUTSIDER_UNSUPPORTED = "I can only take messages from people other than my owner when I run on the Claude brain. My owner has been told about your message in the panel.";
 
 export type Agent = {
   enqueue: (job: Job) => void;
@@ -285,6 +287,7 @@ export function createAgent(options: {
     resume: string | null;
     runId?: string;
     roomId?: string;
+    restricted?: boolean;
     chatty?: boolean;
     quiet?: boolean;
     transcript?: string;
@@ -317,7 +320,7 @@ export function createAgent(options: {
     };
     const jobModel = "model" in input.job ? input.job.model : undefined;
     const model = input.model ?? validModel(jobModel) ?? persisted.model;
-    const started = run(options.config, { brain: persisted.brain, ...(model ? { model } : {}), prompt: input.prompt, system: systemPrompt(options.rulesFile ? readRules(options.rulesFile) : []), resume: input.resume, onEvent });
+    const started = run(options.config, { brain: persisted.brain, ...(model ? { model } : {}), prompt: input.prompt, system: systemPrompt(options.rulesFile ? readRules(options.rulesFile) : []), resume: input.resume, ...(input.restricted ? { restricted: true } : {}), onEvent });
     if (current) {
       current.turn = started;
       if (current.cancelled) started.cancel();
@@ -333,7 +336,32 @@ export function createAgent(options: {
     if (result.ok && result.text.trim()) memory.appendJournal(`chat: ${result.text.trim()}`, session.day);
   };
 
+  const outsider = async (job: Extract<Job, { kind: "chat" }> & { external: { channel: string; sender: string } }) => {
+    markTurn({ mode: "chat" });
+    if (persisted.brain !== "claude") {
+      options.send({ type: "chat", role: "understudy", text: OUTSIDER_UNSUPPORTED });
+      setState("calm");
+      return;
+    }
+    const day = today();
+    const key = `${job.external.channel}:${job.external.sender}`.slice(0, 400);
+    const sessions = (persisted.outsiders ??= {});
+    const previous = sessions[key]?.day === day ? sessions[key] : null;
+    const prompt = externalMessage(job.external.channel, job.external.sender, job.text, job.attachments ?? [], options.config.home);
+    let result = await turn({ job, prompt, resume: previous?.id ?? null, restricted: true });
+    if (!result.ok && previous && !cancelled() && !result.needsLogin) result = await turn({ job, prompt, resume: null, restricted: true });
+    if (result.sessionId) {
+      for (const [name, value] of Object.entries(sessions)) if (value.day !== day) delete sessions[name];
+      sessions[key] = { day, id: result.sessionId };
+      save();
+    }
+    if (cancelled()) return;
+    if (result.ok) setState("calm");
+    else setState("stuck", result.error);
+  };
+
   const chat = async (job: Extract<Job, { kind: "chat" }>) => {
+    if (job.external) return outsider({ ...job, external: job.external });
     const day = today();
     const brain = persisted.brain;
     let session = persisted.chat[brain] ?? null;
@@ -486,6 +514,7 @@ export function createAgent(options: {
     current = { job, turn: null, cancelled: false };
     try {
       setState("thinking");
+      options.send({ type: "turn", ...(job.kind === "chat" && job.origin ? { origin: job.origin } : {}) });
       if (job.kind === "chat") await chat(job);
       else if (job.kind === "room") await room(job);
       else if (job.kind === "recipe") await writeRecipe(job);
@@ -547,7 +576,7 @@ export function createAgent(options: {
 function load(file: string): Persisted {
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
-    return { brain: parsed.brain === "codex" ? "codex" : "claude", ...(validModel(parsed.model) ? { model: parsed.model } : {}), chat: parsed.chat ?? {} };
+    return { brain: parsed.brain === "codex" ? "codex" : "claude", ...(validModel(parsed.model) ? { model: parsed.model } : {}), chat: parsed.chat ?? {}, ...(parsed.outsiders && typeof parsed.outsiders === "object" ? { outsiders: parsed.outsiders } : {}) };
   } catch {
     return { brain: process.env.AGENT_BRAIN === "codex" ? "codex" : "claude", chat: {} };
   }

@@ -19,14 +19,14 @@ Email is not a conversation channel. To let an understudy read, search and draft
 Every channel sorts the person writing into one of three groups, per understudy:
 
 - **The owner**, recognised by an identity the channel can prove: the Slack account matched to the panel account, or the Telegram account that opened the bot with the one-time Start link shown in Settings. The owner's message is a normal chat turn.
-- **People the owner allowed** (Telegram usernames or ids, phone numbers in E.164). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. The answer goes back to them.
+- **People the owner allowed** (Telegram usernames or ids, phone numbers in E.164; a username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no file, shell, browser, desktop or password tools; through the gatekeeper it may only ask for approval or tell the owner. The answer goes back to them.
 - **Anyone else** is held for the owner (Settings › Channels lists it with Let it through, Always allow and Discard, and the owner gets a note in the chat and a push) or dropped, as the owner chooses.
 
 ## How a conversation flows
 
 1. The channel's endpoint authenticates the provider (Slack's request signature, a per-channel secret header for Telegram webhooks), finds the understudy, sorts the sender and either holds, drops or delivers.
-2. Delivering records the conversation as the understudy's reply route for 30 minutes. A panel message clears it; a message on another channel takes it over.
-3. While the route is active, the understudy's chat replies and the files it shares with `share_file` are buffered on the thread and sent as one reply when its turn ends, or after 90 seconds.
+2. Each message carries the thread it came from, and the computer reports which thread each turn belongs to. Replies and shared files go to that thread only; a turn that started in the panel or on Slack never sends anything to a channel thread. A message from the owner also makes that thread the owner's current conversation for approvals (30 minutes); a panel message clears it, and a message on another channel takes it over.
+3. The turn's replies and the files it shares with `share_file` are buffered on its thread and sent as one reply when the turn ends, or after 90 seconds.
 4. An approval requested while the route is active also goes to the owner on that channel, with Approve and Deny buttons that only the owner's account can press. The panel and push keep working as before.
 
 ## Telegram

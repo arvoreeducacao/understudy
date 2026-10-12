@@ -51,6 +51,7 @@ export type TurnRequest = {
   prompt: string;
   system: string;
   resume?: string | null;
+  restricted?: boolean;
   onEvent: (event: BrainEvent) => void;
 };
 
@@ -130,7 +131,13 @@ export function validModel(model: string | undefined | null): string | undefined
   return value && MODEL_NAME.test(value) ? value : undefined;
 }
 
-export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string): string[] {
+export const RESTRICTED_TOOLS = ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch", "Task", "TodoWrite"];
+
+export function restrictedMcpConfig(config: BrainConfig) {
+  return { mcpServers: { gatekeeper: claudeMcpConfig(config).mcpServers.gatekeeper } };
+}
+
+export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string, restricted = false): string[] {
   const args = [
     "-p",
     "--output-format",
@@ -144,6 +151,7 @@ export function claudeArgs(mcpConfig: string, system: string, resume?: string | 
     "bypassPermissions",
     "--disallowedTools",
     ...PROTECTED_TOOL_RULES,
+    ...(restricted ? RESTRICTED_TOOLS : []),
     "--append-system-prompt",
     system,
   ];
@@ -355,7 +363,7 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
   mkdirSync(config.workDir, { recursive: true });
   let child: ChildProcess;
   if (request.brain === "claude") {
-    child = spawn("claude", claudeArgs(JSON.stringify(claudeMcpConfig(config)), request.system, request.resume, request.model), {
+    child = spawn("claude", claudeArgs(JSON.stringify(request.restricted ? restrictedMcpConfig(config) : claudeMcpConfig(config)), request.system, request.resume, request.model, request.restricted), {
       cwd: config.workDir,
       env: claudeEnv(process.env, config.home),
       stdio: ["pipe", "pipe", "pipe"],

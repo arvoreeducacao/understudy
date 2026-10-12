@@ -11,3 +11,9 @@ test("a peer matches by any of its identifiers", () => {
   assert.equal(peerListed("telegram", ["222222", "Sam_Example"], "sam_example"), true);
   assert.equal(peerListed("telegram", ["222222", ""], "sam_example"), false);
 });
+
+test("a listed username is swapped for the account id that first used it", async () => {
+  const { bindPeer } = await import("./peers");
+  assert.equal(bindPeer("sam_example, 333333", "@Sam_Example", "222222"), "222222, 333333");
+  assert.equal(bindPeer("333333", "sam_example", "222222"), null);
+});

@@ -337,3 +337,43 @@ test("an approved action does not cover other arguments, a finished run, a stale
   assert.match(await rpc("request_approval", { summary: "x", runId, action: { tool: "request_approval", args: {} } }), /^not asked/);
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
 });
+
+test("while it answers someone other than its owner, only asking for approval and telling the owner are available", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await db.delete(schema.agentChannels).where(eq(schema.agentChannels.id, "chn_gk"));
+  await db.insert(schema.agentChannels).values({ id: "chn_gk", agentId: ids.agent, kind: "telegram", address: "gk-bot" });
+  await db.insert(schema.channelThreads).values([
+    { id: "cth_gk_outside", agentId: ids.agent, channelId: "chn_gk", peer: "222222", trusted: false },
+    { id: "cth_gk_owner", agentId: ids.agent, channelId: "chn_gk", peer: "111111", trusted: true },
+  ]);
+  const { forgetTurn, startTurn } = await import("./channels/turns");
+  try {
+    await startTurn(ids.agent, "cth_gk_outside");
+    const before = calls.length;
+    assert.match(await rpc("share_file", { path: "~/files/outbox/report.csv" }), /someone other than your owner/);
+    assert.match(await rpc("mail__send", { to: "client@example.com", body: "hi" }), /someone other than your owner/);
+    assert.equal(calls.length, before);
+    assert.doesNotMatch(await rpc("wait_for_approval", { requestId: "apr_missing" }), /someone other than your owner/);
+    const [agentRow] = await db.select({ tools: schema.agents.tools }).from(schema.agents).where(eq(schema.agents.id, ids.agent));
+    await db.update(schema.mcpServers).set({ askAll: false }).where(eq(schema.mcpServers.id, ids.server));
+    await db.update(schema.agents).set({ tools: { ...agentRow.tools, toolPolicy: { [ids.server]: { send: "allow" } } } }).where(eq(schema.agents.id, ids.agent));
+    try {
+      assert.match(await rpc("mail__send", { to: "client@example.com", body: "allowed tool" }), /someone other than your owner/);
+      assert.equal(calls.length, before);
+      await startTurn(ids.agent, "cth_gk_owner");
+      assert.match(await rpc("mail__send", { to: "client@example.com", body: "allowed tool" }), /sent to client@example\.com/);
+      assert.equal(calls.length, before + 1);
+    } finally {
+      await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+      await db.update(schema.agents).set({ tools: agentRow.tools }).where(eq(schema.agents.id, ids.agent));
+    }
+    await startTurn(ids.agent, "cth_gk_owner");
+    assert.doesNotMatch(await rpc("share_file", { path: "~/files/outbox/report.csv" }), /someone other than your owner/);
+    await startTurn(ids.agent, "cth_not_mine");
+    assert.doesNotMatch(await rpc("share_file", { path: "~/files/outbox/report.csv" }), /someone other than your owner/);
+  } finally {
+    forgetTurn(ids.agent);
+    await db.delete(schema.agentChannels).where(eq(schema.agentChannels.id, "chn_gk"));
+  }
+});

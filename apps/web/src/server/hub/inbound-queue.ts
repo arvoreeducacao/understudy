@@ -5,7 +5,7 @@ import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { flushReplies } from "../channels/relay";
-import { appendPending, setRoute } from "../channels/store";
+import { appendPending, routeIfTrusted } from "../channels/store";
 import { notifyRunFailure } from "../run-alerts";
 import { rememberSlackReply, slackGiveUp } from "../slack-inbound";
 import { log } from "./shared";
@@ -78,7 +78,7 @@ export class InboundQueue {
         const [claimed] = await db.delete(schema.inboundQueue).where(eq(schema.inboundQueue.id, row.id)).returning();
         if (!claimed) continue;
         if (claimed.slackChannel) await rememberSlackReply(agentId, claimed.slackChannel, claimed.slackThreadTs ?? undefined);
-        if (claimed.channelThreadId) await setRoute(agentId, claimed.channelThreadId).catch((error) => log("channel_route_error", { agentId, error: String(error) }));
+        if (claimed.channelThreadId) await routeIfTrusted(agentId, claimed.channelThreadId).catch((error) => log("channel_route_error", { agentId, error: String(error) }));
         if (!this.hub.sendToComputer(agentId, claimed.message as unknown as ServerToComputer)) {
           await db.insert(schema.inboundQueue).values(claimed).onConflictDoNothing();
           break;
