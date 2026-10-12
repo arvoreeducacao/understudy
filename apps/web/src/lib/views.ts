@@ -40,6 +40,7 @@ export function toApprovalView(a: typeof schema.approvals.$inferSelect): Approva
     fields: a.fields,
     status: a.status,
     createdAt: a.createdAt.toISOString(),
+    ...(a.grant ? { alwaysAllow: { tool: a.grant.tool } } : {}),
   };
 }
 

@@ -9,7 +9,7 @@ import { clipPreview, slackPreview } from "../../slack-preview";
 import { activeThread, finishRunProgress, mirrorPanelMessage, postApprovalInThread, relayActivity, relayAgentChat, startRunProgress, streamDelta } from "../../slack-threads";
 import type { ChannelAdapter } from "../adapter";
 
-export async function slackApprovalMessage(ownerName: string, approval: Pick<ApprovalView, "id" | "summary" | "fields">) {
+export async function slackApprovalMessage(ownerName: string, approval: Pick<ApprovalView, "id" | "summary" | "fields" | "alwaysAllow">) {
   const link = `${env.publicUrl}/waiting`;
   const fieldsText = approval.fields.map((f) => `*${escapeSlack(f.label)}:* ${f.value.trim() ? slackPreview(f.value) : `_${copy.approvals.emptyValue}_`}`).join("\n");
   const clipped = clipPreview(fieldsText);
@@ -26,6 +26,9 @@ export async function slackApprovalMessage(ownerName: string, approval: Pick<App
         ...(interactive
           ? [
               { type: "button", action_id: "approve", text: { type: "plain_text", text: copy.approvals.approve }, value: approval.id, style: "primary" },
+              ...(approval.alwaysAllow
+                ? [{ type: "button", action_id: "approve_always", text: { type: "plain_text", text: copy.toolAccess.approveAlways }, value: approval.id }]
+                : []),
               { type: "button", action_id: "deny", text: { type: "plain_text", text: copy.approvals.deny }, value: approval.id, style: "danger" },
             ]
           : []),

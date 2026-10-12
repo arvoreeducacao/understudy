@@ -118,7 +118,7 @@ async function onMessage(hub: Hub, addressed: AddressedChannel, token: string, m
 async function onCallback(hub: Hub, addressed: AddressedChannel, token: string, query: NonNullable<TelegramUpdate["callback_query"]>) {
   const { channel, owner } = addressed;
   const settings = telegramSettings(channel);
-  const match = query.data?.match(/^apr:(apr_[A-Za-z0-9_-]{6,80}):([yn])$/);
+  const match = query.data?.match(/^apr:(apr_[A-Za-z0-9_-]{6,80}):([yna])$/);
   if (!match) return "ignored";
   const answer = (text: string) => telegramCall(token, "answerCallbackQuery", { callback_query_id: query.id, text: text.slice(0, 190) });
   if (!settings.ownerUserId || String(query.from.id) !== settings.ownerUserId) {
@@ -133,8 +133,8 @@ async function onCallback(hub: Hub, addressed: AddressedChannel, token: string, 
     await answer(copy.channels.answerMissing);
     return "unknown_approval";
   }
-  const approved = match[2] === "y";
-  const ok = await hub.answerApproval(approval.id, approved, undefined, owner.id);
+  const approved = match[2] !== "n";
+  const ok = await hub.answerApproval(approval.id, approved, undefined, owner.id, match[2] === "a");
   const status = ok ? (approved ? "approved" : "denied") : ((await hub.approvalStatus(approval.id)) ?? "closed");
   const outcome = ok ? copy.channels.answerDone(approved) : copy.channels.answerClosed(copy.approvals.status[status] ?? status);
   await answer(outcome);

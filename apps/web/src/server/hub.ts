@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import { eq } from "drizzle-orm";
 import { parseComputerToServer, type ApprovalRequest, type Attachment, type ComputerToServer, type JobInfo, type ServerToComputer } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
-import type { MessageArtifact, RunTrigger } from "@/lib/db/schema";
+import type { ApprovalGrant, MessageArtifact, RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import { Approvals } from "./hub/approvals";
@@ -372,8 +372,9 @@ export class Hub {
     source: "mcp" | "computer",
     timeoutSeconds?: number,
     payloadHash?: string,
+    grant?: ApprovalGrant,
   ) {
-    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash);
+    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant);
   }
 
   approvalPayloadHash(id: string, agentId: string) {
@@ -392,8 +393,8 @@ export class Hub {
     return this.approvals.wait(id, capMs);
   }
 
-  answerApproval(id: string, approved: boolean, note: string | undefined, userId: string) {
-    return this.approvals.answer(id, approved, note, userId);
+  answerApproval(id: string, approved: boolean, note: string | undefined, userId: string, always = false) {
+    return this.approvals.answer(id, approved, note, userId, always);
   }
 
   cancelApprovals(agentId: string, userId: string | null) {

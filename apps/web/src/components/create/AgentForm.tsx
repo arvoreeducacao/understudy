@@ -9,6 +9,8 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
+import { withLegacyAsks, type ConnectorCeiling, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { Input, Switch } from "@/components/ui/controls";
@@ -33,10 +35,9 @@ function Toggle({ name, label, defaultOn, disabled }: { name: string; label: str
 export type ServerOption = {
   id: string;
   name: string;
-  askAll?: boolean;
-  adminAsk?: string[];
+  ceiling: ConnectorCeiling;
   signIn?: { signedIn: boolean };
-  tools: { name: string; description?: string }[] | null;
+  tools: ToolInfo[] | null;
 };
 
 type SlackMode = NonNullable<AgentTools["slackMode"]>;
@@ -82,7 +83,7 @@ function here() {
 
 function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; initial: AgentTools; admin: boolean }) {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
-  const [ask, setAsk] = useState(new Set(initial.askTools ?? []));
+  const [policy, setPolicy] = useState<ToolPolicy>(() => withLegacyAsks(initial.toolPolicy, initial.askTools));
   const flip = (set: Set<string>, value: string) => {
     const next = new Set(set);
     if (next.has(value)) next.delete(value);
@@ -105,9 +106,9 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
   }
   return (
     <div className="flex flex-col gap-2">
+      <input type="hidden" name="toolPolicy" value={JSON.stringify(policy)} />
       {servers.map((server) => {
         const enabled = on.has(server.id);
-        const adminAsk = new Set(server.adminAsk ?? []);
         return (
           <div key={server.id} className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-2.5">
             <Switch
@@ -121,43 +122,15 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
             />
             {server.signIn && !server.signIn.signedIn && <ConnectorSignIn id={server.id} returnTo={here()} label={messages.admin.signInGo(server.name)} />}
             {server.signIn?.signedIn && <div className="fld-hint">{t.serverSignedInAsYou(server.name)}</div>}
-            {enabled && server.askAll && <div className="fld-hint">{t.serverAdminAsksAll}</div>}
-            {enabled && !server.askAll && server.tools && server.tools.length > 0 && (
-              <div className="flex flex-col">
-                <div className="flex items-center justify-between text-[11.5px] text-smoke pb-1 border-b border-graphite">
-                  <span>{t.toolColumn}</span>
-                  <span>{t.askFirst}</span>
-                </div>
-                {server.tools.map((tool) => {
-                  const key = `${server.id}:${tool.name}`;
-                  const locked = adminAsk.has(tool.name);
-                  return (
-                    <div key={key} className="flex items-center gap-3 py-1.5 border-b border-graphite last:border-b-0">
-                      {locked ? (
-                        <>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-mono text-[12.5px] truncate">{tool.name}</div>
-                            {tool.description && <div className="text-smoke text-[11.5px] line-clamp-2">{tool.description}</div>}
-                          </div>
-                          <span className="pill" title={t.serverAdminAsks}>
-                            {t.alwaysAsks}
-                          </span>
-                        </>
-                      ) : (
-                        <Switch
-                          plain
-                          name="askTools"
-                          value={key}
-                          checked={ask.has(key)}
-                          onChange={() => setAsk((s) => flip(s, key))}
-                          label={<span className="font-mono text-[12.5px]">{tool.name}</span>}
-                          hint={tool.description ? <span className="line-clamp-2">{tool.description}</span> : undefined}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+            {enabled && server.tools && server.tools.length > 0 && (
+              <ToolPermissions
+                serverId={server.id}
+                serverName={server.name}
+                tools={server.tools}
+                ceiling={server.ceiling}
+                policy={policy[server.id] ?? {}}
+                onChange={(next) => setPolicy((current) => ({ ...current, [server.id]: next }))}
+              />
             )}
           </div>
         );

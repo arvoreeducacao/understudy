@@ -392,7 +392,7 @@ export function AgentInside({
           ))}
           {working && drafts.length === 0 && approvals.length === 0 && <WorkingRow agentName={agent.name} look={agent.look} note={live.note} />}
           {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} approval={approval} canAnswer={access !== "viewer"} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
+            <ApprovalCard key={approval.id} approval={approval} canAnswer={access !== "viewer"} canGrant={owner} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
           ))}
         </div>
         {owner ? (

@@ -1,6 +1,7 @@
 import {
   ArrowUp,
   Check,
+  CheckCheck,
   ChevronDown,
   LoaderCircle,
   MessageSquare,
@@ -208,12 +209,12 @@ export function StepsGroup({ entries, active }: { entries: ChatEntry[]; active: 
   );
 }
 
-export function ApprovalCard({ approval, onDone, canAnswer = true }: { approval: ApprovalView; onDone: (id: string) => void; canAnswer?: boolean }) {
-  const [busy, setBusy] = useState<"yes" | "no" | null>(null);
-  async function answer(approved: boolean) {
-    setBusy(approved ? "yes" : "no");
+export function ApprovalCard({ approval, onDone, canAnswer = true, canGrant = false }: { approval: ApprovalView; onDone: (id: string) => void; canAnswer?: boolean; canGrant?: boolean }) {
+  const [busy, setBusy] = useState<"yes" | "no" | "always" | null>(null);
+  async function answer(approved: boolean, always = false) {
+    setBusy(always ? "always" : approved ? "yes" : "no");
     try {
-      await answerApproval(approval.id, approved);
+      await answerApproval(approval.id, approved, undefined, always);
       onDone(approval.id);
     } finally {
       setBusy(null);
@@ -241,6 +242,12 @@ export function ApprovalCard({ approval, onDone, canAnswer = true }: { approval:
             {busy === "yes" ? <LoaderCircle size={14} className="cx-spin" aria-hidden /> : <Check size={14} aria-hidden />}
             {messages.live.approve}
           </button>
+          {canGrant && approval.alwaysAllow && (
+            <button className="btn sm sec" disabled={busy !== null} onClick={() => answer(true, true)} title={messages.toolAccess.approveAlwaysHint(approval.alwaysAllow.tool)}>
+              {busy === "always" ? <LoaderCircle size={14} className="cx-spin" aria-hidden /> : <CheckCheck size={14} aria-hidden />}
+              {messages.toolAccess.approveAlways}
+            </button>
+          )}
         </div>
       )}
     </section>

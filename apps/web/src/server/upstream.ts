@@ -5,6 +5,7 @@ import { getDb, schema } from "@/lib/db";
 import { open } from "@/lib/secret-box";
 import { SignInNeededError, StoredOAuthProvider, usesOAuth } from "./connector-oauth";
 import { safeFetch } from "./safe-fetch";
+import type { ToolHints } from "@/lib/tool-policy";
 
 export type UpstreamServer = typeof schema.mcpServers.$inferSelect;
 
@@ -12,7 +13,17 @@ export type UpstreamTool = {
   name: string;
   description?: string;
   inputSchema: { type: "object"; [key: string]: unknown };
+  annotations?: ToolHints;
 };
+
+function hintsOf(annotations: unknown): ToolHints | undefined {
+  if (!annotations || typeof annotations !== "object") return undefined;
+  const { readOnlyHint, destructiveHint } = annotations as Record<string, unknown>;
+  const hints: ToolHints = {};
+  if (typeof readOnlyHint === "boolean") hints.readOnlyHint = readOnlyHint;
+  if (typeof destructiveHint === "boolean") hints.destructiveHint = destructiveHint;
+  return Object.keys(hints).length ? hints : undefined;
+}
 
 const CACHE_MS = 5 * 60 * 1000;
 const toolCache = new Map<string, { at: number; tools: UpstreamTool[] }>();
@@ -37,6 +48,22 @@ export async function loadServers(ids: string[]) {
   return getDb().select().from(schema.mcpServers).where(inArray(schema.mcpServers.id, ids));
 }
 
+export async function loadToolLimits(ids: string[]) {
+  const limits = new Map<string, { ask: string[]; never: string[] }>();
+  if (ids.length === 0) return limits;
+  const rows = await getDb().select().from(schema.mcpToolLimits).where(inArray(schema.mcpToolLimits.serverId, ids));
+  for (const row of rows) {
+    const entry = limits.get(row.serverId) ?? { ask: [], never: [] };
+    entry[row.level === "never" ? "never" : "ask"].push(row.tool);
+    limits.set(row.serverId, entry);
+  }
+  return limits;
+}
+
+export function ceilingOf(server: Pick<UpstreamServer, "askAll" | "askTools">, limits: { ask: string[]; never: string[] } | undefined) {
+  return { askAll: server.askAll, askTools: [...(server.askTools ?? []), ...(limits?.ask ?? [])], neverTools: limits?.never ?? [] };
+}
+
 function cacheKey(server: UpstreamServer, userId?: string) {
   return usesOAuth(server) ? `${server.id}:${userId ?? ""}` : server.id;
 }
@@ -52,6 +79,7 @@ export async function listUpstreamTools(server: UpstreamServer, userId?: string)
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema as UpstreamTool["inputSchema"],
+      annotations: hintsOf(tool.annotations),
     }));
     toolCache.set(key, { at: Date.now(), tools });
     return tools;

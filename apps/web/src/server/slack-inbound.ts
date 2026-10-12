@@ -204,7 +204,7 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
         }).catch((error) => log("slack_respond_error", { error: String(error) }))
       : Promise.resolve();
   if (action.action_id === "proposal_save" || action.action_id === "proposal_dismiss") return answerProposal(hub, payload.user?.id, String(action.value ?? ""), action.action_id === "proposal_save", respond);
-  if (!["approve", "deny"].includes(action.action_id ?? "")) return;
+  if (!["approve", "approve_always", "deny"].includes(action.action_id ?? "")) return;
   const approvalId = String(action.value ?? "");
   const user = await panelUser(payload.user?.id);
   const [approval] = approvalId
@@ -215,8 +215,8 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
     await respond(copy.slackApp.cannotAnswer, false);
     return;
   }
-  const approved = action.action_id === "approve";
-  const ok = await hub.answerApproval(approval.id, approved, undefined, user.id);
+  const approved = action.action_id !== "deny";
+  const ok = await hub.answerApproval(approval.id, approved, undefined, user.id, action.action_id === "approve_always");
   log("slack_approval_answered", { approvalId, approved, ok });
   const status = ok ? null : await hub.approvalStatus(approval.id);
   const summary = escapeSlack(approval.summary);

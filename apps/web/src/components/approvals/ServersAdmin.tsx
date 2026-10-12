@@ -1,10 +1,12 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Eye, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { checkMcpServer, removeMcpServer, setServerAccess, setServerApprovals } from "@/app/actions/servers";
+import { checkMcpServer, removeMcpServer, setServerAccess } from "@/app/actions/servers";
+import { setConnectorCeiling } from "@/app/actions/tool-limits";
+import { isDestructive, isReadOnly, type ToolInfo } from "@/lib/tool-policy";
 import { featuredFor } from "@/lib/connector-showcase";
 import { messages } from "@/lib/messages";
 import { Checkbox, Input } from "@/components/ui/controls";
@@ -13,43 +15,87 @@ import { ConnectorLogo, ConnectorShowcase } from "./ConnectorShowcase";
 
 type ServerRow = { id: string; name: string; url: string; tools: string[] | null; askAll: boolean; askTools: string[]; allowedEmails: string[] | null };
 
-function ApprovalRules({ server }: { server: ServerRow }) {
-  const t = messages.admin;
+type Ceiling = "owner" | "ask" | "never";
+
+function CeilingRules({ server, tools, limits }: { server: ServerRow; tools: ToolInfo[] | null; limits: { ask: string[]; never: string[] } }) {
+  const t = messages.toolAccess;
   const [askAll, setAskAll] = useState(server.askAll);
-  const [askTools, setAskTools] = useState(new Set(server.askTools));
+  const [levels, setLevels] = useState<Record<string, Ceiling>>(() => {
+    const start: Record<string, Ceiling> = {};
+    for (const tool of [...server.askTools, ...limits.ask]) start[tool] = "ask";
+    for (const tool of limits.never) start[tool] = "never";
+    return start;
+  });
+  const [saved, setSaved] = useState(false);
   const [, start] = useTransition();
-  const save = (all: boolean, tools: Set<string>) => start(() => setServerApprovals(server.id, all, [...tools]));
+  const save = (all: boolean, next: Record<string, Ceiling>) =>
+    start(async () => {
+      const entries = Object.entries(next);
+      await setConnectorCeiling(server.id, { askAll: all, ask: entries.filter(([, level]) => level === "ask").map(([tool]) => tool), never: entries.filter(([, level]) => level === "never").map(([tool]) => tool) });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    });
   return (
-    <div className="flex flex-col gap-2 text-[12.5px]">
-      <Checkbox
-        className="!text-[12.5px]"
-        checked={askAll}
-        onChange={(e) => {
-          setAskAll(e.target.checked);
-          save(e.target.checked, askTools);
-        }}
-        label={t.serverAskAll}
-      />
-      {!askAll && server.tools && server.tools.length > 0 && (
-        <div className="flex flex-wrap gap-x-5 gap-y-2 pl-7">
-          {server.tools.map((tool) => (
-            <Checkbox
-              key={tool}
-              className="!text-[12.5px]"
-              checked={askTools.has(tool)}
-              onChange={() => {
-                const next = new Set(askTools);
-                if (next.has(tool)) next.delete(tool);
-                else next.add(tool);
-                setAskTools(next);
-                save(askAll, next);
-              }}
-              label={<span className="font-mono">{tool}</span>}
-            />
-          ))}
-        </div>
+    <div className="flex flex-col gap-3 text-[12.5px]">
+      <div className="flex flex-col gap-1">
+        <span className="fld-label">{t.ceilingTitle}</span>
+        <span className="fld-hint">{t.ceilingHint}</span>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <Checkbox
+          className="!text-[12.5px]"
+          checked={askAll}
+          onChange={(e) => {
+            setAskAll(e.target.checked);
+            save(e.target.checked, levels);
+          }}
+          label={t.ceilingAskAll}
+        />
+        {saved && <span className="text-green">{messages.admin.serverSaved}</span>}
+      </div>
+      {tools && tools.length > 0 && (
+        <ul className="tp-list" aria-label={t.ceilingTitle}>
+          {tools.map((tool) => {
+            const level = levels[tool.name] ?? "owner";
+            const options = (askAll ? (["ask", "never"] as Ceiling[]) : (["owner", "ask", "never"] as Ceiling[])).map((value) => ({ value, label: t.ceiling[value] }));
+            return (
+              <li key={tool.name} className="tp-row">
+                <div className="tp-tool">
+                  <div className="tp-name">
+                    <span className="font-mono">{tool.name}</span>
+                    {isReadOnly(tool.annotations) && (
+                      <span className="tp-tag">
+                        <Eye size={12} aria-hidden />
+                        {t.readOnly}
+                      </span>
+                    )}
+                    {isDestructive(tool.annotations) && (
+                      <span className="tp-tag is-danger">
+                        <TriangleAlert size={12} aria-hidden />
+                        {t.destructive}
+                      </span>
+                    )}
+                  </div>
+                  {tool.description && <p className="tp-desc">{tool.description}</p>}
+                </div>
+                <Segmented
+                  className="tp-seg"
+                  label={t.ceilingChoiceLabel(tool.name)}
+                  options={options}
+                  value={askAll && level === "owner" ? "ask" : level}
+                  onChange={(value) => {
+                    const next = { ...levels };
+                    if (value === "owner") delete next[tool.name];
+                    else next[tool.name] = value;
+                    setLevels(next);
+                    save(askAll, next);
+                  }}
+                />
+              </li>
+            );
+          })}
+        </ul>
       )}
-      {!askAll && server.tools && server.tools.length > 0 && <div className="fld-hint pl-7">{t.serverAskHint}</div>}
     </div>
   );
 }
@@ -135,11 +181,11 @@ export function ConnectedActions({ id }: { id: string }) {
   );
 }
 
-export function ConnectorSettings({ server }: { server: ServerRow }) {
+export function ConnectorSettings({ server, tools, limits }: { server: ServerRow; tools: ToolInfo[] | null; limits: { ask: string[]; never: string[] } }) {
   return (
     <div className="flex flex-col gap-4">
       <AccessRules server={server} />
-      <ApprovalRules server={server} />
+      <CeilingRules server={server} tools={tools} limits={limits} />
     </div>
   );
 }
