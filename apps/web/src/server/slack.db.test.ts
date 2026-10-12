@@ -249,6 +249,50 @@ test("approval buttons answer only for people who may approve", { skip }, async 
   assert.match(JSON.stringify(responses.at(-1)), /Denied by Owner/);
 });
 
+test("task suggestion buttons save the task only for the owner", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const hub = createHub();
+  const recipe = {
+    title: "Weekly Northwind stock report",
+    trigger: "every Monday",
+    steps: [
+      { id: "s1", text: "Open the Northwind stock sheet", mode: "auto" as const },
+      { id: "s2", text: "Send the summary to the team", mode: "ask" as const },
+    ],
+    questions: [],
+    askFirstRuns: 3,
+  };
+  const proposed = await hub.proposals.propose(ids.ana, { recipe, cron: "0 9 * * 1", timezone: "UTC", reason: "You asked me for this three times.", origin: "repeated" });
+  assert.ok(proposed.ok);
+  const posted = await waitFor(
+    () => slackCalls.find((c) => c.method === "chat.postMessage" && JSON.stringify(c.body.blocks).includes(proposed.id)),
+    "the suggestion card to be posted",
+  );
+  assert.match(JSON.stringify(posted.body.blocks), /proposal_save/);
+  const click = (user: string, action: string) =>
+    signed(
+      "/api/slack/interactivity",
+      new URLSearchParams({ payload: JSON.stringify({ type: "block_actions", user: { id: user }, actions: [{ action_id: action, value: proposed.id }], response_url: "https://hooks.slack.com/actions/y" }) }).toString(),
+      "application/x-www-form-urlencoded",
+    );
+  await click("USTRANGER", "proposal_save");
+  await settle();
+  let [row] = await getDb().select().from(schema.taskProposals).where(eq(schema.taskProposals.id, proposed.id));
+  assert.equal(row.status, "pending");
+  assert.match(JSON.stringify(responses.at(-1)), /Only the owner/);
+  await click("UOWNER", "proposal_save");
+  await settle();
+  [row] = await getDb().select().from(schema.taskProposals).where(eq(schema.taskProposals.id, proposed.id));
+  assert.equal(row.status, "saved");
+  assert.equal(row.answeredBy, ids.owner);
+  const [task] = await getDb().select().from(schema.recipes).where(eq(schema.recipes.id, row.recipeId!));
+  assert.equal(task.recipe.title, "Weekly Northwind stock report");
+  await click("UOWNER", "proposal_dismiss");
+  await settle();
+  assert.match(JSON.stringify(responses.at(-1)), /already answered/);
+});
+
 test("the slash command lists the person's agents", { skip }, async () => {
   const res = await signed("/api/slack/commands", new URLSearchParams({ user_id: "UOWNER", command: "/understudy" }).toString(), "application/x-www-form-urlencoded");
   const body = (await res.json()) as { text: string; response_type: string };

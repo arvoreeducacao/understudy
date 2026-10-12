@@ -22,6 +22,7 @@ import type { ApprovalView, ChatEntry } from "@/server/hub-types";
 import { ArtifactCard, ArtifactEditChip } from "@/components/artifacts/ArtifactCard";
 import { AttachmentChip, AttachmentList } from "./FileCards";
 import { Markdown } from "./Markdown";
+import { ProposalCard } from "./ProposalCard";
 import type { AttachmentsState } from "./useAttachments";
 
 const t = messages.live;
@@ -84,6 +85,7 @@ export function MessageRow({
   look,
   agentId,
   onOpenArtifact,
+  canAnswerProposal = false,
 }: {
   entry: ChatEntry;
   continued: boolean;
@@ -91,6 +93,7 @@ export function MessageRow({
   look: Look;
   agentId?: string;
   onOpenArtifact?: () => void;
+  canAnswerProposal?: boolean;
 }) {
   const files = agentId && entry.attachments?.length ? <AttachmentList agentId={agentId} attachments={entry.attachments} /> : null;
   if (entry.role === "system") return <SystemRow text={entry.text} at={entry.at} />;
@@ -123,6 +126,7 @@ export function MessageRow({
         )}
         {entry.text && <Markdown text={entry.text} />}
         {entry.artifact && <ArtifactCard artifact={entry.artifact} onOpen={onOpenArtifact} />}
+        {entry.proposal && <ProposalCard proposal={entry.proposal} canAnswer={canAnswerProposal} />}
         {files}
       </div>
     </div>

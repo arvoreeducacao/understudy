@@ -129,6 +129,7 @@ export const messages = pgTable(
     via: text("via"),
     attachments: jsonb("attachments").$type<Attachment[]>(),
     artifact: jsonb("artifact").$type<MessageArtifact>(),
+    proposalId: text("proposal_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("messages_agent_idx").on(t.agentId, t.createdAt)],
@@ -623,4 +624,30 @@ export const artifactLinks = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("artifact_links_token_idx").on(t.tokenHash), index("artifact_links_artifact_idx").on(t.artifactId)],
+);
+
+export type ProposalOrigin = "repeated" | "multi_step";
+export type ProposalStatus = "pending" | "saved" | "dismissed";
+
+export const taskProposals = pgTable(
+  "task_proposals",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    recipe: jsonb("recipe").$type<Recipe>().notNull(),
+    cron: text("cron"),
+    timezone: text("timezone").notNull().default("UTC"),
+    reason: text("reason").notNull(),
+    origin: text("origin").$type<ProposalOrigin>().notNull(),
+    status: text("status").$type<ProposalStatus>().notNull().default("pending"),
+    recipeId: text("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
+    slackChannel: text("slack_channel"),
+    slackTs: text("slack_ts"),
+    answeredBy: text("answered_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+  },
+  (t) => [index("task_proposals_agent_idx").on(t.agentId, t.status)],
 );

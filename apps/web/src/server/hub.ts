@@ -10,6 +10,7 @@ import { handleComputerMessage } from "./hub/computer-handlers";
 import { Hosts } from "./hub/hosts";
 import { IdleSleeper } from "./hub/idle";
 import { InboundQueue, type DeliverOptions } from "./hub/inbound-queue";
+import { Proposals } from "./hub/proposals";
 import { Recordings } from "./hub/recordings";
 import { Rooms } from "./hub/rooms";
 import { Runs } from "./hub/runs";
@@ -38,6 +39,7 @@ export class Hub {
   readonly approvals = new Approvals(this);
   readonly runs = new Runs(this);
   readonly recordings = new Recordings(this);
+  readonly proposals = new Proposals(this);
   readonly hosts = new Hosts(this);
   readonly inbound = new InboundQueue(this);
   readonly watcher = new Watcher(this);

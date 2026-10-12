@@ -42,6 +42,17 @@ Message shapes live in `packages/protocol/src/index.ts`. Changing them is a cont
 - The isolated network has no route to production networks; egress is internet only.
 - Everything specific to one deployment (domain, allowed email domain, Slack workspace) is configuration, never code.
 
+## Learning without being taught
+
+An understudy also offers to keep work it was not taught. Two signals start it:
+
+- **Repetition.** When the owner writes in the panel or on Slack, the panel compares the message with that owner's other messages to the same understudy from the last 30 days (words without stopwords, numbers or links; Jaccard similarity of at least 0.5; asks less than an hour apart count once). On the third similar ask, unless an existing task or a recent suggestion already covers it, the chat message reaches the computer with `repeated: { times, since }`.
+- **A long ad-hoc job.** The computer counts the actions in each chat turn (reads, screenshots and approvals do not count).
+
+After a successful chat turn with either signal, and when the brain did not already call `save_task` or `propose_task`, the computer runs one quiet follow-up in the same session asking the brain to call the gatekeeper tool `propose_task` if the work is a routine. Nothing it writes in that follow-up reaches the chat.
+
+`propose_task` takes a draft (title, why, steps with `ask_first`, inputs, an optional cron) and stores it in `task_proposals` after the usual recipe normalization, so commit-like steps ask first. It refuses a routine that is already a task or that the owner dismissed in the last 30 days, updates a waiting suggestion for the same routine instead of adding another, and keeps at most three waiting. The chat shows it as a card and, when Slack is on, it goes to the active Slack thread or as a direct message to the owner with Save task and Not now buttons. Only the owner can answer. Saving creates the task with the suggested schedule turned on (the first runs still ask before every step); "Save and edit" creates it paused and opens the editor. Nothing is saved without that choice.
+
 ## Always on
 
 Understudies do not depend on their owner being online. The computer runs 24/7 on the host; the panel's scheduler and triggers start runs; approvals wait in the panel (and optionally Slack) until answered, and the run resumes from the approval.

@@ -1,3 +1,5 @@
+import { messages } from "./messages";
+
 export type ScheduleMode = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
 
 export type Schedule = { mode: ScheduleMode; time: string; weekday: number; monthday: number; custom: string };
@@ -35,5 +37,23 @@ export function toCron(schedule: Schedule): string {
       return `${minute} ${hour} ${Math.min(28, Math.max(1, schedule.monthday))} * *`;
     case "custom":
       return schedule.custom.trim();
+  }
+}
+
+export function describeSchedule(cron: string | null | undefined): string {
+  const t = messages.schedule;
+  const schedule = parseCron(cron ?? "");
+  switch (schedule.mode) {
+    case "none":
+      return t.modes.none;
+    case "daily":
+    case "weekdays":
+      return t.at(t.modes[schedule.mode], schedule.time);
+    case "weekly":
+      return t.at(t.weekdays[schedule.weekday] ? t.weeklyOn(t.weekdays[schedule.weekday]) : t.modes.weekly, schedule.time);
+    case "monthly":
+      return t.at(t.onDay(schedule.monthday), schedule.time);
+    case "custom":
+      return t.customShort(schedule.custom.trim());
   }
 }

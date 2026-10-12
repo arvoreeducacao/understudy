@@ -109,3 +109,9 @@ test("owner rules: amounts, email domains and blocked sites are caught, and rule
   assert.match(brief, /Never work on weekends/);
   assert.equal(rulesBriefing([]), "");
 });
+
+test("an owner chat can say how often the same thing was asked", () => {
+  const message = { type: "chat", text: "Summarize the support inbox", from: "Maya", repeated: { times: 3, since: Date.parse("2026-03-02T09:00:00Z") } };
+  assert.deepEqual(parseServerToComputer(message), { ok: true, message });
+  assert.equal(parseServerToComputer({ ...message, repeated: { times: 1, since: 0 } }).ok, false);
+});
