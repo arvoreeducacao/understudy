@@ -8,6 +8,8 @@ export type ConnectorCeiling = { askAll?: boolean; askTools?: string[] | null; n
 
 export type ToolPolicy = Record<string, Record<string, ToolPermission>>;
 
+export type SeenHints = Record<string, Record<string, ToolHints>>;
+
 export type ToolVerdict = "allowed" | "approved" | "denied" | "blocked";
 
 const RANK: Record<ToolPermission, number> = { allow: 0, ask: 1, never: 2 };
@@ -34,13 +36,60 @@ export function defaultPermission(hints: ToolHints | undefined): ToolPermission 
   return isReadOnly(hints) ? "allow" : "ask";
 }
 
+export function toolKey(name: string) {
+  return name.normalize("NFKC").trim().toLowerCase();
+}
+
+function lookup<T>(entries: Record<string, T> | undefined, tool: string): T[] {
+  if (!entries) return [];
+  const key = toolKey(tool);
+  return Object.entries(entries)
+    .filter(([name]) => toolKey(name) === key)
+    .map(([, value]) => value);
+}
+
+export function hintsLoosened(seen: ToolHints | undefined, current: ToolHints | undefined) {
+  if (!seen) return false;
+  return (isReadOnly(current) && !isReadOnly(seen)) || (isDestructive(seen) && !isDestructive(current));
+}
+
+export function trustedHints(seen: ToolHints | undefined, current: ToolHints | undefined): ToolHints | undefined {
+  if (!hintsLoosened(seen, current)) return current;
+  return { readOnlyHint: isReadOnly(seen) && isReadOnly(current), destructiveHint: isDestructive(seen) || isDestructive(current) };
+}
+
+export function seenHintsFor(seen: SeenHints | undefined, serverId: string, tool: string): ToolHints | undefined {
+  const found = lookup(seen?.[serverId], tool);
+  if (found.length === 0) return undefined;
+  return { readOnlyHint: found.every((hints) => isReadOnly(hints)), destructiveHint: found.some((hints) => isDestructive(hints)) };
+}
+
+export function recordedHints(seen: SeenHints | undefined, serverId: string, tools: ToolInfo[], chosen: Record<string, ToolPermission> = {}): Record<string, ToolHints> {
+  const kept: Record<string, ToolHints> = {};
+  for (const tool of tools.slice(0, MAX_TOOLS_PER_SERVER)) {
+    if (!tool.name || tool.name.length > MAX_TOOL_NAME) continue;
+    const decided = isPermission(chosen[tool.name]) ? undefined : seenHintsFor(seen, serverId, tool.name);
+    kept[tool.name] = decided ?? hintsOnly(tool.annotations);
+  }
+  return kept;
+}
+
+function hintsOnly(hints: ToolHints | undefined): ToolHints {
+  const kept: ToolHints = {};
+  if (typeof hints?.readOnlyHint === "boolean") kept.readOnlyHint = hints.readOnlyHint;
+  if (typeof hints?.destructiveHint === "boolean") kept.destructiveHint = hints.destructiveHint;
+  return kept;
+}
+
 export function stricter(a: ToolPermission, b: ToolPermission): ToolPermission {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
 export function ceilingFor(server: ConnectorCeiling, tool: string): ToolPermission {
-  if ((server.neverTools ?? []).includes(tool)) return "never";
-  if (server.askAll || (server.askTools ?? []).includes(tool)) return "ask";
+  const key = toolKey(tool);
+  const listed = (names: string[] | null | undefined) => (names ?? []).some((name) => toolKey(name) === key);
+  if (listed(server.neverTools)) return "never";
+  if (server.askAll || listed(server.askTools)) return "ask";
   return "allow";
 }
 
@@ -49,9 +98,10 @@ export function allowedChoices(ceiling: ToolPermission) {
 }
 
 export function ownerChoice(policy: ToolPolicy | undefined, legacyAsk: string[] | undefined, serverId: string, tool: string): ToolPermission | undefined {
-  const chosen = policy?.[serverId]?.[tool];
-  if (isPermission(chosen)) return chosen;
-  if ((legacyAsk ?? []).includes(`${serverId}:${tool}`)) return "ask";
+  const chosen = lookup(policy?.[serverId], tool).filter(isPermission);
+  if (chosen.length) return chosen.reduce(stricter);
+  const key = toolKey(tool);
+  if ((legacyAsk ?? []).some((entry) => entry.startsWith(`${serverId}:`) && toolKey(entry.slice(serverId.length + 1)) === key)) return "ask";
   return undefined;
 }
 
@@ -61,10 +111,11 @@ export function effectivePermission(input: {
   tool: ToolInfo;
   policy?: ToolPolicy;
   legacyAsk?: string[];
+  seen?: SeenHints;
 }): { permission: ToolPermission; source: "admin" | "owner" | "default" } {
   const ceiling = ceilingFor(input.server, input.tool.name);
   const chosen = ownerChoice(input.policy, input.legacyAsk, input.serverId, input.tool.name);
-  const wanted = chosen ?? defaultPermission(input.tool.annotations);
+  const wanted = chosen ?? defaultPermission(trustedHints(seenHintsFor(input.seen, input.serverId, input.tool.name), input.tool.annotations));
   const permission = stricter(wanted, ceiling);
   const source = permission !== wanted ? "admin" : chosen ? "owner" : "default";
   return { permission, source };
@@ -75,10 +126,7 @@ export function canAlwaysAllow(server: ConnectorCeiling, tool: string) {
 }
 
 export function withChoice(policy: Record<string, ToolPermission>, tool: ToolInfo, permission: ToolPermission) {
-  const next = { ...policy };
-  if (permission === defaultPermission(tool.annotations)) delete next[tool.name];
-  else next[tool.name] = permission;
-  return next;
+  return { ...policy, [tool.name]: permission };
 }
 
 export function allowReadOnly(policy: Record<string, ToolPermission>, tools: ToolInfo[]) {
@@ -103,6 +151,22 @@ export function cleanPolicy(input: unknown, serverIds: string[]): ToolPolicy {
     const entries = Object.entries(tools as Record<string, unknown>)
       .filter(([name, permission]) => name.length > 0 && name.length <= MAX_TOOL_NAME && isPermission(permission))
       .slice(0, MAX_TOOLS_PER_SERVER) as [string, ToolPermission][];
+    if (entries.length) clean[serverId] = Object.fromEntries(entries);
+  }
+  return clean;
+}
+
+export function cleanSeenHints(input: unknown, serverIds: string[]): SeenHints {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const allowed = new Set(serverIds);
+  const clean: SeenHints = {};
+  for (const [serverId, tools] of Object.entries(input as Record<string, unknown>)) {
+    if (Object.keys(clean).length >= MAX_SERVERS) break;
+    if (!allowed.has(serverId) || !tools || typeof tools !== "object" || Array.isArray(tools)) continue;
+    const entries = Object.entries(tools as Record<string, unknown>)
+      .filter(([name, hints]) => name.length > 0 && name.length <= MAX_TOOL_NAME && Boolean(hints) && typeof hints === "object" && !Array.isArray(hints))
+      .slice(0, MAX_TOOLS_PER_SERVER)
+      .map(([name, hints]) => [name, hintsOnly(hints as ToolHints)] as const);
     if (entries.length) clean[serverId] = Object.fromEntries(entries);
   }
   return clean;

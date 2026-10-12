@@ -1,4 +1,4 @@
-import { Eye, TriangleAlert } from "lucide-react";
+import { Eye, RefreshCw, TriangleAlert } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 import { messages } from "@/lib/messages";
 import {
@@ -7,10 +7,14 @@ import {
   askForRest,
   ceilingFor,
   effectivePermission,
+  hintsLoosened,
   isDestructive,
   isReadOnly,
+  seenHintsFor,
+  trustedHints,
   withChoice,
   type ConnectorCeiling,
+  type SeenHints,
   type ToolInfo,
   type ToolPermission,
 } from "@/lib/tool-policy";
@@ -20,6 +24,7 @@ export function ToolPermissions({
   serverName,
   tools,
   ceiling,
+  seen,
   policy,
   onChange,
 }: {
@@ -27,13 +32,17 @@ export function ToolPermissions({
   serverName: string;
   tools: ToolInfo[];
   ceiling: ConnectorCeiling;
+  seen?: SeenHints;
   policy: Record<string, ToolPermission>;
   onChange: (next: Record<string, ToolPermission>) => void;
 }) {
   const t = messages.toolAccess;
-  const readOnly = tools.filter((tool) => isReadOnly(tool.annotations));
-  const rest = tools.filter((tool) => !isReadOnly(tool.annotations));
-  const permissionOf = (tool: ToolInfo) => effectivePermission({ serverId, server: ceiling, tool, policy: { [serverId]: policy } }).permission;
+  const seenOf = (tool: ToolInfo) => seenHintsFor(seen, serverId, tool.name);
+  const hintsOf = (tool: ToolInfo) => trustedHints(seenOf(tool), tool.annotations);
+  const trusted = tools.map((tool) => ({ ...tool, annotations: hintsOf(tool) }));
+  const readOnly = trusted.filter((tool) => isReadOnly(tool.annotations));
+  const rest = trusted.filter((tool) => !isReadOnly(tool.annotations));
+  const permissionOf = (tool: ToolInfo) => effectivePermission({ serverId, server: ceiling, tool, policy: { [serverId]: policy }, seen }).permission;
   const counts = { allow: 0, ask: 0, never: 0 };
   for (const tool of tools) counts[permissionOf(tool)] += 1;
 
@@ -56,13 +65,15 @@ export function ToolPermissions({
           const cap = ceilingFor(ceiling, tool.name);
           const current = permissionOf(tool);
           const choices = allowedChoices(cap);
-          const destructive = isDestructive(tool.annotations);
+          const hints = hintsOf(tool);
+          const destructive = isDestructive(hints);
+          const changed = !(tool.name in policy) && hintsLoosened(seenOf(tool), tool.annotations);
           return (
             <li key={tool.name} className="tp-row">
               <div className="tp-tool">
                 <div className="tp-name">
                   <span className="font-mono">{tool.name}</span>
-                  {isReadOnly(tool.annotations) && (
+                  {isReadOnly(hints) && (
                     <span className="tp-tag">
                       <Eye size={12} aria-hidden />
                       {t.readOnly}
@@ -72,6 +83,12 @@ export function ToolPermissions({
                     <span className="tp-tag is-danger">
                       <TriangleAlert size={12} aria-hidden />
                       {t.destructive}
+                    </span>
+                  )}
+                  {changed && (
+                    <span className="tp-tag is-danger" title={t.hintsChangedHint}>
+                      <RefreshCw size={12} aria-hidden />
+                      {t.hintsChanged}
                     </span>
                   )}
                 </div>

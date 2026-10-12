@@ -5,7 +5,7 @@ import { cleanLook } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { serverAllowedFor } from "@/server/approval-payload";
-import { cleanPolicy } from "@/lib/tool-policy";
+import { cleanPolicy, cleanSeenHints } from "@/lib/tool-policy";
 
 export async function toolsFrom(form: FormData, email: string): Promise<AgentTools> {
   const requested = new Set(form.getAll("servers").map(String).slice(0, 50));
@@ -21,6 +21,7 @@ export async function toolsFrom(form: FormData, email: string): Promise<AgentToo
     servers: allowed,
     askTools: [],
     toolPolicy: cleanPolicy(parsePolicy(form.get("toolPolicy")), usable),
+    toolHints: cleanSeenHints(parsePolicy(form.get("toolHints")), usable),
   };
 }
 
