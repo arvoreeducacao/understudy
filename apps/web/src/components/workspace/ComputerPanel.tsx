@@ -1,4 +1,4 @@
-import { GraduationCap, Maximize2, Minimize2, X } from "lucide-react";
+import { GraduationCap, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AgentState } from "@understudy/protocol";
@@ -37,8 +37,11 @@ export function ComputerPanel({
   const { live, send } = link;
   const [controlling, setControlling] = useState(false);
   const [full, setFull] = useState(false);
+  const [canFull, setCanFull] = useState(true);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inControl = controlling && live.online;
+
+  useEffect(() => setCanFull(Boolean(document.fullscreenEnabled)), []);
 
   useEffect(() => {
     const onChange = () => setFull(document.fullscreenElement === panelRef.current && panelRef.current !== null);
@@ -68,9 +71,11 @@ export function ComputerPanel({
           <span className={`pc-dot ${live.online ? "on" : ""}`} aria-hidden />
           <span className="truncate">{a.computerOf(agent.name)} · {headline}</span>
           <div className="pc-top-actions">
-            <button type="button" className="pc-mini" onClick={toggleFull} aria-label={full ? t.exitFullScreen : t.fullScreen} title={full ? t.exitFullScreen : t.fullScreen}>
-              {full ? <Minimize2 size={13} aria-hidden /> : <Maximize2 size={13} aria-hidden />}
-            </button>
+            {canFull && (
+              <button type="button" className="pc-mini" onClick={toggleFull} aria-label={full ? t.exitFullScreen : t.fullScreen} title={full ? t.exitFullScreen : t.fullScreen}>
+                {full ? <Minimize2 size={13} aria-hidden /> : <Maximize2 size={13} aria-hidden />}
+              </button>
+            )}
             {!full && (
               <button type="button" className="pc-mini" onClick={onClose} aria-label={a.closeComputer} title={a.closeComputer}>
                 <X size={13} aria-hidden />
@@ -87,6 +92,12 @@ export function ComputerPanel({
           look={agent.look}
         />
       </div>
+      {inControl && (
+        <p className="pc-rotate">
+          <RotateCw size={13} aria-hidden />
+          {t.rotateHint}
+        </p>
+      )}
       {live.error && <div className="err">{live.error}</div>}
       {owner && live.online && (
         <div className="pc-control" role="group" aria-label={a.control}>

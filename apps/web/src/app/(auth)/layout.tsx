@@ -15,7 +15,7 @@ const PARADE = [
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="sky-page min-h-screen flex flex-col items-center px-4 pt-[6vh] pb-0 overflow-hidden">
+    <div className="sky-page min-h-dvh flex flex-col items-center px-4 pt-[6dvh] pb-0 overflow-hidden">
       <div className="w-full max-w-[400px] flex flex-col items-center gap-6 flex-1">
         <div className="sign-hero flex flex-col items-center gap-3 text-center">
           <div className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.02em] text-mist">

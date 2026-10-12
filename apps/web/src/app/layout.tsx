@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { PwaRegister } from "@/components/PwaRegister";
 import { env } from "@/lib/env";
+import { THEME_COLOR } from "@/lib/theme";
 import { messages, serverLocale } from "@/lib/messages";
 import "./globals.css";
 
@@ -13,7 +14,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0f1628",
+  interactiveWidget: "resizes-content",
+  themeColor: THEME_COLOR,
 };
 
 export function generateMetadata(): Metadata {

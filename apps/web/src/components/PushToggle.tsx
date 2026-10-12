@@ -1,13 +1,15 @@
 "use client";
 
+import { Share } from "lucide-react";
 import { useEffect, useState } from "react";
 import { subscribePush, unsubscribePush } from "@/app/actions/notifications";
 import { messages } from "@/lib/messages";
 import { Switch } from "@/components/ui/controls";
+import { pushSupport } from "@/lib/push-support";
 
 const t = messages.settings;
 
-type State = "loading" | "unsupported" | "denied" | "off" | "on" | "busy";
+type State = "loading" | "unsupported" | "install-first" | "denied" | "off" | "on" | "busy";
 
 function keyBytes(base64: string) {
   const padded = (base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
@@ -23,8 +25,14 @@ export function PushToggle({ publicKey }: { publicKey: string }) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-      setState("unsupported");
+    const support = pushSupport({
+      userAgent: navigator.userAgent,
+      maxTouchPoints: navigator.maxTouchPoints ?? 0,
+      standalone: window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
+      hasPushApi: "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
+    });
+    if (support !== "supported") {
+      setState(support);
       return;
     }
     if (Notification.permission === "denied") {
@@ -73,6 +81,21 @@ export function PushToggle({ publicKey }: { publicKey: string }) {
     }
   }
 
+  if (state === "install-first")
+    return (
+      <div className="push-install">
+        <strong>{t.pushInstallTitle}</strong>
+        <p>{t.pushInstallWhy}</p>
+        <ol>
+          {t.pushInstallSteps.map((step, index) => (
+            <li key={index}>
+              <span>{step}</span>
+              {index === 1 && <Share size={14} className="push-install-icon" aria-hidden />}
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
   if (state === "unsupported") return <div className="text-smoke text-[12.5px]">{t.pushUnsupported}</div>;
   if (state === "denied") return <div className="text-smoke text-[12.5px]">{t.pushDenied}</div>;
   const on = state === "on";

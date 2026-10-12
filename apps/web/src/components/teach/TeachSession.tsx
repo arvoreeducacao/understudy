@@ -13,7 +13,9 @@ import { useSpeech } from "@/components/live/useSpeech";
 import type { BrainStatus } from "@/lib/db/schema";
 import { agentTabPath } from "@/lib/workspace-tabs";
 import { messages } from "@/lib/messages";
-import { Input, Textarea } from "@/components/ui/controls";
+import { Input } from "@/components/ui/controls";
+import { PHONE, useMediaQuery } from "@/components/useMediaQuery";
+import { DescribeTaskForm, TeachByWords } from "./TeachByWords";
 
 const t = messages.teach;
 
@@ -83,7 +85,6 @@ export function TeachSession({
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [narration, setNarration] = useState("");
-  const [description, setDescription] = useState("");
   const [failure, setFailure] = useState<string | null>(null);
   const { live, send, subscribeFrames } = useAgentSocket(
     agent.id,
@@ -133,11 +134,21 @@ export function TeachSession({
 
   const steps = useMemo(() => stepsFromEvents(events), [events]);
   const face: AgentState = processing ? "thinking" : recording ? "listening" : "calm";
+  const phone = useMediaQuery(PHONE);
+
+  function describe(text: string) {
+    setFailure(null);
+    return send({ type: "teach_text", text });
+  }
+
+  if (phone && !recording && steps.length === 0)
+    return <TeachByWords agent={agent} face={face} online={live.online} brainReady={brainReady} processing={processing} failure={failure ?? live.error ?? null} onSubmit={describe} />;
+
   let actionNumber = 0;
 
   return (
-    <div className="grid grid-cols-[1fr_340px] h-screen max-[1000px]:grid-cols-1 max-[1000px]:h-auto">
-      <div className="flex flex-col pl-[22px] pr-[18px] py-[18px] gap-3 min-h-0 max-[1000px]:h-[80vh]">
+    <div className="grid grid-cols-[1fr_340px] h-dvh max-[1000px]:grid-cols-1 max-[1000px]:h-auto">
+      <div className="flex flex-col pl-[22px] pr-[18px] py-[18px] gap-3 min-h-0 max-[1000px]:h-[80dvh]">
         <div className="flex items-center gap-3 flex-wrap">
           <Link href={`/agents/${agent.id}`} aria-label={messages.common.back} className="text-ash hover:text-mist no-underline inline-flex">
             <ArrowLeft size={18} aria-hidden />
@@ -190,7 +201,7 @@ export function TeachSession({
         />
       </div>
 
-      <aside className="bg-void border-l border-graphite flex flex-col min-h-0 max-[1000px]:h-[70vh]">
+      <aside className="bg-void border-l border-graphite flex flex-col min-h-0 max-[1000px]:h-[70dvh]">
         <div className="p-[18px] flex gap-3 items-center border-b border-graphite">
           <AgentFigure state={face} size={44} look={agent.look} />
           <div>
@@ -201,31 +212,7 @@ export function TeachSession({
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-[18px] py-3.5 flex flex-col gap-2.5">
           {steps.length === 0 && <div className="text-smoke text-[12.5px]">{t.noSteps}</div>}
           {!recording && steps.length === 0 && (
-            <form
-              className="flex flex-col gap-2 mt-2 border-t border-graphite pt-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const text = description.trim();
-                if (!text) return;
-                setFailure(null);
-                if (send({ type: "teach_text", text })) setDescription("");
-              }}
-            >
-              <div className="text-[13px] font-semibold">{t.describeTitle}</div>
-              <div className="text-[12px] text-smoke">{t.describeHint}</div>
-              <Textarea
-                size="sm"
-                aria-label={t.describeTitle}
-                className="resize-none [field-sizing:content] !min-h-[120px]"
-                placeholder={t.describePlaceholder}
-                value={description}
-                disabled={processing || !live.online}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <button type="submit" className="btn sec sm self-start" disabled={processing || !live.online || !brainReady || !description.trim()}>
-                {t.describeSubmit}
-              </button>
-            </form>
+            <DescribeTaskForm online={live.online} brainReady={brainReady} processing={processing} onSubmit={describe} />
           )}
           {steps.map((step, i) => {
             const isLast = i === steps.length - 1 && recording && step.kind === "action";
