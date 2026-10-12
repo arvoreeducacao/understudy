@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { parseMarkdown, type Block, type Inline } from "@/lib/markdown";
+import { chartScene, COMPACT_CHART, parseChart, type ChartTone } from "@/lib/chart";
+import { columnAlign, parseMarkdown, type Block, type Inline } from "@/lib/markdown";
 import { messages } from "@/lib/messages";
 
 function renderInline(nodes: Inline[], keyPrefix = ""): ReactNode[] {
@@ -60,6 +61,82 @@ function CodeBlock({ lang, value, caret }: { lang: string; value: string; caret:
   );
 }
 
+const tone = (name: ChartTone) => `var(--chart-${name})`;
+
+function ChartFigure({ source, caret }: { source: string; caret: ReactNode }) {
+  const scene = useMemo(() => {
+    const chart = parseChart(source);
+    return chart ? chartScene(chart, COMPACT_CHART) : null;
+  }, [source]);
+  if (!scene) return <CodeBlock lang="chart" value={source} caret={caret} />;
+  return (
+    <figure className="md-chart">
+      <svg viewBox={`0 0 ${scene.width} ${scene.height}`} role="img" aria-label={scene.label}>
+        {scene.items.map((item, i) => {
+          switch (item.kind) {
+            case "rect":
+              return item.tone === "surface" ? null : <rect key={i} x={item.x} y={item.y} width={item.width} height={item.height} rx={2} style={{ fill: tone(item.tone) }} />;
+            case "line":
+              return <line key={i} x1={item.x1} y1={item.y1} x2={item.x2} y2={item.y2} style={{ stroke: tone(item.tone) }} />;
+            case "path":
+              return item.fill ? (
+                <path key={i} d={item.d} style={{ fill: tone(item.tone) }}>
+                  {item.title ? <title>{item.title}</title> : null}
+                </path>
+              ) : (
+                <path key={i} d={item.d} className="md-chart-line" style={{ stroke: tone(item.tone) }} />
+              );
+            case "circle":
+              return (
+                <circle key={i} cx={item.cx} cy={item.cy} r={item.r} className="md-chart-dot" style={{ fill: tone(item.tone) }}>
+                  {item.title ? <title>{item.title}</title> : null}
+                </circle>
+              );
+            case "text":
+              return (
+                <text key={i} x={item.x} y={item.y} fontSize={item.size} textAnchor={item.anchor} fontWeight={item.weight} style={{ fill: tone(item.tone) }}>
+                  {item.text}
+                </text>
+              );
+          }
+        })}
+      </svg>
+      {caret}
+    </figure>
+  );
+}
+
+function TableBlock({ block, caret }: { block: Extract<Block, { kind: "table" }>; caret: ReactNode }) {
+  const align = block.header.map((_, column) => columnAlign(block, column));
+  return (
+    <div className="md-table-wrap">
+      <table className="md-table">
+        <thead>
+          <tr>
+            {block.header.map((cell, c) => (
+              <th key={c} style={{ textAlign: align[c] }}>
+                {renderInline(cell)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} style={{ textAlign: align[c] }}>
+                  {renderInline(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {caret}
+    </div>
+  );
+}
+
 function renderBlock(block: Block, key: string, caret: ReactNode): ReactNode {
   switch (block.kind) {
     case "paragraph":
@@ -77,7 +154,9 @@ function renderBlock(block: Block, key: string, caret: ReactNode): ReactNode {
         </p>
       );
     case "code":
-      return <CodeBlock key={key} lang={block.lang} value={block.value} caret={caret} />;
+      return block.lang === "chart" && !block.open ? <ChartFigure key={key} source={block.value} caret={caret} /> : <CodeBlock key={key} lang={block.lang} value={block.value} caret={caret} />;
+    case "table":
+      return <TableBlock key={key} block={block} caret={caret} />;
     case "rule":
       return <hr key={key} />;
     case "quote":

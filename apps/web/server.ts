@@ -18,6 +18,7 @@ import { ROOM_SOCKET } from "@/lib/rooms";
 import { handleWebhook } from "@/server/webhook";
 import { handleInboundEmail } from "@/server/inbound-email/handler";
 import { handleFigureRoute, isFigureRoute } from "@/server/figure-png";
+import { handleChartRoute, isChartRoute } from "@/server/chart-png";
 import { handleSlack, isSlackRoute } from "@/server/slack-inbound";
 import { createExtensionRoutes, isExtensionRoute } from "@/server/extension/routes";
 import { ARTIFACT_CONTENT_PREFIX, handleArtifactContent, isArtifactContentRoute } from "@/server/artifacts/routes";
@@ -145,6 +146,16 @@ async function main() {
     if (isFigureRoute(url.pathname)) {
       handleFigureRoute(req, res, url.pathname).catch((error) => {
         console.error("figure_png_error", error);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        }
+      });
+      return;
+    }
+    if (isChartRoute(url.pathname)) {
+      handleChartRoute(req, res, url.pathname).catch((error) => {
+        console.error("chart_png_error", error);
         if (!res.headersSent) {
           res.writeHead(500);
           res.end();

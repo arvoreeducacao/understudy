@@ -19,6 +19,7 @@
     "test": "node --import tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "0.4.2",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@resvg/resvg-wasm": "2.6.2",
     "@understudy/characters": "workspace:*",

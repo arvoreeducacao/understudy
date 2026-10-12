@@ -2,10 +2,13 @@ import { and, eq, gt } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { messages as copy } from "@/lib/messages";
 import { agentIdentity, escapeSlack, postMessage, slackCall, type SlackIdentity } from "./slack";
+import { chartImageUrl } from "./chart-png";
+import { plainFallback, richSlackMessage } from "./slack-blocks";
+
+export { plainFallback };
 
 export const THREAD_WINDOW_MS = 30 * 60 * 1000;
 const MARKDOWN_LIMIT = 11_900;
-const FALLBACK_LIMIT = 3_900;
 
 export type SlackThread = typeof schema.slackThreads.$inferSelect;
 
@@ -17,15 +20,11 @@ export function markdownBlocks(text: string) {
   return [{ type: "markdown", text: text.slice(0, MARKDOWN_LIMIT) }];
 }
 
-export function plainFallback(text: string) {
-  return text
-    .replace(/```[a-z]*\n?/g, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
-    .slice(0, FALLBACK_LIMIT);
+export function richReply(text: string) {
+  return richSlackMessage(text, { chartUrl: chartImageUrl });
 }
+
+const BLOCK_ERRORS = new Set(["invalid_blocks", "invalid_blocks_format", "invalid_arguments", "only_one_table_allowed", "msg_blocks_too_long", "invalid_attachments"]);
 
 export function statusFromActivity(text: string) {
   const clean = text.replace(/\s+/g, " ").trim().replace(/[.…]+$/, "");
@@ -69,7 +68,13 @@ async function agentInfo(agentId: string) {
 }
 
 export async function postAgentText(input: { channel: string; threadTs?: string; text: string; as?: SlackIdentity }) {
-  return postMessage({ channel: input.channel, threadTs: input.threadTs, text: plainFallback(input.text), blocks: markdownBlocks(input.text), as: input.as });
+  const plain = () => postMessage({ channel: input.channel, threadTs: input.threadTs, text: plainFallback(input.text), blocks: markdownBlocks(input.text), as: input.as });
+  const rich = richReply(input.text);
+  if (!rich) return plain();
+  const result = await postMessage({ channel: input.channel, threadTs: input.threadTs, text: rich.text, blocks: rich.blocks, as: input.as });
+  if (result.ok || !BLOCK_ERRORS.has(String(result.error))) return result;
+  log("slack_rich_reply_refused", { error: result.error });
+  return plain();
 }
 
 type LiveStream = { channel: string; ts: string | null; sent: string; failed: boolean; queue: Promise<void>; startedAt: number };
@@ -135,6 +140,12 @@ async function finishStream(agentId: string, streamId: string, text: string) {
   const rest = text.startsWith(live.sent) ? text.slice(live.sent.length) : "";
   const result = await slackCall("chat.stopStream", { channel: live.channel, ts: live.ts, ...(rest ? { markdown_text: rest } : {}) });
   if (!result.ok) return false;
+  const rich = richReply(text);
+  if (rich) {
+    const updated = await slackCall("chat.update", { channel: live.channel, ts: live.ts, text: rich.text, blocks: rich.blocks });
+    if (updated.ok) return true;
+    log("slack_rich_reply_refused", { agentId, error: updated.error });
+  }
   if (!text.startsWith(live.sent)) {
     await slackCall("chat.update", { channel: live.channel, ts: live.ts, text: plainFallback(text), blocks: markdownBlocks(text) });
   }
