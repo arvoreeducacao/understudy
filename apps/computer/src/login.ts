@@ -83,7 +83,26 @@ export function prepareClaudeHome(home: string, workDir: string): void {
 
 export const CLAUDE_STATUS_TIMEOUT_MS = 60 * 1000;
 
+export function claudeStatusFromFiles(home: string, env: NodeJS.ProcessEnv): BrainStatus | null {
+  const configDir = claudeConfigDir(home, env);
+  let refreshToken: unknown;
+  try {
+    refreshToken = JSON.parse(readFileSync(join(configDir, ".credentials.json"), "utf8"))?.claudeAiOauth?.refreshToken;
+  } catch {
+    return null;
+  }
+  if (typeof refreshToken !== "string" || !refreshToken) return null;
+  let account: string | undefined;
+  try {
+    const settings = JSON.parse(readFileSync(env.CLAUDE_CONFIG_DIR ? join(configDir, ".claude.json") : join(home, ".claude.json"), "utf8"));
+    if (typeof settings?.oauthAccount?.emailAddress === "string") account = settings.oauthAccount.emailAddress;
+  } catch {}
+  return { brain: "claude", loggedIn: true, ...(account ? { account } : {}) };
+}
+
 export async function readClaudeStatus(env: NodeJS.ProcessEnv, home: string, exec = run): Promise<BrainStatus> {
+  const saved = claudeStatusFromFiles(home, env);
+  if (saved) return saved;
   if (clearStaleRefreshLock(claudeConfigDir(home, env))) log("login", "removed a sign-in refresh lock left behind by an earlier process");
   const result = await exec("claude", ["auth", "status", "--json"], env, CLAUDE_STATUS_TIMEOUT_MS);
   try {

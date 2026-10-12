@@ -280,6 +280,10 @@ export function codexFailure(line: string): string | null {
   }
 }
 
+export function isWork(event: BrainEvent): boolean {
+  return event.kind === "tool" || event.kind === "tool_result" || event.kind === "thinking" || event.kind === "text";
+}
+
 export type TurnOptions = {
   spawnTurn?: (config: BrainConfig, request: TurnRequest) => Turn;
   lock?: BrainLock;
@@ -318,7 +322,8 @@ export function startTurn(config: BrainConfig, request: TurnRequest, options: Tu
       const turn = spawnOne(config, {
         ...request,
         onEvent: (event) => {
-          if (event.kind !== "session") worked = true;
+          if (event.kind === "text" && isRefreshRace(event.text)) return;
+          if (isWork(event)) worked = true;
           request.onEvent(event);
         },
       });
