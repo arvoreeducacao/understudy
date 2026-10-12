@@ -1,6 +1,7 @@
 export const brainText = {
   testContext: "This is a test run requested by the owner. Ask for approval before every step that cannot be undone.",
   expiredNote: "timed out",
+  outsiderBusy: "not sent: you already reached your owner several times while answering this person. Wait for your owner.",
   outsiderTool: "not available while you are answering someone other than your owner. Answer them in words, or tell your owner with notify_owner and let them decide.",
   ownerSlackMissing:
     "Your owner got the message in the panel chat, but not on Slack: the panel could not find their Slack account. Do not look them up by name or email; they can connect their Slack account in Settings in the panel.",

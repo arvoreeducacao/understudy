@@ -19,7 +19,7 @@ Email is not a conversation channel. To let an understudy read, search and draft
 Every channel sorts the person writing into one of three groups, per understudy:
 
 - **The owner**, recognised by an identity the channel can prove: the Slack account matched to the panel account, or the Telegram account that opened the bot with the one-time Start link shown in Settings. The owner's message is a normal chat turn.
-- **People the owner allowed** (Telegram usernames or ids, phone numbers in E.164; a username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no file, shell, browser, desktop or password tools; through the gatekeeper it may only ask for approval or tell the owner. The answer goes back to them.
+- **People the owner allowed** (Telegram usernames or ids, phone numbers in E.164; a username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no built-in tools and only the restricted gatekeeper address, which offers nothing but asking for approval and telling the owner (labelled with who the understudy was answering, and rate limited). The answer goes back to them.
 - **Anyone else** is held for the owner (Settings › Channels lists it with Let it through, Always allow and Discard, and the owner gets a note in the chat and a push) or dropped, as the owner chooses.
 
 ## How a conversation flows

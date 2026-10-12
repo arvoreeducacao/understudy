@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ComputerToServer } from "@understudy/protocol";
 import { createAgent, externalMessage } from "./agent.ts";
-import { claudeArgs, RESTRICTED_TOOLS, restrictedMcpConfig, type TurnRequest } from "./brain.ts";
+import { claudeArgs, OUTSIDER_TOOLS, restrictedMcpConfig, type TurnRequest } from "./brain.ts";
 import { createMemory } from "./memory.ts";
 
 async function settle() {
@@ -67,11 +67,17 @@ test("an outside sender gets a restricted turn in a session of their own, never 
   ]);
 });
 
-test("a restricted turn has only the gatekeeper and no file, shell or web tools", () => {
+test("a restricted turn has no built-in tools and only the restricted gatekeeper address", () => {
   const config = { home: "/home/agent", workDir: "/home/agent/work", serverUrl: "https://panel.example.com", token: "t" };
-  assert.deepEqual(Object.keys(restrictedMcpConfig(config).mcpServers), ["gatekeeper"]);
+  const servers = restrictedMcpConfig(config).mcpServers;
+  assert.deepEqual(Object.keys(servers), ["gatekeeper"]);
+  assert.equal(servers.gatekeeper.url, "https://panel.example.com/api/mcp/restricted");
   const args = claudeArgs("{}", "system", null, undefined, true);
-  for (const tool of ["Bash", "Read", "Write", "WebFetch"]) assert.ok(args.includes(tool));
-  assert.equal(RESTRICTED_TOOLS.every((tool) => args.includes(tool)), true);
-  assert.equal(claudeArgs("{}", "system").includes("Bash"), false);
+  const tools = args.indexOf("--tools");
+  assert.ok(tools >= 0);
+  assert.equal(args[tools + 1], "");
+  const allowed = args.indexOf("--allowedTools");
+  assert.deepEqual(args.slice(allowed + 1, allowed + 1 + OUTSIDER_TOOLS.length), OUTSIDER_TOOLS);
+  assert.deepEqual(OUTSIDER_TOOLS, ["mcp__gatekeeper__request_approval", "mcp__gatekeeper__wait_for_approval", "mcp__gatekeeper__notify_owner"]);
+  assert.equal(claudeArgs("{}", "system").includes("--tools"), false);
 });

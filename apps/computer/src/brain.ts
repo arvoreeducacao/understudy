@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
 import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
-import { gatekeeperUrl } from "./endpoints.ts";
+import { gatekeeperUrl, restrictedGatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
 
@@ -131,10 +131,10 @@ export function validModel(model: string | undefined | null): string | undefined
   return value && MODEL_NAME.test(value) ? value : undefined;
 }
 
-export const RESTRICTED_TOOLS = ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch", "Task", "TodoWrite"];
+export const OUTSIDER_TOOLS = ["mcp__gatekeeper__request_approval", "mcp__gatekeeper__wait_for_approval", "mcp__gatekeeper__notify_owner"];
 
 export function restrictedMcpConfig(config: BrainConfig) {
-  return { mcpServers: { gatekeeper: claudeMcpConfig(config).mcpServers.gatekeeper } };
+  return { mcpServers: { gatekeeper: { type: "http", url: restrictedGatekeeperUrl(config.serverUrl), headers: { Authorization: `Bearer ${config.token}` } } } };
 }
 
 export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string, restricted = false): string[] {
@@ -149,9 +149,9 @@ export function claudeArgs(mcpConfig: string, system: string, resume?: string | 
     "--strict-mcp-config",
     "--permission-mode",
     "bypassPermissions",
+    ...(restricted ? ["--tools", "", "--allowedTools", ...OUTSIDER_TOOLS] : []),
     "--disallowedTools",
     ...PROTECTED_TOOL_RULES,
-    ...(restricted ? RESTRICTED_TOOLS : []),
     "--append-system-prompt",
     system,
   ];

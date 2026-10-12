@@ -185,8 +185,8 @@ async function main() {
       });
       return;
     }
-    if (url.pathname === PATHS.gatekeeperMcp) {
-      handleGatekeeper(hub, req, res).catch((error) => {
+    if (url.pathname === PATHS.gatekeeperMcp || url.pathname === PATHS.gatekeeperMcpRestricted) {
+      handleGatekeeper(hub, req, res, url.pathname === PATHS.gatekeeperMcpRestricted).catch((error) => {
         console.error("gatekeeper_error", error);
         if (!res.headersSent) {
           res.writeHead(500);

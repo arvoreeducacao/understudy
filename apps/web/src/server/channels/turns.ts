@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { ChannelKind } from "@/lib/db/schema";
+import { messages as copy } from "@/lib/messages";
 
 export type TurnOrigin = { threadId: string; kind: ChannelKind; trusted: boolean };
 
@@ -30,6 +31,18 @@ export function currentTurn(agentId: string) {
 export function outsiderTurn(agentId: string) {
   const turn = turns.get(agentId);
   return Boolean(turn && !turn.trusted);
+}
+
+export async function outsiderLabel(agentId: string) {
+  const turn = turns.get(agentId);
+  const [thread] = turn
+    ? await getDb()
+        .select({ peer: schema.channelThreads.peer, peerName: schema.channelThreads.peerName })
+        .from(schema.channelThreads)
+        .where(and(eq(schema.channelThreads.id, turn.threadId), eq(schema.channelThreads.agentId, agentId)))
+    : [];
+  const who = thread ? (thread.peerName ? `${thread.peerName} (${thread.peer})` : thread.peer) : copy.channels.someoneElse;
+  return copy.channels.whileAnswering(who.slice(0, 160));
 }
 
 export function forgetTurn(agentId: string) {

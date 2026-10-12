@@ -87,6 +87,8 @@ export const ptBR: Messages = {
     telegramSendersHint: "Usuários do Telegram ou ids numéricos, separados por vírgula. As mensagens deles chegam ao understudy como pedido de outra pessoa, nunca como seu.",
     telegramPaired: (name: string) => `Vinculado. Escreva para ${name} aqui como no painel.`,
     telegramNotOwner: "Só o dono pode responder isso.",
+    whileAnswering: (who: string) => `Ao responder ${who}: `,
+    someoneElse: "outra pessoa",
     kinds: { telegram: "Telegram", teams: "Microsoft Teams", whatsapp: "WhatsApp", sms: "SMS" } as Record<string, string>,
     via: (kind: string) => `via ${kind}`,
     held: (kind: string, peer: string) => `Uma mensagem por ${kind} de ${peer} está esperando você em Configurações › Canais.`,

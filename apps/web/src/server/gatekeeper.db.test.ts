@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -30,6 +30,20 @@ let panelUrl = "";
 
 function listen(server: Server) {
   return new Promise<string>((resolve) => server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`)));
+}
+
+async function mcp(path: string, method: string, params: Record<string, unknown>) {
+  const res = await fetch(`${panelUrl}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const text = await res.text();
+  return text
+    .split("\n")
+    .filter((l) => l.startsWith("data: "))
+    .map((l) => JSON.parse(l.slice(6)))
+    .find((m) => m.id === 1);
 }
 
 async function rpc(name: string, args: Record<string, unknown>) {
@@ -111,6 +125,7 @@ before(async () => {
   panel = createServer((req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
     if (path === "/api/mcp") return void handleGatekeeper(hub, req, res);
+    if (path === "/api/mcp/restricted") return void handleGatekeeper(hub, req, res, true);
     if (path.startsWith("/api/hooks/")) return void handleWebhook(hub, req, res, path);
     res.writeHead(404);
     res.end();
@@ -376,4 +391,25 @@ test("while it answers someone other than its owner, only asking for approval an
     forgetTurn(ids.agent);
     await db.delete(schema.agentChannels).where(eq(schema.agentChannels.id, "chn_gk"));
   }
+});
+
+test("the restricted gatekeeper address serves only the three outside-sender tools, even when the panel has forgotten the turn", { skip }, async () => {
+  const { forgetTurn } = await import("./channels/turns");
+  forgetTurn(ids.agent);
+  const listed = await mcp("/api/mcp/restricted", "tools/list", {});
+  assert.deepEqual(listed.result.tools.map((tool: { name: string }) => tool.name).sort(), ["notify_owner", "request_approval", "wait_for_approval"]);
+  const before = calls.length;
+  const call = async (name: string, args: Record<string, unknown>) => (await mcp("/api/mcp/restricted", "tools/call", { name, arguments: args })).result.content[0].text as string;
+  assert.match(await call("share_file", { path: "~/files/outbox/report.csv" }), /someone other than your owner/);
+  assert.match(await call("mail__send", { to: "client@example.com", body: "hi" }), /someone other than your owner/);
+  assert.equal(calls.length, before);
+  const { getDb, schema } = await import("@/lib/db");
+  assert.match(await call("notify_owner", { text: "Please approve the refund" }), /delivered/);
+  const [note] = await getDb().select().from(schema.messages).where(eq(schema.messages.agentId, ids.agent)).orderBy(desc(schema.messages.createdAt)).limit(1);
+  assert.equal(note.text, "While answering someone other than you: Please approve the refund");
+  await call("notify_owner", { text: "again" });
+  await call("notify_owner", { text: "and again" });
+  assert.match(await call("notify_owner", { text: "one more" }), /several times/);
+  const normal = await mcp("/api/mcp", "tools/list", {});
+  assert.ok(normal.result.tools.some((tool: { name: string }) => tool.name === "share_file"));
 });
