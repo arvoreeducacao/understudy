@@ -4,7 +4,8 @@ import { getDb, schema } from "@/lib/db";
 import type { BrainStatus } from "@/lib/db/schema";
 import { messages as copy } from "@/lib/messages";
 import { sendPush, type PushPayload } from "./push";
-import { agentIdentity, escapeSlack, replaceDirectNotice, slackEnabled, slackUserIdFor, type SlackIdentity, type SlackRecipient } from "./slack";
+import { agentIdentity, escapeSlack, lookupUserId, replaceDirectNotice, slackEnabled, type SlackIdentity, type SlackRecipient } from "./slack";
+import { linkedSlackUser } from "./slack-link";
 import { log } from "./hub/shared";
 
 export type RunOutcome = "stopped" | "signed_out";
@@ -66,23 +67,33 @@ export function runFailurePush(notice: RunFailureNotice): PushPayload {
   };
 }
 
+export type AlertRecipient = SlackRecipient & { emailVerified: boolean };
+
+export type SlackLookup = { linked: (userId: string) => Promise<string | null>; byEmail: (email: string) => Promise<string | null> };
+
+export async function alertSlackUser(owner: AlertRecipient, lookup: SlackLookup): Promise<string | null> {
+  const linked = await lookup.linked(owner.id).catch(() => null);
+  if (linked) return linked;
+  return owner.emailVerified ? lookup.byEmail(owner.email) : null;
+}
+
 export type NoticeDeps = {
   push: (userIds: string[], payload: PushPayload) => Promise<void>;
-  slackUser: (owner: SlackRecipient) => Promise<string | null>;
+  slackUser: (owner: AlertRecipient) => Promise<string | null>;
   replace: (userId: string, key: string, text: string, as?: SlackIdentity) => Promise<{ ok: boolean; error?: string }>;
   baseUrl: string;
 };
 
 const liveDeps: NoticeDeps = {
   push: sendPush,
-  slackUser: async (owner) => ((await slackEnabled()) ? slackUserIdFor(owner) : null),
+  slackUser: async (owner) => ((await slackEnabled()) ? alertSlackUser(owner, { linked: linkedSlackUser, byEmail: lookupUserId }) : null),
   replace: (userId, key, text, as) => replaceDirectNotice(userId, key, text, as),
   get baseUrl() {
     return env.publicUrl;
   },
 };
 
-export async function deliverRunFailureNotice(notice: RunFailureNotice, owner: SlackRecipient, deps: NoticeDeps = liveDeps) {
+export async function deliverRunFailureNotice(notice: RunFailureNotice, owner: AlertRecipient, deps: NoticeDeps = liveDeps) {
   await deps.push([owner.id], runFailurePush(notice)).catch((error) => log("push_error", { error: String(error) }));
   const slackUser = await deps.slackUser(owner).catch(() => null);
   if (!slackUser) return { slack: false };
@@ -97,7 +108,7 @@ export async function notifyRunFailure(agentId: string, runId: string, outcome?:
   if (outcome === "stopped") return;
   const db = getDb();
   const [found] = await db
-    .select({ run: schema.runs, agent: schema.agents, owner: { id: schema.user.id, email: schema.user.email }, task: schema.recipes.recipe })
+    .select({ run: schema.runs, agent: schema.agents, owner: { id: schema.user.id, email: schema.user.email, emailVerified: schema.user.emailVerified }, task: schema.recipes.recipe })
     .from(schema.runs)
     .innerJoin(schema.agents, eq(schema.agents.id, schema.runs.agentId))
     .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))

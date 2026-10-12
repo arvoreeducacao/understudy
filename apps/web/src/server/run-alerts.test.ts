@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deliverRunFailureNotice, failureStreak, openFailures, runFailurePush, runFailureSlackText, type FailureRow, type NoticeDeps, type RunFailureNotice } from "./run-alerts";
+import { alertSlackUser, deliverRunFailureNotice, failureStreak, openFailures, runFailurePush, runFailureSlackText, type FailureRow, type NoticeDeps, type RunFailureNotice } from "./run-alerts";
 import { replaceDirectNotice, RUN_NOTICE_EVENT, type NoticeApi } from "./slack";
 
 const notice: RunFailureNotice = {
@@ -15,7 +15,7 @@ const notice: RunFailureNotice = {
   signedOut: false,
 };
 
-const owner = { id: "usr_1", email: "owner@example.com" };
+const owner = { id: "usr_1", email: "owner@example.com", emailVerified: true };
 
 test("the failure streak counts failures until the last run that worked", () => {
   assert.equal(failureStreak([]), 0);
@@ -125,4 +125,13 @@ test("the waiting list shows one entry per task that is still failing, with its 
   assert.equal(open[0].streak, 2);
   assert.equal(open[0].signedOut, false);
   assert.equal(openFailures([row("rcp_a", "failed", "r1", false)])[0].signedOut, true);
+});
+
+test("alerts go to a linked Slack account, and by email only when the panel email is verified", async () => {
+  const byEmail = async (email: string) => (email === "owner@example.com" ? "U_EMAIL" : null);
+  const unlinked = { linked: async () => null, byEmail };
+  assert.equal(await alertSlackUser({ ...owner, emailVerified: true }, { linked: async () => "U_LINKED", byEmail }), "U_LINKED");
+  assert.equal(await alertSlackUser({ ...owner, emailVerified: false }, { linked: async () => "U_LINKED", byEmail }), "U_LINKED");
+  assert.equal(await alertSlackUser({ ...owner, emailVerified: true }, unlinked), "U_EMAIL");
+  assert.equal(await alertSlackUser({ ...owner, emailVerified: false }, unlinked), null);
 });
