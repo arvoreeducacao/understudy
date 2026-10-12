@@ -18,6 +18,7 @@ import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, listUpstreamTools, loadServers, type UpstreamServer } from "./upstream";
+import { queueReplyFile } from "./channels/relay";
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
 const APPROVAL_CALL_CAP_MS = 30 * 60 * 1000;
@@ -176,6 +177,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
       if (result.type === "failed") return text(`not shared: ${result.error === "offline" ? "your computer is not connected to the panel" : "the copy took too long"}`, true);
       if (result.error || !result.attachment) return text(`not shared: ${result.error ?? "unknown error"}`, true);
       await hub.addMessage(agent.id, "agent", (args.caption ?? "").trim().slice(0, 4000), null, undefined, undefined, undefined, [result.attachment]);
+      await queueReplyFile(agent.id, result.attachment).catch(() => false);
       return text(`shared "${result.attachment.name}" (${formatBytes(result.attachment.size)}) with your owner; it is in the chat as ~/files/${result.attachment.path}. Do not paste its contents again.`);
     }) as Builtin["run"],
   });

@@ -127,6 +127,7 @@ export const messages = pgTable(
     text: text("text").notNull(),
     authorId: text("author_id"),
     via: text("via"),
+    sender: text("sender"),
     attachments: jsonb("attachments").$type<Attachment[]>(),
     artifact: jsonb("artifact").$type<MessageArtifact>(),
     proposalId: text("proposal_id"),
@@ -490,6 +491,7 @@ export const inboundQueue = pgTable(
     source: text("source").notNull(),
     slackChannel: text("slack_channel"),
     slackThreadTs: text("slack_thread_ts"),
+    channelThreadId: text("channel_thread_id"),
     runId: text("run_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -515,6 +517,77 @@ export const slackThreads = pgTable(
   },
   (t) => [index("slack_threads_thread_idx").on(t.channel, t.threadTs)],
 );
+
+export type ChannelKind = "slack" | "telegram" | "teams" | "whatsapp" | "sms";
+
+export type UnknownSenders = "hold" | "ignore";
+
+export type HeldMessage = {
+  subject: string;
+  text: string;
+  date: string | null;
+  attachments: { filename: string; mimeType: string; base64: string; bytes: number }[];
+  droppedAttachments: number;
+};
+
+export type PendingFile = Attachment;
+
+export const agentChannels = pgTable(
+  "agent_channels",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<ChannelKind>().notNull(),
+    address: text("address").notNull(),
+    allowedSenders: text("allowed_senders"),
+    unknownSenders: text("unknown_senders").$type<UnknownSenders>().notNull().default("hold"),
+    secret: text("secret"),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_channels_address_idx").on(t.kind, t.address), uniqueIndex("agent_channels_agent_kind_idx").on(t.agentId, t.kind)],
+);
+
+export const channelThreads = pgTable(
+  "channel_threads",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => agentChannels.id, { onDelete: "cascade" }),
+    peer: text("peer").notNull(),
+    peerName: text("peer_name"),
+    trusted: boolean("trusted").notNull().default(false),
+    status: text("status").$type<"open" | "held">().notNull().default("open"),
+    subject: text("subject").notNull().default(""),
+    lastMessageId: text("last_message_id"),
+    references: text("references").notNull().default(""),
+    held: jsonb("held").$type<HeldMessage>(),
+    pendingText: text("pending_text").notNull().default(""),
+    pendingFiles: jsonb("pending_files").$type<PendingFile[]>().notNull().default([]),
+    pendingSince: timestamp("pending_since", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("channel_threads_channel_idx").on(t.channelId, t.peer, t.updatedAt), index("channel_threads_pending_idx").on(t.pendingSince)],
+);
+
+export const channelRoutes = pgTable("channel_routes", {
+  agentId: text("agent_id")
+    .primaryKey()
+    .references(() => agents.id, { onDelete: "cascade" }),
+  threadId: text("thread_id")
+    .notNull()
+    .references(() => channelThreads.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const rooms = pgTable(
   "rooms",

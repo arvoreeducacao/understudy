@@ -69,6 +69,15 @@ No conversation grows forever. Every run is a fresh brain session that starts fr
 
 A run's briefing is: profile + the recipe being run + the last 7 journal lines + the task input. Chat with the owner uses one rolling session per day; when it ends, the brain writes a short summary into the journal and the next day starts fresh. Long recordings are reduced before reaching the brain: consecutive inputs on the same field collapse, network requests keep only method, path and status, and screenshots are sampled. The brain CLIs also compact on their own; the files above are what survives compaction.
 
+## Channels
+
+A channel is another place where people hold a conversation with an understudy, with the same chat, memory, approvals and run history as the panel. Each understudy has at most one connection per kind (`agent_channels`), and each person it talks to there gets a thread (`channel_threads`: the peer, whether it is the owner, and what the channel needs to answer in place).
+
+- **Inbound**: the channel's endpoint authenticates the provider, maps the destination to the understudy, classifies the sender (owner, allowed, unknown) and either holds the message for the owner, drops it, or delivers it as a normal `chat`. A message from anyone but the owner carries `external: { channel, sender }`, and the computer briefs the brain with it quoted as data and the rule that it never authorizes anything.
+- **Reply route**: delivering a channel message records the thread in `channel_routes` for 30 minutes and ends any Slack reply window; a panel message clears it, and a later Slack message wins over it. While a route is active, the understudy's chat replies and `share_file` files are buffered on the thread and sent as one reply when its turn ends (state back to calm, waiting or stuck), or after 90 seconds at the latest.
+- **Approvals**: while the route is active, a new approval also reaches the owner on that channel through the adapter's `sendApproval`.
+- **Adapters**: each kind implements `send` and optionally `sendApproval` in `apps/web/src/server/channels`. Telegram is built in (a bot per understudy, webhook or polling, approvals as buttons); [CHANNELS.md](CHANNELS.md) has the adapter contract and the designs for Teams, WhatsApp and SMS.
+
 ## Rooms
 
 A room is a group chat between an owner and two or more of their own understudies (`rooms`, `room_participants`, `room_messages`). Only the owner reads it or writes in it, over `wss://<panel>/api/ws/room?room=<id>`.

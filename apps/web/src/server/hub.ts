@@ -19,6 +19,7 @@ import { handleViewerMessage } from "./hub/viewer-handlers";
 import type { ChatEntry, ServerToViewer, ViewerToServer } from "./hub-types";
 import { computerLimit, RateLimiter } from "./rate-limit";
 import { Watcher } from "./watcher";
+import { flushStale } from "./channels/relay";
 import { Uploads } from "./files/uploads";
 
 export type { Viewer } from "./hub/shared";
@@ -86,6 +87,7 @@ export class Hub {
     this.approvals.expire().catch((error) => log("approval_expire_error", { error: String(error) }));
     this.inbound.expire().catch((error) => log("inbound_expire_error", { error: String(error) }));
     this.rooms.expireStale().catch((error) => log("room_expire_error", { error: String(error) }));
+    flushStale(this).catch((error) => log("channel_flush_error", { error: String(error) }));
   }
 
   deliver(agentId: string, message: ServerToComputer, options: DeliverOptions) {
@@ -204,14 +206,15 @@ export class Hub {
     streamId?: string,
     attachments?: Attachment[],
     artifact?: MessageArtifact,
+    sender?: string,
   ) {
     const id = newId("msg");
     const createdAt = new Date();
     const files = attachments?.length ? attachments : null;
-    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, attachments: files, artifact: artifact ?? null, createdAt });
+    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, sender: sender ?? null, attachments: files, artifact: artifact ?? null, createdAt });
     this.broadcast(agentId, {
       type: "chat",
-      entry: { id, role, text, runId: runId ?? null, via: via ?? null, streamId: streamId ?? null, at: createdAt.toISOString(), ...(files ? { attachments: files } : {}), ...(artifact ? { artifact } : {}) },
+      entry: { id, role, text, runId: runId ?? null, via: via ?? null, ...(sender ? { sender } : {}), streamId: streamId ?? null, at: createdAt.toISOString(), ...(files ? { attachments: files } : {}), ...(artifact ? { artifact } : {}) },
     });
     return id;
   }
