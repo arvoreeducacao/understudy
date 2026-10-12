@@ -74,14 +74,14 @@ An understudy reads, searches and drafts in its owner's mailbox through a connec
 3. Each owner signs in with their own Google account from the understudy's settings.
 4. The panel asks Google only for `gmail.readonly` and `gmail.compose`, and asks for offline access so the sign-in keeps working.
 
-The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. The server marks its search, read and list tools read-only and its draft, label, trash and spam tools as changes; the label, trash and spam tools also need a wider Google permission than the panel asks for, so they fail instead of acting.
+The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. The server marks its search, read and list tools read-only and its draft, label, trash and spam tools as changes; the label, trash and spam tools also need a wider Google permission than the panel asks for, so they fail instead of acting. Because only the read tools are marked read-only, every draft, label, trash and spam tool starts as Ask for each understudy, and the owner approves each call unless they change it.
 
 **Outlook.** Add a Microsoft 365 MCP server as a custom connector:
 
 - Microsoft's own Mail server in Agent 365 needs Copilot licensing.
 - A self-hosted open-source server such as `ms-365-mcp-server` can run read-only, or limited to `Mail.Read` and `Mail.ReadWrite`.
 
-If the server can send, mark its send, reply and send-draft actions ask-first. They then wait for the owner's approval, and the approval covers only those exact arguments.
+If the server can send, its send, reply and send-draft actions start as Ask unless the server marks them read-only. To make sure no owner switches them to Allow, set them to Always ask (or Never) under Limits for everyone on the connector's page. An approval covers only the exact arguments it showed.
 
 ## Starting tasks by email
 
