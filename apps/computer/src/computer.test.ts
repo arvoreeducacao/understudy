@@ -332,7 +332,7 @@ test("run folders older than 30 days are removed, recent ones kept", () => {
 });
 
 test("brain rules ask for tables, label lines and chart fences when an answer is structured", () => {
-  assert.match(SYSTEM_PROMPT, /markdown table for rows and columns/);
+  assert.match(SYSTEM_PROMPT, /markdown pipe table for rows and columns \(never inside a code fence/);
   assert.match(SYSTEM_PROMPT, /```chart fence/);
   assert.match(SYSTEM_PROMPT, /Keep chatty answers as plain sentences/);
 });

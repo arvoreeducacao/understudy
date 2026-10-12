@@ -65,6 +65,27 @@ test("only the first table is native and the second stays markdown", () => {
   assert.equal((message.blocks[1] as { text: string }).text, table);
 });
 
+const fencedReply = (lang: string) => `Hi Sam! Here is a test table\n\n\`\`\`${lang}\n| Item | Value |\n|------|-------|\n| Open orders | 1.204 |\n| Total orders | 3.518 |\n| Share open | 34,2% |\n\`\`\`\n(numbers from a sample export)`;
+
+test("a pipe table inside a plain or markdown fence becomes a native table", () => {
+  for (const lang of ["", "md", "markdown", "text", "MD"]) {
+    const message = richSlackMessage(fencedReply(lang));
+    assert.ok(message, `fence "${lang}"`);
+    assert.deepEqual(types(message.blocks), ["markdown", "table", "markdown"]);
+    assert.equal((message.blocks[2] as { text: string }).text, "(numbers from a sample export)");
+    const table = message.blocks[1] as { rows: { text: string }[][] };
+    assert.deepEqual(table.rows[0], [{ type: "raw_text", text: "Item" }, { type: "raw_text", text: "Value" }]);
+    assert.deepEqual(table.rows[3], [{ type: "raw_text", text: "Share open" }, { type: "raw_text", text: "34,2%" }]);
+    assert.doesNotMatch(message.text, /```/);
+  }
+});
+
+test("a fence in another language or with more than a table stays a code block", () => {
+  assert.equal(richSlackMessage(fencedReply("sql")), null);
+  assert.equal(richSlackMessage("Output:\n\n```\nTotal rows: 3\n| a | b |\n|---|---|\n| 1 | 2 |\n```"), null);
+  assert.equal(richSlackMessage("```\n| a | b |\n|---|---|\n| 1 | 2 |"), null);
+});
+
 test("an oversize table falls back to the plain path", () => {
   const rows = Array.from({ length: 120 }, (_, i) => `| Person ${i} | ${i} |`).join("\n");
   assert.equal(richSlackMessage(`| Person | Score |\n|---|---|\n${rows}`), null);

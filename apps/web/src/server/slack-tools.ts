@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { AgentTools } from "@/lib/db/schema";
 import { RateLimiter } from "./rate-limit";
 import { slackApiBase, slackConfig } from "./slack";
-import { markdownBlocks, plainFallback } from "./slack-threads";
+import { BLOCK_ERRORS, markdownBlocks, plainFallback, richReply } from "./slack-threads";
 
 export type SlackMode = "off" | "ask" | "free";
 
@@ -216,15 +216,12 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
 
   const post = async (channel: string, text: string, threadTs?: string) => {
     const clean = quietBroadcasts(text);
-    return api.call("chat.postMessage", {
-      channel,
-      text: plainFallback(clean),
-      blocks: markdownBlocks(clean),
-      thread_ts: threadTs,
-      unfurl_links: false,
-      username: agent.name.slice(0, 80),
-      icon_url: agent.iconUrl,
-    });
+    const base = { channel, thread_ts: threadTs, unfurl_links: false, username: agent.name.slice(0, 80), icon_url: agent.iconUrl };
+    const plain = () => api.call("chat.postMessage", { ...base, text: plainFallback(clean), blocks: markdownBlocks(clean) });
+    const rich = richReply(clean);
+    if (!rich) return plain();
+    const data = await api.call("chat.postMessage", { ...base, text: rich.text, blocks: rich.blocks });
+    return data.ok || !BLOCK_ERRORS.has(String(data.error)) ? data : plain();
   };
 
   const permalink = async (channel: string, ts: string) => {
@@ -269,7 +266,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
     },
     {
       name: "slack_post_message",
-      description: `Post a message on Slack, in a channel (#name or id) or as a reply in a thread (thread_ts). It goes out with your own name and face. Slack markdown works; mention a person with <@USERID>. @channel and @here are not allowed.${ask ? " Your owner approves the exact text first." : ""}`,
+      description: `Post a message on Slack, in a channel (#name or id) or as a reply in a thread (thread_ts). It goes out with your own name and face. Markdown works, and a plain markdown table (never inside a code fence) shows as a real table; mention a person with <@USERID>. @channel and @here are not allowed.${ask ? " Your owner approves the exact text first." : ""}`,
       schema: z.object({ channel: z.string().min(1).max(200), text: z.string().min(1).max(11000), thread_ts: z.string().max(40).optional() }),
       run: (async (args: { channel: string; text: string; thread_ts?: string }, extra?: unknown) => {
         const where = await resolveChannel(args.channel);

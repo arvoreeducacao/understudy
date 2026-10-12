@@ -23,6 +23,7 @@ const VALUE_MAX = 200;
 const PLAIN_VALUE_MAX = 60;
 const CONTEXT_MAX = 300;
 const CONTEXT_START = /^(sources?|updated|last updated|as of|data as of)\b/i;
+const TABLE_FENCES = new Set(["", "md", "markdown", "text", "txt"]);
 
 export type SlackBlock = Record<string, unknown>;
 export type RichMessage = { blocks: SlackBlock[]; text: string };
@@ -199,6 +200,12 @@ function tableCell(nodes: Inline[]) {
   return { type: "rich_text", elements: [{ type: "rich_text_section", elements: richElements(nodes) }] };
 }
 
+function fencedTable(block: Block): Extract<Block, { kind: "table" }> | null {
+  if (block.kind !== "code" || block.open || !TABLE_FENCES.has(block.lang.trim().toLowerCase())) return null;
+  const inner = parseMarkdownSources(block.value);
+  return inner.length === 1 && inner[0].block.kind === "table" ? inner[0].block : null;
+}
+
 function tableBlock(table: Extract<Block, { kind: "table" }>): SlackBlock | null {
   const rows = [table.header, ...table.rows];
   if (rows.length > SLACK_LIMITS.tableRows || table.header.length > SLACK_LIMITS.tableColumns) return null;
@@ -310,7 +317,7 @@ export function richSlackMessage(markdown: string, options: RichOptions = {}): R
   };
 
   for (const entry of body) {
-    const { block } = entry;
+    const block = fencedTable(entry.block) ?? entry.block;
     if (block.kind === "heading") {
       const title = block.level <= 2 ? header(block.children) : subheading(block.children);
       if (title) emit(title);

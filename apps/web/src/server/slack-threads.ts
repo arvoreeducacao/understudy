@@ -24,7 +24,7 @@ export function richReply(text: string) {
   return richSlackMessage(text, { chartUrl: chartImageUrl });
 }
 
-const BLOCK_ERRORS = new Set(["invalid_blocks", "invalid_blocks_format", "invalid_arguments", "only_one_table_allowed", "msg_blocks_too_long", "invalid_attachments"]);
+export const BLOCK_ERRORS = new Set(["invalid_blocks", "invalid_blocks_format", "invalid_arguments", "only_one_table_allowed", "msg_blocks_too_long", "invalid_attachments"]);
 
 export function statusFromActivity(text: string) {
   const clean = text.replace(/\s+/g, " ").trim().replace(/[.…]+$/, "");
