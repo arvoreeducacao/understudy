@@ -204,6 +204,13 @@
       "when": 1791766473013,
       "tag": "0028_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791768454350,
+      "tag": "0029_tool_permissions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,26 +1,36 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools } from "@/lib/db/schema";
 import { cleanLook } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { serverAllowedFor } from "@/server/approval-payload";
+import { cleanPolicy } from "@/lib/tool-policy";
 
 export async function toolsFrom(form: FormData, email: string): Promise<AgentTools> {
-  const requested = form.getAll("servers").map(String).slice(0, 50);
-  const allowed = requested.length
-    ? (await getDb().select().from(schema.mcpServers).where(inArray(schema.mcpServers.id, requested)))
-        .filter((server) => serverAllowedFor(server.allowedEmails, email))
-        .map((server) => server.id)
-    : [];
+  const requested = new Set(form.getAll("servers").map(String).slice(0, 50));
+  const usable = (await getDb().select({ id: schema.mcpServers.id, allowedEmails: schema.mcpServers.allowedEmails }).from(schema.mcpServers))
+    .filter((server) => serverAllowedFor(server.allowedEmails, email))
+    .map((server) => server.id);
+  const allowed = usable.filter((id) => requested.has(id));
   return {
     notifyOwner: form.get("notifyOwner") === "on",
     slack: false,
     slackChannels: [],
     slackMode: slackModeFrom(form.get("slackMode")),
     servers: allowed,
-    askTools: form.getAll("askTools").map(String).slice(0, 500),
+    askTools: [],
+    toolPolicy: cleanPolicy(parsePolicy(form.get("toolPolicy")), usable),
   };
+}
+
+function parsePolicy(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || value.length > 200_000) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function slackModeFrom(value: FormDataEntryValue | null): AgentTools["slackMode"] {

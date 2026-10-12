@@ -11,6 +11,8 @@ import { slackApprovalMessage } from "../channels/slack/adapter";
 import type { ApprovalView } from "../hub-types";
 import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
 import { log, type Answer } from "./shared";
+import { grantTool } from "../tool-access";
+import type { ApprovalGrant } from "@/lib/db/schema";
 
 export class Approvals {
   private waiters = new Map<string, Set<(answer: Answer) => void>>();
@@ -23,6 +25,7 @@ export class Approvals {
     source: "mcp" | "computer",
     timeoutSeconds?: number,
     payloadHash?: string,
+    grant?: ApprovalGrant,
   ) {
     const db = getDb();
     const id = newId("apr");
@@ -38,6 +41,7 @@ export class Approvals {
       source,
       requestId,
       payloadHash: payloadHash ?? null,
+      grant: grant ?? null,
       expiresAt,
     };
     await db.insert(schema.approvals).values(row);
@@ -54,6 +58,7 @@ export class Approvals {
       fields: row.fields,
       status: "pending",
       createdAt: new Date().toISOString(),
+      ...(grant ? { alwaysAllow: { tool: grant.tool } } : {}),
     };
     this.hub.broadcast(agentId, { type: "approval", approval: view });
     this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note: request.summary });
@@ -170,7 +175,7 @@ export class Approvals {
     return row?.status ?? null;
   }
 
-  async answer(id: string, approved: boolean, note: string | undefined, userId: string) {
+  async answer(id: string, approved: boolean, note: string | undefined, userId: string, always = false) {
     const db = getDb();
     const status = approved ? "approved" : "denied";
     const [row] = await db
@@ -180,6 +185,10 @@ export class Approvals {
       .returning();
     if (!row) return false;
     log("approval_answered", { approvalId: id, agentId: row.agentId, status });
+    if (approved && always && row.grant) {
+      const granted = await grantTool(row.agentId, row.grant, userId).catch((error) => (log("approval_grant_error", { approvalId: id, error: String(error) }), false));
+      log("approval_grant", { approvalId: id, agentId: row.agentId, granted });
+    }
     this.settle(id, { approved, note, status });
     if (row.source === "computer") {
       this.hub.sendToComputer(row.agentId, { type: "approval_answer", requestId: row.requestId ?? id, approved, note });

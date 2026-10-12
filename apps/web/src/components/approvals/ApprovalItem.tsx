@@ -1,7 +1,7 @@
 "use client";
 
 import type { Look } from "@/lib/look";
-import { Check, MonitorPlay, X } from "lucide-react";
+import { Check, CheckCheck, MonitorPlay, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -19,7 +19,7 @@ export function ApprovalItem({
   agent,
   when,
 }: {
-  approval: { id: string; summary: string; fields: { label: string; value: string }[] };
+  approval: { id: string; summary: string; fields: { label: string; value: string }[]; alwaysAllow?: { tool: string } };
   agent: { id: string; name: string; look: Look };
   when: string;
 }) {
@@ -28,9 +28,9 @@ export function ApprovalItem({
   const [pending, start] = useTransition();
   const [done, setDone] = useState<string | null>(null);
 
-  function answer(approved: boolean) {
+  function answer(approved: boolean, always = false) {
     start(async () => {
-      const result = await answerApproval(approval.id, approved, note);
+      const result = await answerApproval(approval.id, approved, note, always);
       setDone(answeredOutcome(result, approved));
       router.refresh();
     });
@@ -63,6 +63,12 @@ export function ApprovalItem({
             <Check size={15} aria-hidden />
             {t.approve}
           </button>
+          {approval.alwaysAllow && (
+            <button className="btn sec inline-flex items-center gap-1.5" disabled={pending} onClick={() => answer(true, true)} title={messages.toolAccess.approveAlwaysHint(approval.alwaysAllow.tool)}>
+              <CheckCheck size={15} aria-hidden />
+              {messages.toolAccess.approveAlways}
+            </button>
+          )}
           <button className="btn sec inline-flex items-center gap-1.5" disabled={pending} onClick={() => answer(false)}>
             <X size={15} aria-hidden />
             {t.deny}

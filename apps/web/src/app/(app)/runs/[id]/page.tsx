@@ -1,12 +1,12 @@
 import { CircleCheck, CircleX, LoaderCircle, ShieldAlert, ShieldCheck, ShieldX, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { agentAccess } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
-import { formatWhen } from "@/lib/format";
+import { formatTime, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 
@@ -27,7 +27,14 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const approvals = approvalIds.length
     ? await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, agent.id), inArray(schema.approvals.id, approvalIds)))
     : await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, agent.id), eq(schema.approvals.runId, id)));
+  const connectorCalls = await db
+    .select({ id: schema.toolCalls.id, tool: schema.toolCalls.tool, verdict: schema.toolCalls.verdict, ok: schema.toolCalls.ok, at: schema.toolCalls.createdAt })
+    .from(schema.toolCalls)
+    .where(and(eq(schema.toolCalls.agentId, agent.id), eq(schema.toolCalls.runId, id)))
+    .orderBy(asc(schema.toolCalls.createdAt))
+    .limit(200);
   const t = messages.run;
+  const tc = messages.toolAccess;
   const title = recipe?.recipe.title ?? "";
   const statusPill = run.status === "ok" ? "g" : run.status === "failed" ? "c" : "s";
 
@@ -132,6 +139,25 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <h3 className="m-0 mb-2 text-[14px] font-semibold">{t.usage}</h3>
               <div className="text-[13px] text-ash">{t.tokens(run.usage.inputTokens, run.usage.outputTokens)}</div>
               {typeof run.usage.costUsd === "number" && <div className="text-[13px] text-mist mt-1">{t.cost(run.usage.costUsd)}</div>}
+            </div>
+          )}
+          {connectorCalls.length > 0 && (
+            <div className="card p-[18px] flex flex-col gap-2">
+              <h3 className="m-0 text-[14px] font-semibold">{tc.callsTitle}</h3>
+              <ul className="m-0 p-0 list-none flex flex-col gap-1.5" aria-label={tc.callsTitle}>
+                {connectorCalls.map((call) => (
+                  <li key={call.id} className="text-[12.5px] flex gap-2 items-center min-w-0">
+                    <span className={`pill flex-none ${call.verdict === "allowed" || call.verdict === "approved" ? "g" : "c"}`}>{call.verdict ? tc.verdict[call.verdict] : tc.verdictUnknown}</span>
+                    <span className="font-mono truncate flex-1 min-w-0" title={call.tool}>
+                      {call.tool}
+                    </span>
+                    {!call.ok && (call.verdict === "allowed" || call.verdict === "approved") && <span className="text-coral flex-none">{tc.callFailed}</span>}
+                    <span className="text-smoke flex-none" suppressHydrationWarning>
+                      {formatTime(call.at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {approvals.length > 0 && !record && (

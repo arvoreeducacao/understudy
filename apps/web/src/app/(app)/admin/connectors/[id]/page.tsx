@@ -12,6 +12,7 @@ import { requireAdmin } from "@/lib/session";
 import { searchCatalog } from "@/server/connector-catalog";
 import { oauthCallbackUrl, usesOAuth } from "@/server/connector-oauth";
 import { listUpstreamTools } from "@/server/upstream";
+import { toolLimitsOf } from "@/server/tool-access";
 
 const t = messages.admin;
 
@@ -70,7 +71,9 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
   const connector = byId ? (featuredFor(byId.url) ?? asConnector(byId)) : (featuredById(id) ?? (id === "catalog" ? await fromRegistry(query.id, query.q) : null));
   if (!connector) notFound();
   const server = byId ?? servers.find((candidate) => sameAddress(candidate.url, connector.url));
-  const tools = server ? await listUpstreamTools(server, admin.id).then((list) => list.map((tool) => tool.name), () => null) : null;
+  const toolInfo = server ? await listUpstreamTools(server, admin.id).then((list) => list.map((tool) => ({ name: tool.name, description: tool.description, annotations: tool.annotations })), () => null) : null;
+  const tools = toolInfo ? toolInfo.map((tool) => tool.name) : null;
+  const limits = server ? await toolLimitsOf(server.id) : { ask: [], never: [] };
   const blurb = (t.showcaseBlurbs as Partial<Record<string, string>>)[connector.id] ?? connector.description;
 
   return (
@@ -106,6 +109,8 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
               <h2 className="m-0 text-[15px] font-semibold">{t.connectedSettings}</h2>
               <ConnectorSettings
                 server={{ id: server.id, name: server.name, url: server.url, tools, askAll: server.askAll, askTools: server.askTools ?? [], allowedEmails: server.allowedEmails ?? null }}
+                tools={toolInfo}
+                limits={limits}
               />
             </section>
           </>

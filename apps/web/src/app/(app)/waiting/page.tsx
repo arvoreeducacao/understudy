@@ -104,7 +104,7 @@ export default async function WaitingPage() {
             {pending.map(({ approval, agent }) => (
               <ApprovalItem
                 key={approval.id}
-                approval={{ id: approval.id, summary: approval.summary, fields: approval.fields }}
+                approval={{ id: approval.id, summary: approval.summary, fields: approval.fields, ...(approval.grant && agent.ownerId === user.id ? { alwaysAllow: { tool: approval.grant.tool } } : {}) }}
                 agent={{ id: agent.id, name: agent.name, look: agent.look }}
                 when={formatWhen(approval.createdAt)}
               />

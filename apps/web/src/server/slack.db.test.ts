@@ -249,6 +249,26 @@ test("approval buttons answer only for people who may approve", { skip }, async 
   assert.match(JSON.stringify(responses.at(-1)), /Denied by Owner/);
 });
 
+test("a connector approval that may be remembered offers approve and always allow on Slack", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const hub = createHub();
+  const approvalId = await hub.createApproval(ids.ana, { summary: "Use create_draft on Mail", runId: "" }, "mcp", 3600, undefined, { serverId: "mcp_absent", tool: "create_draft" });
+  const card = await waitFor(
+    () => slackCalls.find((c) => c.method === "chat.postMessage" && JSON.stringify(c.body.blocks).includes(approvalId)),
+    "the approval card to be posted",
+  );
+  assert.ok(JSON.stringify(card.body.blocks).includes('"action_id":"approve_always"'));
+  await signed(
+    "/api/slack/interactivity",
+    new URLSearchParams({ payload: JSON.stringify({ type: "block_actions", user: { id: "UOWNER" }, actions: [{ action_id: "approve_always", value: approvalId }], response_url: "https://hooks.slack.com/actions/z" }) }).toString(),
+    "application/x-www-form-urlencoded",
+  );
+  await settle();
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approvalId));
+  assert.equal(row.status, "approved");
+});
+
 test("task suggestion buttons save the task only for the owner", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");

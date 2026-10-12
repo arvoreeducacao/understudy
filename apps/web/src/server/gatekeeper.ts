@@ -2,11 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
-import type { AgentTools } from "@/lib/db/schema";
+import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
+import { messages } from "@/lib/messages";
+import { canAlwaysAllow, effectivePermission, isDestructive, oneLine, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
@@ -17,7 +19,7 @@ import { taskTools } from "./task-tools";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
-import { callUpstreamTool, listUpstreamTools, loadServers, type UpstreamServer } from "./upstream";
+import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
@@ -27,7 +29,7 @@ const HEARTBEAT_MS = 20_000;
 
 type AgentRow = typeof schema.agents.$inferSelect;
 
-type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
+type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean; verdict?: ToolVerdict };
 
 function decision(approved: boolean, note: string | undefined, requestId: string, stopped = false): ToolResult {
   const verdict = approved ? "approved" : stopped ? "stopped" : "denied";
@@ -54,9 +56,21 @@ function text(value: unknown, isError = false): ToolResult {
   return { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], isError };
 }
 
-async function logCall(agentId: string, tool: string, args: unknown, result: unknown, ok: boolean) {
-  await getDb().insert(schema.toolCalls).values({ id: newId("tc"), agentId, tool, args, result, ok });
-  console.log(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call", agentId, tool, ok }));
+export async function runningRunId(agentId: string) {
+  const [run] = await getDb()
+    .select({ id: schema.runs.id })
+    .from(schema.runs)
+    .where(and(eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
+    .orderBy(desc(schema.runs.startedAt))
+    .limit(1);
+  return run?.id ?? null;
+}
+
+async function logCall(agentId: string, tool: string, args: unknown, result: unknown, ok: boolean, verdict?: ToolVerdict, runId?: string | null) {
+  await getDb()
+    .insert(schema.toolCalls)
+    .values({ id: newId("tc"), agentId, tool, args, result, ok, verdict: verdict ?? null, runId: runId ?? null });
+  console.log(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call", agentId, tool, ok, ...(verdict ? { verdict } : {}) }));
 }
 
 export function actionToolName(tool: string) {
@@ -98,7 +112,6 @@ function jsonSchemaOf(schema: z.ZodType) {
 async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   const server = new Server({ name: "understudy-gatekeeper", version: "1.0.0" }, { capabilities: { tools: {}, logging: {} } });
   const enabled = toolsEnabled(agent.tools);
-  const askTools = new Set(agent.tools.askTools ?? []);
 
   const waitOutcome = async (id: string, extra: Extra): Promise<Outcome> => {
     const heartbeat = setInterval(() => {
@@ -142,7 +155,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         let hash: string | undefined;
         if (args.action) {
           const tool = actionToolName(args.action.tool);
-          if (!actionAllowed(tool)) return text(`not asked: ${tool} is not one of your gatekeeper tools; ask without action`, true);
+          if (!(await actionAllowed(tool))) return text(`not asked: ${tool} is not one of your gatekeeper tools; ask without action`, true);
           const shown = approvalFields(args.action.args);
           if ("error" in shown) return text(`not asked: an action needs ${shown.error}, so the owner sees exactly what will run`, true);
           fields = [...fields, { label: "Action", value: tool }, ...shown.fields];
@@ -236,21 +249,37 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   }
 
   const upstreams = (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail));
-  const needsApproval = (upstream: UpstreamServer, toolName: string) =>
-    upstream.askAll || (upstream.askTools ?? []).includes(toolName) || askTools.has(`${upstream.id}:${toolName}`);
-  const actionAllowed = (tool: string) =>
-    tool !== "request_approval" && tool !== "wait_for_approval" && (builtins.some((b) => b.name === tool) || upstreams.some((u) => tool.startsWith(`${u.slug}${PROXY_SEPARATOR}`)));
+  const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
+  const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingOf(upstream, limits.get(upstream.id))]));
+  const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
+    effectivePermission({ serverId: upstream.id, server: ceilings.get(upstream.id) ?? {}, tool, policy: agent.tools.toolPolicy, legacyAsk: agent.tools.askTools }).permission;
+  const toolsOf = (upstream: UpstreamServer) => listUpstreamTools(upstream, agent.ownerId);
+  const findTool = async (upstream: UpstreamServer, toolName: string): Promise<UpstreamTool | { name: string; annotations?: undefined; description?: undefined }> =>
+    (await toolsOf(upstream).catch(() => [] as UpstreamTool[])).find((tool) => tool.name === toolName) ?? { name: toolName };
+  const splitProxied = (name: string) => {
+    const [slug, ...rest] = name.split(PROXY_SEPARATOR);
+    return { upstream: upstreams.find((u) => u.slug === slug), toolName: rest.join(PROXY_SEPARATOR) };
+  };
+  const actionAllowed = async (tool: string) => {
+    if (tool === "request_approval" || tool === "wait_for_approval") return false;
+    if (builtins.some((b) => b.name === tool)) return true;
+    const { upstream, toolName } = splitProxied(tool);
+    return Boolean(upstream && toolName && permissionOf(upstream, await findTool(upstream, toolName)) !== "never");
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const proxied = await Promise.all(
       upstreams.map(async (upstream) => {
         try {
-          const tools = await listUpstreamTools(upstream, agent.ownerId);
-          return tools.map((tool) => ({
-            name: `${upstream.slug}${PROXY_SEPARATOR}${tool.name}`,
-            description: `[${upstream.name}] ${tool.description ?? ""}${needsApproval(upstream, tool.name) ? " (the owner approves every call; it may take a while)" : ""}`.trim(),
-            inputSchema: tool.inputSchema,
-          }));
+          const tools = await toolsOf(upstream);
+          return tools
+            .map((tool) => ({ tool, permission: permissionOf(upstream, tool) }))
+            .filter(({ permission }) => permission !== "never")
+            .map(({ tool, permission }) => ({
+              name: `${upstream.slug}${PROXY_SEPARATOR}${tool.name}`,
+              description: `[${upstream.name}] ${tool.description ?? ""}${permission === "ask" ? " (the owner approves every call; it may take a while)" : ""}`.trim(),
+              inputSchema: tool.inputSchema,
+            }));
         } catch (error) {
           console.error(JSON.stringify({ event: "upstream_list_error", server: upstream.slug, error: String(error) }));
           return [];
@@ -270,25 +299,27 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     const builtin = builtins.find((b) => b.name === name);
     const callExtra = { ...(extra as unknown as Extra), call: { name } };
+    const runId = builtin ? null : await runningRunId(agent.id);
     try {
       let result: ToolResult;
       if (builtin) {
         const parsed = builtin.schema.safeParse(args);
         result = parsed.success ? await builtin.run(parsed.data as never, callExtra) : text(parsed.error.message, true);
       } else {
-        const [slug, ...rest] = name.split(PROXY_SEPARATOR);
-        const toolName = rest.join(PROXY_SEPARATOR);
-        const upstream = upstreams.find((u) => u.slug === slug);
+        const { upstream, toolName } = splitProxied(name);
         if (!upstream || !toolName) {
           result = text(`unknown tool ${name}`, true);
         } else {
-          result = await proxyCall(hub, agent, upstream, toolName, args, needsApproval(upstream, toolName), waitOutcome, callExtra);
+          const tool = await findTool(upstream, toolName);
+          const ceiling = ceilings.get(upstream.id) ?? {};
+          result = await proxyCall(hub, agent, upstream, tool, args, permissionOf(upstream, tool), ceiling, runId, waitOutcome, callExtra);
         }
       }
-      await logCall(agent.id, name, args, result.content[0]?.text?.slice(0, 4000), !result.isError);
-      return result;
+      const { verdict, ...shown } = result;
+      await logCall(agent.id, name, args, shown.content[0]?.text?.slice(0, 4000), !shown.isError, verdict, runId);
+      return shown;
     } catch (error) {
-      await logCall(agent.id, name, args, String(error), false);
+      await logCall(agent.id, name, args, String(error), false, undefined, runId);
       return text(String(error), true);
     }
   });
@@ -306,7 +337,8 @@ async function guardOutward(
   ask: boolean,
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
-): Promise<GuardResult> {
+  approval: { runId?: string | null; grant?: ApprovalGrant } = {},
+): Promise<GuardResult & { asked?: boolean }> {
   const violation = findViolation(agent.rules ?? [], argsSubject(args));
   if (violation) {
     const rule = describeRule(violation.rule);
@@ -314,37 +346,62 @@ async function guardOutward(
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
   if (!ask) return { ok: true };
-  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true };
+  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
-  const id = await hub.createApproval(agent.id, { summary, fields }, "mcp", APPROVAL_LIFETIME_SECONDS, hash);
+  const id = await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant);
   let outcome = await waitOutcome(id, extra);
   while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
-  if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
+  if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
   const approvedHash = await hub.approvalPayloadHash(id, agent.id);
-  if (!approvedHash || approvedHash !== payloadHash(target, args)) return { ok: false, text: "not done: the arguments differ from what the owner approved" };
-  return { ok: true };
+  if (!approvedHash || approvedHash !== payloadHash(target, args)) return { ok: false, asked: true, text: "not done: the arguments differ from what the owner approved" };
+  return { ok: true, asked: true };
+}
+
+export function connectorApprovalFields(connector: string, tool: Pick<UpstreamTool, "name" | "description" | "annotations">, args: Record<string, unknown>) {
+  const t = messages.toolAccess;
+  const shown = approvalFields(args);
+  if ("error" in shown) return shown;
+  const about = oneLine(tool.description);
+  const fields = [
+    { label: t.fieldConnector, value: connector },
+    { label: t.fieldAction, value: tool.name },
+    ...(about ? [{ label: t.fieldWhat, value: about }] : []),
+    ...(isDestructive(tool.annotations) ? [{ label: t.fieldWarning, value: t.destructiveWarning }] : []),
+    ...shown.fields,
+  ];
+  if (fields.length > MAX_APPROVAL_FIELDS) return { error: `at most ${MAX_APPROVAL_FIELDS - (fields.length - shown.fields.length)} arguments` } as const;
+  return { fields } as const;
 }
 
 async function proxyCall(
   hub: Hub,
   agent: AgentRow,
   upstream: UpstreamServer,
-  toolName: string,
+  tool: Pick<UpstreamTool, "name" | "description" | "annotations">,
   args: Record<string, unknown>,
-  needsApproval: boolean,
+  permission: ToolPermission,
+  ceiling: ConnectorCeiling,
+  runId: string | null,
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
 ): Promise<ToolResult> {
-  const shown = needsApproval ? approvalFields(args) : { fields: [] };
-  if ("error" in shown) {
-    return text(`not called: calls that need approval need ${shown.error}, so the owner sees exactly what will run`, true);
+  const toolName = tool.name;
+  if (permission === "never") {
+    return { ...text(`not called: your owner turned off ${upstream.name}'s ${toolName} for you. Do not try another way; tell your owner if you need it.`, true), verdict: "blocked" };
   }
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, `${upstream.name}: ${toolName}`, [...shown.fields], args, needsApproval, waitOutcome, extra);
-  if (!allowed.ok) return text(allowed.text.replace(/^not done:/, "not called:"), true);
+  const needsApproval = permission === "ask";
+  const shown = needsApproval ? connectorApprovalFields(upstream.name, tool, args) : { fields: [] };
+  if ("error" in shown) {
+    return { ...text(`not called: calls that need approval need ${shown.error}, so the owner sees exactly what will run`, true), verdict: "denied" };
+  }
+  const grant = canAlwaysAllow(ceiling, toolName) ? { serverId: upstream.id, tool: toolName } : undefined;
+  const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId, grant });
+  if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.asked ? "denied" : "blocked" };
   const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];
   const parts = content.map((part: { type: string; text?: string }) => (part.type === "text" ? part.text ?? "" : JSON.stringify(part)));
-  return text(parts.join("\n") || JSON.stringify(result), Boolean(result.isError));
+  return { ...text(parts.join("\n") || JSON.stringify(result), Boolean(result.isError)), verdict: needsApproval ? "approved" : "allowed" };
 }
 
 async function readBody(req: IncomingMessage) {

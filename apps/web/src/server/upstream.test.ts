@@ -36,7 +36,8 @@ before(async () => {
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
     const mcp = new McpServer({ name: "tracker", version: "1" });
     mcp.registerTool("create_issue", { description: "Create an issue", inputSchema: { title: z.string() } }, async () => ({ content: [{ type: "text", text: "ok" }] }));
-    mcp.registerTool("list_issues", { description: "List issues", inputSchema: {} }, async () => ({ content: [{ type: "text", text: "[]" }] }));
+    mcp.registerTool("list_issues", { description: "List issues", inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: "text", text: "[]" }] }));
+    mcp.registerTool("delete_issue", { description: "Delete an issue", inputSchema: { id: z.string() }, annotations: { readOnlyHint: false, destructiveHint: true, title: "Delete" } }, async () => ({ content: [{ type: "text", text: "gone" }] }));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await mcp.connect(transport);
     await transport.handleRequest(req, res, body);
@@ -69,7 +70,17 @@ test("testing a connector lists the actions it offers", async () => {
   const { testConnection } = await import("./upstream");
   const result = await testConnection(await row(`${base}/mcp`, KEY));
   assert.equal(result.ok, true);
-  assert.deepEqual(result.ok && result.tools.map((t) => t.name).sort(), ["create_issue", "list_issues"]);
+  assert.deepEqual(result.ok && result.tools.map((t) => t.name).sort(), ["create_issue", "delete_issue", "list_issues"]);
+});
+
+test("the read-only and destructive hints a server declares come along with each action", async () => {
+  const { testConnection } = await import("./upstream");
+  const result = await testConnection(await row(`${base}/mcp`, KEY));
+  assert.equal(result.ok, true);
+  const byName = new Map(result.ok ? result.tools.map((t) => [t.name, t.annotations]) : []);
+  assert.deepEqual(byName.get("list_issues"), { readOnlyHint: true });
+  assert.deepEqual(byName.get("delete_issue"), { readOnlyHint: false, destructiveHint: true });
+  assert.equal(byName.get("create_issue"), undefined);
 });
 
 test("a wrong key, a wrong path and a non-MCP page each get their own reason", async () => {

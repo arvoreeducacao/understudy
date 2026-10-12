@@ -1,5 +1,6 @@
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { Look } from "../look";
+import type { ToolPolicy, ToolVerdict } from "../tool-policy";
 import type { ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
 
 export const user = pgTable("user", {
@@ -65,6 +66,7 @@ export type AgentTools = {
   slackMode?: "off" | "ask" | "free";
   servers?: string[];
   askTools?: string[];
+  toolPolicy?: ToolPolicy;
 };
 
 export const hosts = pgTable("hosts", {
@@ -280,6 +282,8 @@ export const runs = pgTable(
   ],
 );
 
+export type ApprovalGrant = { serverId: string; tool: string };
+
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 
 export const approvals = pgTable(
@@ -303,6 +307,7 @@ export const approvals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     usedAt: timestamp("used_at", { withTimezone: true }),
+    grant: jsonb("tool_grant").$type<ApprovalGrant | null>(),
   },
   (t) => [index("approvals_agent_idx").on(t.agentId, t.status)],
 );
@@ -318,9 +323,11 @@ export const toolCalls = pgTable(
     args: jsonb("args").$type<unknown>(),
     result: jsonb("result").$type<unknown>(),
     ok: boolean("ok").notNull(),
+    runId: text("run_id"),
+    verdict: text("verdict").$type<ToolVerdict>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("tool_calls_agent_idx").on(t.agentId, t.createdAt)],
+  (t) => [index("tool_calls_agent_idx").on(t.agentId, t.createdAt), index("tool_calls_run_idx").on(t.runId)],
 );
 
 export const memoryFiles = pgTable(
@@ -351,6 +358,20 @@ export const mcpServers = pgTable("mcp_servers", {
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const mcpToolLimits = pgTable(
+  "mcp_tool_limits",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    tool: text("tool").notNull(),
+    level: text("level").$type<"ask" | "never">().notNull(),
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.tool] })],
+);
 
 export const mcpServerLogins = pgTable(
   "mcp_server_logins",

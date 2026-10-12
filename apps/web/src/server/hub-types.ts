@@ -49,6 +49,7 @@ export type ApprovalView = {
   fields: ApprovalRequest["fields"];
   status: string;
   createdAt: string;
+  alwaysAllow?: { tool: string };
 };
 
 export type ServerToViewer =

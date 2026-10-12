@@ -57,6 +57,7 @@ export function telegramAdapter(): ChannelAdapter {
           { text: copy.channels.answerApprove, callback_data: `apr:${id}:y` },
           { text: copy.channels.answerDeny, callback_data: `apr:${id}:n` },
         ],
+        ...(notice.approval.alwaysAllow ? [[{ text: copy.toolAccess.approveAlways, callback_data: `apr:${id}:a` }]] : []),
         ...(panel.startsWith("https://") ? [[{ text: copy.channels.answerOpenPanel, url: panel }]] : []),
       ];
       const text = approvalText({ agentName: notice.agentName, approval: notice.approval }).slice(0, 4000);

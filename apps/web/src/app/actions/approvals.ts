@@ -7,7 +7,7 @@ import { agentAccess, canApprove } from "@/lib/access";
 import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
 
-export async function answerApproval(approvalId: string, approved: boolean, note?: string) {
+export async function answerApproval(approvalId: string, approved: boolean, note?: string, always = false) {
   const user = await requireUser();
   const db = getDb();
   const [row] = await db
@@ -18,7 +18,7 @@ export async function answerApproval(approvalId: string, approved: boolean, note
   const hub = getHub();
   let ok = false;
   if (hub) {
-    ok = await hub.answerApproval(approvalId, approved, note?.trim() || undefined, user.id);
+    ok = await hub.answerApproval(approvalId, approved, note?.trim() || undefined, user.id, approved && always);
   } else {
     const updated = await db
       .update(schema.approvals)

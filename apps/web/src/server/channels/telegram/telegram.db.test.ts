@@ -190,6 +190,23 @@ test("approvals during a Telegram conversation come with buttons only the owner 
   assert.deepEqual([row.status, row.answeredBy], ["approved", ids.owner]);
 });
 
+test("a connector approval that may be remembered gets an always-allow button that approves", { skip }, async () => {
+  const { hub } = await connected();
+  await pair(hub);
+  await send(hub, message(OWNER_TG, "Draft the reply"));
+  calls.length = 0;
+  const approvalId = await hub.approvals.create(ids.agent, { summary: "Use create_draft on Mail", fields: [{ label: "to", value: "client@example.com" }] }, "mcp", undefined, undefined, { serverId: "mcp_absent", tool: "create_draft" });
+  await settle(100);
+  const notice = calls.find((call) => call.method === "sendMessage" && JSON.stringify(call.body.reply_markup ?? "").includes(approvalId));
+  assert.ok(notice);
+  assert.ok(JSON.stringify(notice.body.reply_markup).includes(`apr:${approvalId}:a`));
+  const press = { update_id: updateId++, callback_query: { id: `cb${updateId}`, from: { id: OWNER_TG }, data: `apr:${approvalId}:a`, message: { message_id: 9, chat: { id: OWNER_TG, type: "private" }, text: "Ada needs your OK" } } };
+  assert.equal(await send(hub, press), "answered");
+  const { getDb, schema } = await import("@/lib/db");
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approvalId));
+  assert.equal(row.status, "approved");
+});
+
 test("the webhook only accepts Telegram's secret header for that channel", { skip }, async () => {
   const { hub } = await connected();
   const { handleTelegramWebhook } = await import("./webhook");
