@@ -304,3 +304,28 @@ test("channels are listed public and private apart, following every page, so a c
   const joined = await join.run(join.schema.parse({ channel: "#teste-fluxo-slack" }) as never);
   assert.equal(joined.isError, undefined);
 });
+
+const fencedTable = "Here is the test table\n\n```\n| Item | Value |\n|---|---|\n| Open orders | 12 |\n| Total orders | 40 |\n```";
+
+test("a direct message with a fenced pipe table goes out as a native table", async () => {
+  const { run, calls } = setup();
+  const sent = await run("slack_send_dm", { person: "bruno@example.com", text: fencedTable });
+  assert.equal(sent.error, false);
+  const [post] = posts(calls);
+  const blocks = post.params.blocks as { type: string }[];
+  assert.deepEqual(blocks.map((block) => block.type), ["markdown", "table"]);
+  assert.equal(post.params.username, "Rita");
+  assert.doesNotMatch(String(post.params.text), /```/);
+});
+
+test("a channel post with a table falls back to plain markdown when Slack refuses the blocks", async () => {
+  const slack = fakeSlack({ "chat.postMessage": (params) => ((params.blocks as { type: string }[]).some((block) => block.type === "table") ? { ok: false, error: "invalid_blocks" } : { ok: true, ts: "1700000000.000200", channel: params.channel }) });
+  const tools = slackTools({ agent: { id: "agt_test", name: "Rita", iconUrl: "https://panel.example/avatar.png" }, mode: "free", api: slack.api, limiter: new RateLimiter(), fetchFile: async () => ({ error: "none" }), guard: async () => ({ ok: true }) });
+  const tool = tools.find((t) => t.name === "slack_post_message");
+  assert.ok(tool);
+  const result = await tool.run(tool.schema.parse({ channel: "#general", text: fencedTable }) as never);
+  assert.equal(Boolean(result.isError), false);
+  const sent = posts(slack.calls);
+  assert.equal(sent.length, 2);
+  assert.deepEqual((sent[1].params.blocks as { type: string }[]).map((block) => block.type), ["markdown"]);
+});
