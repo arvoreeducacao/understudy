@@ -76,7 +76,7 @@ export async function slackGet(method: string, params: Record<string, string>) {
   return (await res.json()) as SlackResponse;
 }
 
-async function lookupUserId(rawEmail: string): Promise<string | null> {
+export async function lookupUserId(rawEmail: string): Promise<string | null> {
   const email = rawEmail.trim().toLowerCase();
   const cachedId = userIdByEmail.get(email);
   if (cachedId) return cachedId;
