@@ -51,7 +51,6 @@ export const en = {
   },
   push: {
     approvalTitle: (name: string) => `${name} needs your approval`,
-    stuckTitle: (name: string) => `${name} got stuck`,
   },
   channels: {
     title: "Channels",
@@ -1157,6 +1156,17 @@ export const en = {
     finishedOk: (summary: string) => `Done: ${summary}`,
     finishedFail: (summary: string) => `Did not finish: ${summary}`,
     computerOffline: "The computer was off.",
+  },
+  runAlerts: {
+    failed: (agent: string, task: string) => `${agent} could not finish "${task}".`,
+    repeated: (count: number) => `It failed ${count} times in a row.`,
+    signedOut: (brain: string) => `${brain} is signed out on this computer. Connect ${brain} again in the agent's settings and the task will run on its next schedule.`,
+    signInAction: (brain: string) => `Connect ${brain} again`,
+    seeRun: "See what happened",
+    pushTitle: (agent: string, count: number) => (count > 1 ? `${agent} failed ${count} times in a row` : `${agent} could not finish a task`),
+    waitingTitle: "Tasks that did not finish",
+    waitingRepeated: (count: number) => `${count} times in a row`,
+    waitingFailed: "Did not finish",
   },
   briefing: {
     header: "*Your understudies, last 24 hours*",

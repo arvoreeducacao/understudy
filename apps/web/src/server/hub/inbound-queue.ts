@@ -6,6 +6,7 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { flushReplies } from "../channels/relay";
 import { appendPending, setRoute } from "../channels/store";
+import { notifyRunFailure } from "../run-alerts";
 import { rememberSlackReply, slackGiveUp } from "../slack-inbound";
 import { log } from "./shared";
 
@@ -113,6 +114,7 @@ export class InboundQueue {
         .update(schema.runs)
         .set({ status: "failed", summary: copy.runs.computerOffline, finishedAt: new Date() })
         .where(and(eq(schema.runs.id, row.runId), eq(schema.runs.agentId, row.agentId), eq(schema.runs.status, "running")));
+      await notifyRunFailure(row.agentId, row.runId).catch((error) => log("run_notice_error", { error: String(error) }));
     }
     if (row.slackChannel) await slackGiveUp(row.agentId, row.slackChannel, row.slackThreadTs ?? undefined).catch((error) => log("slack_give_up_error", { error: String(error) }));
     if (row.channelThreadId) {

@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
-import { Ban, Check, Clock, X } from "lucide-react";
+import { AlertTriangle, Ban, Check, Clock, X } from "lucide-react";
 import Link from "next/link";
 import { accessibleAgentIds } from "@/lib/access";
 import { AgentFigure } from "@/components/AgentFigure";
@@ -10,6 +10,7 @@ import { formatDate, formatTime, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { brainName, loadOpenFailures, noticePath } from "@/server/run-alerts";
 
 const t = messages.approvals;
 
@@ -42,6 +43,7 @@ export default async function WaitingPage() {
     .where(and(scope, ne(schema.approvals.status, "pending")))
     .orderBy(desc(schema.approvals.createdAt))
     .limit(30);
+  const failures = await loadOpenFailures(await accessibleAgentIds(user.id, ["owner"]));
   const days = new Map<string, typeof answered>();
   for (const row of answered) {
     const label = dayOf(row.approval.answeredAt ?? row.approval.createdAt);
@@ -54,16 +56,41 @@ export default async function WaitingPage() {
         <div>
           <h1 className="flex items-center gap-2.5">
             {t.title}
-            {pending.length > 0 && <span className="wait-count">{pending.length}</span>}
+            {pending.length + failures.length > 0 && <span className="wait-count">{pending.length + failures.length}</span>}
           </h1>
           <p>{t.subtitle}</p>
         </div>
       </div>
       <div className="page-body">
-        {pending.length === 0 && answered.length === 0 && (
+        {failures.length > 0 && (
+          <section className="flex flex-col gap-2" aria-label={messages.runAlerts.waitingTitle}>
+            <h2 className="m-0 text-[15px] font-semibold">{messages.runAlerts.waitingTitle}</h2>
+            <ul className="card rows">
+              {failures.map(({ latest, streak, signedOut }) => (
+                <li key={latest.recipeId}>
+                  <Link href={noticePath({ agentId: latest.agent.id, runId: latest.runId, signedOut })} className="row wait-row">
+                    <AgentFigure state="stuck" size={34} look={latest.agent.look as never} />
+                    <span className="row-main">
+                      <span className="wait-summary">{messages.runAlerts.failed(latest.agent.name, latest.task)}</span>
+                      <span className="row-sub">
+                        {signedOut ? messages.runAlerts.signInAction(brainName(latest.agent.brain)) : (latest.summary ?? "").slice(0, 200)}
+                        {latest.finishedAt ? ` · ${formatWhen(latest.finishedAt)}` : ""}
+                      </span>
+                    </span>
+                    <span className="pill c inline-flex items-center gap-1 flex-none">
+                      <AlertTriangle size={12} aria-hidden />
+                      {streak > 1 ? messages.runAlerts.waitingRepeated(streak) : messages.runAlerts.waitingFailed}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {pending.length === 0 && answered.length === 0 && failures.length === 0 && (
           <EmptyState framed mood="happy" title={messages.empty.waitingTitle} body={messages.empty.waitingBody} action={{ href: "/settings", label: messages.empty.waitingAction, secondary: true }} />
         )}
-        {pending.length === 0 && answered.length > 0 && (
+        {pending.length === 0 && answered.length > 0 && failures.length === 0 && (
           <div className="card wait-clear">
             <AgentFigure state="done" size={52} look={{ body: "cloud", color: "#3ECF8E", eyes: "happy" }} />
             <div className="min-w-0">

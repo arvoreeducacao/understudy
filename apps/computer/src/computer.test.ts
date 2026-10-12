@@ -1120,5 +1120,5 @@ test("stopping a recipe run cancels its brain", async () => {
   agent.stop();
   for (let i = 0; i < 50 && !sent.some((message) => message.type === "run_finished"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(cancelled, 1);
-  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "r-stop", ok: false, summary: "Stopped by the owner." });
+  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "r-stop", ok: false, summary: "Stopped by the owner.", outcome: "stopped" });
 });
