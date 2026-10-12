@@ -123,3 +123,9 @@ test("a follow-up wake carries the follow-up it came from, and the turn reports 
   assert.equal(parseServerToComputer({ ...message, followup: { id: "fu_abc123", bookedAt: 0, emptyWakes: -1 } }).ok, false);
   assert.deepEqual(parseComputerToServer({ type: "turn", followup: "fu_abc123" }), { ok: true, message: { type: "turn", followup: "fu_abc123" } });
 });
+
+test("a turn can say which run it belongs to and that its input came from someone other than the owner", () => {
+  assert.deepEqual(parseComputerToServer({ type: "turn", runId: "run_abc123" }), { ok: true, message: { type: "turn", runId: "run_abc123" } });
+  assert.deepEqual(parseComputerToServer({ type: "turn", untrusted: true }), { ok: true, message: { type: "turn", untrusted: true } });
+  assert.equal(parseComputerToServer({ type: "turn", untrusted: false }).ok, false);
+});

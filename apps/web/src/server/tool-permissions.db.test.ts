@@ -317,3 +317,41 @@ test("a tool that now claims to be read-only keeps asking when it was a write to
   assert.match(await pending, /^not called/);
   assert.equal(calls.length, 0);
 });
+
+async function agentHints() {
+  const { getDb, schema } = await import("@/lib/db");
+  const [agent] = await getDb().select({ tools: schema.agents.tools }).from(schema.agents).where(eq(schema.agents.id, ids.agent));
+  return agent?.tools.toolHints ?? {};
+}
+
+test("the first listing records each tool's hints on the server, and a later listing keeps them", { skip }, async () => {
+  await listed();
+  const first = (await agentHints())[ids.server];
+  assert.deepEqual(first?.search_threads, { readOnlyHint: true });
+  assert.deepEqual(first?.trash_message, { destructiveHint: true });
+  await setTools({}, [], { [ids.server]: { search_threads: { readOnlyHint: false } } });
+  await listed();
+  assert.deepEqual((await agentHints())[ids.server], { search_threads: { readOnlyHint: false } });
+});
+
+test("an allow stored while a tool looked read-only asks again once the tool stops saying so", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  await setTools({ [ids.server]: { label_message: "allow" } }, [], { [ids.server]: { label_message: { readOnlyHint: true }, search_threads: { readOnlyHint: true } } });
+  assert.match((await listed()).find((t) => t.name === "mail__label_message")?.description ?? "", /owner approves/);
+  const pending = call("mail__label_message", { id: "1" });
+  const approval = await pendingApproval();
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  assert.match(await pending, /^not called/);
+  assert.equal(calls.length, 0);
+});
+
+test("a tool missing from the hints recorded for its connector asks even when it claims to be read-only", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  await setTools({}, [], { [ids.server]: { create_draft: { readOnlyHint: false, destructiveHint: false } } });
+  assert.match((await listed()).find((t) => t.name === "mail__search_threads")?.description ?? "", /owner approves/);
+  const pending = call("mail__search_threads", { query: "x" });
+  const approval = await pendingApproval();
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  assert.match(await pending, /^not called/);
+  assert.equal(calls.length, 0);
+});

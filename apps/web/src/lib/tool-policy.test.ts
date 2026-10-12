@@ -13,7 +13,10 @@ import {
   cleanSeenHints,
   grantedPolicy,
   hintsLoosened,
+  hintsTightened,
   isDestructive,
+  mergeRecordedHints,
+  withoutStaleAllows,
   recordedHints,
   oneLine,
   withChoice,
@@ -103,7 +106,7 @@ test("a tool whose hints became less safe since they were recorded falls back to
   const plain: ToolInfo = { name: "plain", annotations: { readOnlyHint: true } };
   for (const tool of [relabeled, purge, plain]) {
     assert.equal(hintsLoosened(seen.s[tool.name as keyof typeof seen.s], tool.annotations), true, tool.name);
-    assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool, seen }), { permission: "ask", source: "default" }, tool.name);
+    assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool, seen }), { permission: "ask", source: "default", changed: "safer" }, tool.name);
   }
   assert.equal(effectivePermission({ serverId: "s", server: {}, tool: search, seen: { s: { search_threads: { readOnlyHint: true } } } }).permission, "allow");
   assert.equal(effectivePermission({ serverId: "s", server: {}, tool: draft, seen: { s: { create_draft: { readOnlyHint: true } } } }).permission, "ask");
@@ -163,4 +166,53 @@ test("descriptions are shown on one bounded line", () => {
 test("older ask-first choices become explicit asks without overriding newer choices", () => {
   assert.deepEqual(withLegacyAsks({ s: { a: "never" } }, ["s:a", "s:b", "t:c:d", "broken", ":x"]), { s: { a: "never", b: "ask" }, t: { "c:d": "ask" } });
   assert.deepEqual(withLegacyAsks(undefined, undefined), {});
+});
+
+test("an allow stored while a tool looked safe turns back to ask when the tool now says it writes or destroys", () => {
+  const seen = { s: { search_threads: { readOnlyHint: true }, create_draft: { readOnlyHint: false, destructiveHint: false } } };
+  const writes: ToolInfo = { name: "search_threads", annotations: { readOnlyHint: false } };
+  const destroys: ToolInfo = { name: "create_draft", annotations: { destructiveHint: true } };
+  const policy = { s: { search_threads: "allow" as const, create_draft: "allow" as const } };
+  for (const tool of [writes, destroys]) {
+    assert.equal(hintsTightened(seenHintsOf(seen, tool.name), tool.annotations), true, tool.name);
+    assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool, policy, seen }), { permission: "ask", source: "default", changed: "riskier" }, tool.name);
+  }
+  assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool: search, policy, seen }), { permission: "allow", source: "owner" });
+  assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool: destroys, policy: { s: { create_draft: "never" } }, seen }), { permission: "never", source: "owner" });
+  assert.deepEqual(withoutStaleAllows(policy.s, "s", [writes, draft], seen), { create_draft: "allow" });
+});
+
+function seenHintsOf(seen: Record<string, Record<string, { readOnlyHint?: boolean; destructiveHint?: boolean }>>, tool: string) {
+  return seen.s[tool];
+}
+
+test("a tool the connector did not list when its hints were recorded asks first instead of trusting its own read-only claim", () => {
+  const seen = { s: { create_draft: { readOnlyHint: false, destructiveHint: false } } };
+  const renamed: ToolInfo = { name: "create_draft_v2", annotations: { readOnlyHint: true } };
+  assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool: renamed, seen }), { permission: "ask", source: "default", changed: "new" });
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: renamed, seen, policy: { s: { create_draft_v2: "allow" } } }).permission, "allow");
+  assert.equal(effectivePermission({ serverId: "t", server: {}, tool: renamed, seen }).permission, "allow");
+});
+
+test("the admin ceiling sees through lookalike letters and invisible characters, and odd names ask at least", () => {
+  const server = { neverTools: ["delete_repo"], askTools: ["send_mail"] };
+  assert.equal(ceilingFor(server, "d\u0435lete_repo"), "never");
+  assert.equal(ceilingFor(server, "delete\u200b_repo"), "never");
+  assert.equal(ceilingFor(server, "s\u0435nd_m\u0430il"), "ask");
+  assert.equal(ceilingFor({}, "l\u00f6\u00f6p"), "ask");
+  assert.equal(ceilingFor({}, "search_threads"), "allow");
+  assert.equal(canAlwaysAllow({}, "s\u0435arch"), false);
+});
+
+test("saving settings keeps the hints recorded before unless the owner made a new choice for that tool", () => {
+  const stored = { s: { search_threads: { readOnlyHint: true }, label_message: { readOnlyHint: true } } };
+  const submitted = { s: { search_threads: { readOnlyHint: false }, label_message: { readOnlyHint: false }, fresh_tool: { readOnlyHint: true }, chosen_tool: { readOnlyHint: true } } };
+  const before = { s: { search_threads: "allow" as const, label_message: "allow" as const } };
+  const after = { s: { search_threads: "allow" as const, label_message: "ask" as const, chosen_tool: "allow" as const } };
+  assert.deepEqual(mergeRecordedHints({ stored, submitted, before, after }), {
+    s: { search_threads: { readOnlyHint: false }, label_message: { readOnlyHint: false }, chosen_tool: { readOnlyHint: true } },
+  });
+  const untouched = { s: { search_threads: "ask" as const, label_message: "allow" as const } };
+  assert.deepEqual(mergeRecordedHints({ stored, submitted: { s: { search_threads: { readOnlyHint: true }, label_message: { readOnlyHint: true } } }, before: untouched, after: untouched }), stored);
+  assert.deepEqual(mergeRecordedHints({ submitted: { t: { a: { readOnlyHint: true } } }, after: {} }), { t: { a: { readOnlyHint: true } } });
 });

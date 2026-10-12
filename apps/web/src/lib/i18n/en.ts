@@ -1193,6 +1193,8 @@ export const en = {
     booked: (when: string, note: string, task: string | null) => `Follow-up booked for ${when}${task ? ` (task "${task}")` : ""}: ${note}`,
     woke: (note: string) => `Follow-up: ${note}`,
     stoppedNotice: (times: number, note: string) => `I checked ${times} times in a row and found nothing new, so I stopped following up on this: ${note}. Tell me if I should keep checking.`,
+    limitNotice: (times: number, note: string) => `I already checked ${times} times on this, the most allowed for one follow-up, so I stopped: ${note}. Tell me if I should keep checking.`,
+    dailyLimitNotice: (cap: number, note: string) => `I already woke up ${cap} times for follow-ups in the last 24 hours, the most allowed, so I skipped this one: ${note}. Tell me if I should check it.`,
   },
   runAlerts: {
     failed: (agent: string, task: string) => `${agent} could not finish "${task}".`,
@@ -1437,6 +1439,9 @@ export const en = {
     destructive: "Can delete",
     hintsChanged: "Changed",
     hintsChangedHint: "The connector now describes this action as safer than when you first saw it, so it asks first until you choose.",
+    hintsRiskierHint: "The connector now describes this action as riskier than when you allowed it, so it asks first until you choose again.",
+    hintsNew: "New",
+    hintsNewHint: "This action was not there when you last set this connector up, so it asks first until you choose.",
     adminBlocked: "Turned off by your admin.",
     adminAtMostAsk: "Your admin requires approval for this one.",
     choiceLabel: (tool: string) => `Permission for ${tool}`,

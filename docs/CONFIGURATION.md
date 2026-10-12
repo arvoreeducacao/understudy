@@ -25,6 +25,8 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_ARTIFACT_ORIGIN` | Optional separate origin (another registrable domain) that serves artifact content; without it content is served from the panel host, already sandboxed with an opaque origin |
 | `UNDERSTUDY_LOCALE` | `en` (default) or `pt-BR` |
 | `UNDERSTUDY_TIMEZONE` | Time zone for dates and new schedules; default `UTC` |
+| `UNDERSTUDY_FOLLOWUP_MAX_CHAIN_WAKES` | Most times one chain of follow-ups can wake an understudy before it stops and the owner is told; default `30` |
+| `UNDERSTUDY_FOLLOWUP_MAX_DAILY_WAKES` | Most follow-up wakes per understudy in 24 hours; default `48` |
 | `UNDERSTUDY_AGENT_TALK_CEILING` | Most turns in a row understudies may take talking among themselves, in rooms and through messages and hand-offs; empty means no limit, and the owner can always press Stop |
 | `UNDERSTUDY_BRIEFING_CRON` | When owners get their daily Slack briefing; default `0 8 * * 1-5` |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Lets understudies talk on Slack; an admin can also paste both in the panel under People |

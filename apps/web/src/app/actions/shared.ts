@@ -5,14 +5,15 @@ import { cleanLook } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { serverAllowedFor } from "@/server/approval-payload";
-import { cleanPolicy, cleanSeenHints } from "@/lib/tool-policy";
+import { cleanPolicy, cleanSeenHints, mergeRecordedHints, withLegacyAsks } from "@/lib/tool-policy";
 
-export async function toolsFrom(form: FormData, email: string): Promise<AgentTools> {
+export async function toolsFrom(form: FormData, email: string, previous?: AgentTools): Promise<AgentTools> {
   const requested = new Set(form.getAll("servers").map(String).slice(0, 50));
   const usable = (await getDb().select({ id: schema.mcpServers.id, allowedEmails: schema.mcpServers.allowedEmails }).from(schema.mcpServers))
     .filter((server) => serverAllowedFor(server.allowedEmails, email))
     .map((server) => server.id);
   const allowed = usable.filter((id) => requested.has(id));
+  const toolPolicy = cleanPolicy(parsePolicy(form.get("toolPolicy")), usable);
   return {
     notifyOwner: form.get("notifyOwner") === "on",
     slack: false,
@@ -20,8 +21,13 @@ export async function toolsFrom(form: FormData, email: string): Promise<AgentToo
     slackMode: slackModeFrom(form.get("slackMode")),
     servers: allowed,
     askTools: [],
-    toolPolicy: cleanPolicy(parsePolicy(form.get("toolPolicy")), usable),
-    toolHints: cleanSeenHints(parsePolicy(form.get("toolHints")), usable),
+    toolPolicy,
+    toolHints: mergeRecordedHints({
+      stored: cleanSeenHints(previous?.toolHints, usable),
+      submitted: cleanSeenHints(parsePolicy(form.get("toolHints")), usable),
+      before: withLegacyAsks(previous?.toolPolicy, previous?.askTools),
+      after: toolPolicy,
+    }),
   };
 }
 

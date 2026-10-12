@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { normalizeRecipe, RUN_RECORD_MAX_SCREENSHOTS, type RunStep, type Usage } from "@understudy/protocol";
 import { effectiveModel } from "@/lib/models";
-import { approvalsRequiredFor } from "@/lib/run-policy";
+import { approvalsRequiredFor, quotedInputTrigger } from "@/lib/run-policy";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
 import type { RunTrigger } from "@/lib/db/schema";
@@ -46,7 +46,7 @@ export class Runs {
       recipe: steps,
       approvalsRequired,
       model: effectiveModel(found.model) ?? undefined,
-      webhook: trigger === "webhook" || trigger === "email" || trigger === "handoff" || trigger === "watch",
+      webhook: quotedInputTrigger(trigger),
       context: context || undefined,
     }, { source: "run", runId });
     log("run_started", { runId, recipeId, trigger, delivery: delivery.status });

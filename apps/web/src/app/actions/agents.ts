@@ -41,7 +41,7 @@ export async function createAgent(_: { error?: string; redirectTo?: string } | n
 }
 
 export async function updateAgentTools(agentId: string, form: FormData) {
-  const { user } = await ownAgent(agentId);
+  const { user, agent } = await ownAgent(agentId);
   const name = String(form.get("name") ?? "").trim().slice(0, 80);
   const role = String(form.get("role") ?? "").trim().slice(0, 200);
   const look = parseLook(form);
@@ -51,7 +51,7 @@ export async function updateAgentTools(agentId: string, form: FormData) {
       ...(name ? { name } : {}),
       role,
       look,
-      tools: await toolsFrom(form, user.email),
+      tools: await toolsFrom(form, user.email, agent.tools),
       updatedAt: new Date(),
     })
     .where(eq(schema.agents.id, agentId));

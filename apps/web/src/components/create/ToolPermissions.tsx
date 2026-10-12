@@ -7,7 +7,6 @@ import {
   askForRest,
   ceilingFor,
   effectivePermission,
-  hintsLoosened,
   isDestructive,
   isReadOnly,
   seenHintsFor,
@@ -42,7 +41,8 @@ export function ToolPermissions({
   const trusted = tools.map((tool) => ({ ...tool, annotations: hintsOf(tool) }));
   const readOnly = trusted.filter((tool) => isReadOnly(tool.annotations));
   const rest = trusted.filter((tool) => !isReadOnly(tool.annotations));
-  const permissionOf = (tool: ToolInfo) => effectivePermission({ serverId, server: ceiling, tool, policy: { [serverId]: policy }, seen }).permission;
+  const verdictOf = (tool: ToolInfo) => effectivePermission({ serverId, server: ceiling, tool, policy: { [serverId]: policy }, seen });
+  const permissionOf = (tool: ToolInfo) => verdictOf(tool).permission;
   const counts = { allow: 0, ask: 0, never: 0 };
   for (const tool of tools) counts[permissionOf(tool)] += 1;
 
@@ -67,7 +67,7 @@ export function ToolPermissions({
           const choices = allowedChoices(cap);
           const hints = hintsOf(tool);
           const destructive = isDestructive(hints);
-          const changed = !(tool.name in policy) && hintsLoosened(seenOf(tool), tool.annotations);
+          const changed = verdictOf(tool).changed;
           return (
             <li key={tool.name} className="tp-row">
               <div className="tp-tool">
@@ -86,9 +86,9 @@ export function ToolPermissions({
                     </span>
                   )}
                   {changed && (
-                    <span className="tp-tag is-danger" title={t.hintsChangedHint}>
+                    <span className="tp-tag is-danger" title={changed === "new" ? t.hintsNewHint : changed === "riskier" ? t.hintsRiskierHint : t.hintsChangedHint}>
                       <RefreshCw size={12} aria-hidden />
-                      {t.hintsChanged}
+                      {changed === "new" ? t.hintsNew : t.hintsChanged}
                     </span>
                   )}
                 </div>

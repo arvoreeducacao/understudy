@@ -1,7 +1,8 @@
-import { and, asc, count, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
+import { untrustedTrigger } from "@/lib/run-policy";
 import type { Hub } from "./hub";
 import { setRoute } from "./channels/store";
 import { currentTurn } from "./channels/turns";
@@ -11,6 +12,23 @@ export const FOLLOWUP_MAX_HORIZON_MS = 60 * 24 * 60 * 60 * 1000;
 export const FOLLOWUP_MAX_PENDING = 20;
 export const FOLLOWUP_MAX_EMPTY_WAKES = 3;
 export const FOLLOWUP_NOTE_MAX = 2000;
+export const FOLLOWUP_DEFAULT_CHAIN_WAKES = 30;
+export const FOLLOWUP_DEFAULT_DAILY_WAKES = 48;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function envCap(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+export function followupChainWakeCap() {
+  return envCap("UNDERSTUDY_FOLLOWUP_MAX_CHAIN_WAKES", FOLLOWUP_DEFAULT_CHAIN_WAKES);
+}
+
+export function followupDailyWakeCap() {
+  return envCap("UNDERSTUDY_FOLLOWUP_MAX_DAILY_WAKES", FOLLOWUP_DEFAULT_DAILY_WAKES);
+}
 
 const FIRE_BATCH = 50;
 
@@ -89,14 +107,25 @@ export function localTime(at: Date, timeZone = followupTimezone()) {
   return `${part("weekday")} ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} (${timeZone})`;
 }
 
-const wakes = new Map<string, string | null>();
+type TurnContext = { followup: string | null; runId: string | null; untrusted: boolean };
 
-export function noteTurnWake(agentId: string, followupId: string | undefined) {
-  wakes.set(agentId, followupId ?? null);
+const turns = new Map<string, TurnContext>();
+
+export function noteTurn(agentId: string, turn: { followup?: string; runId?: string; untrusted?: boolean }) {
+  turns.set(agentId, { followup: turn.followup ?? null, runId: turn.runId ?? null, untrusted: turn.untrusted === true });
 }
 
 export function forgetTurnWake(agentId: string) {
-  wakes.delete(agentId);
+  turns.delete(agentId);
+}
+
+export function turnUntrusted(agentId: string) {
+  return turns.get(agentId)?.untrusted === true;
+}
+
+export async function turnRunId(agentId: string, fallback: (agentId: string) => Promise<string | null>) {
+  const turn = turns.get(agentId);
+  return turn ? turn.runId : fallback(agentId);
 }
 
 async function currentWake(agentId: string, runId: string | null) {
@@ -105,7 +134,7 @@ async function currentWake(agentId: string, runId: string | null) {
     const [fromRun] = await db.select().from(schema.followups).where(and(eq(schema.followups.agentId, agentId), eq(schema.followups.runId, runId)));
     if (fromRun) return fromRun;
   }
-  const wakeId = wakes.get(agentId);
+  const wakeId = turns.get(agentId)?.followup;
   if (!wakeId) return null;
   const [fromChat] = await db.select().from(schema.followups).where(and(eq(schema.followups.agentId, agentId), eq(schema.followups.id, wakeId)));
   return fromChat ?? null;
@@ -133,15 +162,47 @@ export type BookInput = { when: string; note: string; task?: string; progress?: 
 
 export type BookResult =
   | { ok: true; followup: Followup; taskTitle: string | null }
-  | { ok: false; reason: "outsider" | "when" | "too_soon" | "too_far" | "too_many" | "no_task" | "no_progress"; error: string };
+  | { ok: false; reason: "outsider" | "untrusted" | "when" | "too_soon" | "too_far" | "too_many" | "daily_limit" | "no_task" | "no_progress" | "chain_limit"; error: string };
+
+async function untrustedRun(agentId: string, runId: string | null) {
+  if (!runId) return false;
+  const [run] = await getDb()
+    .select({ trigger: schema.runs.trigger })
+    .from(schema.runs)
+    .where(and(eq(schema.runs.agentId, agentId), eq(schema.runs.id, runId)));
+  return run ? untrustedTrigger(run.trigger) : true;
+}
+
+async function wakesSince(agentId: string, since: Date) {
+  const [{ fired }] = await getDb()
+    .select({ fired: count() })
+    .from(schema.followups)
+    .where(and(eq(schema.followups.agentId, agentId), eq(schema.followups.status, "fired"), gt(schema.followups.firedAt, since)));
+  return fired;
+}
+
+async function stopChain(hub: FollowupHub, agentId: string, chainId: string, now: Date, notice: string) {
+  await getDb()
+    .update(schema.followups)
+    .set({ status: "stopped", endedAt: now })
+    .where(and(eq(schema.followups.agentId, agentId), eq(schema.followups.chainId, chainId), eq(schema.followups.status, "pending")));
+  await hub.notifyOwner(agentId, notice).catch(() => undefined);
+}
 
 export async function bookFollowup(
   hub: FollowupHub,
   agent: { id: string },
   input: BookInput,
-  context: { runId: string | null; outsider: boolean; now?: Date },
+  context: { runId: string | null; outsider: boolean; untrusted?: boolean; now?: Date },
 ): Promise<BookResult> {
   if (context.outsider) return { ok: false, reason: "outsider", error: "not booked: you are answering someone who is not your owner, and only your owner's conversations and tasks can book a follow-up" };
+  if (context.untrusted || (await untrustedRun(agent.id, context.runId))) {
+    return {
+      ok: false,
+      reason: "untrusted",
+      error: "not booked: what you are working on now did not come from your owner (a webhook, an email, a teammate, a room or a watched page), and only your owner's conversations and tasks can book a follow-up. If a later check is needed, tell your owner with notify_owner and let them decide.",
+    };
+  }
   const now = context.now ?? new Date();
   const parsed = parseWhen(input.when, now);
   if (!parsed.ok) return { ok: false, reason: "when", error: `not booked: ${parsed.error}` };
@@ -150,11 +211,10 @@ export async function bookFollowup(
   if (delay > FOLLOWUP_MAX_HORIZON_MS) return { ok: false, reason: "too_far", error: `not booked: a follow-up can be at most ${FOLLOWUP_MAX_HORIZON_MS / 86_400_000} days ahead; for something further away, suggest a task with propose_task` };
 
   const db = getDb();
-  const [{ pending }] = await db
-    .select({ pending: count() })
-    .from(schema.followups)
-    .where(and(eq(schema.followups.agentId, agent.id), eq(schema.followups.status, "pending")));
-  if (pending >= FOLLOWUP_MAX_PENDING) return { ok: false, reason: "too_many", error: `not booked: you already have ${pending} follow-ups waiting, the most allowed. Cancel one you no longer need with cancel_followup, or tell your owner.` };
+  const dailyCap = followupDailyWakeCap();
+  if ((await wakesSince(agent.id, new Date(now.getTime() - DAY_MS))) >= dailyCap) {
+    return { ok: false, reason: "daily_limit", error: `not booked: you already woke up ${dailyCap} times for follow-ups in the last 24 hours, the most allowed. Tell your owner in one short sentence what you wanted to check and ask how they want to handle it.` };
+  }
 
   let recipeId: string | null = null;
   let taskTitle: string | null = null;
@@ -171,12 +231,23 @@ export async function bookFollowup(
   const parent = await currentWake(agent.id, context.runId);
   const progressed = Boolean(input.progress?.trim());
   const emptyWakes = parent ? (progressed ? 0 : parent.emptyWakes + 1) : 0;
+  if (parent) {
+    const chainCap = followupChainWakeCap();
+    const [{ woke }] = await db
+      .select({ woke: count() })
+      .from(schema.followups)
+      .where(and(eq(schema.followups.agentId, agent.id), eq(schema.followups.chainId, parent.chainId), eq(schema.followups.status, "fired")));
+    if (woke >= chainCap) {
+      await stopChain(hub, agent.id, parent.chainId, now, copy.followups.limitNotice(woke, parent.note));
+      return {
+        ok: false,
+        reason: "chain_limit",
+        error: `not booked: this follow-up already woke you ${woke} times, the most allowed for one chain, so it stops here and your owner was told. Do not book it again; tell your owner in one short sentence what you were waiting for and ask whether to keep checking.`,
+      };
+    }
+  }
   if (parent && emptyWakes >= FOLLOWUP_MAX_EMPTY_WAKES) {
-    await db
-      .update(schema.followups)
-      .set({ status: "stopped", endedAt: now })
-      .where(and(eq(schema.followups.agentId, agent.id), eq(schema.followups.chainId, parent.chainId), eq(schema.followups.status, "pending")));
-    await hub.notifyOwner(agent.id, copy.followups.stoppedNotice(emptyWakes, parent.note)).catch(() => undefined);
+    await stopChain(hub, agent.id, parent.chainId, now, copy.followups.stoppedNotice(emptyWakes, parent.note));
     return {
       ok: false,
       reason: "no_progress",
@@ -185,20 +256,33 @@ export async function bookFollowup(
   }
 
   const turn = context.runId ? null : currentTurn(agent.id);
-  const [followup] = await db
-    .insert(schema.followups)
-    .values({
-      id: newId("fu"),
-      agentId: agent.id,
-      dueAt: parsed.at,
-      note: input.note.trim().slice(0, FOLLOWUP_NOTE_MAX),
-      recipeId,
-      origin: turn?.trusted ? turn.threadId : null,
-      chainId: parent?.chainId ?? newId("fuc"),
-      emptyWakes,
-      bookedInRunId: context.runId,
-    })
-    .returning();
+  const booked = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`followups:${agent.id}`}))`);
+    const [{ pending }] = await tx
+      .select({ pending: count() })
+      .from(schema.followups)
+      .where(and(eq(schema.followups.agentId, agent.id), eq(schema.followups.status, "pending")));
+    if (pending >= FOLLOWUP_MAX_PENDING) return { pending };
+    const [row] = await tx
+      .insert(schema.followups)
+      .values({
+        id: newId("fu"),
+        agentId: agent.id,
+        dueAt: parsed.at,
+        note: input.note.trim().slice(0, FOLLOWUP_NOTE_MAX),
+        recipeId,
+        origin: turn?.trusted ? turn.threadId : null,
+        chainId: parent?.chainId ?? newId("fuc"),
+        emptyWakes,
+        bookedInRunId: context.runId,
+      })
+      .returning();
+    return { row };
+  });
+  if (!("row" in booked) || !booked.row) {
+    return { ok: false, reason: "too_many", error: `not booked: you already have ${booked.pending} follow-ups waiting, the most allowed. Cancel one you no longer need with cancel_followup, or tell your owner.` };
+  }
+  const followup = booked.row;
   await hub.addMessage(agent.id, "system", copy.followups.booked(localTime(parsed.at), followup.note, taskTitle), context.runId).catch(() => undefined);
   return { ok: true, followup, taskTitle };
 }
@@ -274,6 +358,12 @@ export async function fireDueFollowups(hub: FollowupHub, now = new Date()) {
       .where(eq(schema.agents.id, claimed.agentId));
     if (!owner || owner.status !== "approved") {
       await db.update(schema.followups).set({ status: "stopped", endedAt: now }).where(eq(schema.followups.id, claimed.id));
+      continue;
+    }
+    const dailyCap = followupDailyWakeCap();
+    if ((await wakesSince(claimed.agentId, new Date(now.getTime() - DAY_MS))) > dailyCap) {
+      await db.update(schema.followups).set({ status: "stopped", firedAt: null, endedAt: now }).where(eq(schema.followups.id, claimed.id));
+      await hub.notifyOwner(claimed.agentId, copy.followups.dailyLimitNotice(dailyCap, claimed.note)).catch(() => undefined);
       continue;
     }
     const [task] = claimed.recipeId

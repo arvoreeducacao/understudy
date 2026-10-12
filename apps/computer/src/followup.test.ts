@@ -76,3 +76,10 @@ test("booking, listing and cancelling follow-ups are bookkeeping, not actions, a
   assert.equal(describeTool("mcp__gatekeeper__schedule_followup", { when: "2h" }), "Booking a follow-up 2h");
   assert.equal(describeTool("mcp__gatekeeper__list_followups", {}), "Checking my follow-ups");
 });
+
+test("a turn tells the panel which run it is and when a teammate or an outside sender started it", async () => {
+  const { agent, sent } = harness();
+  agent.enqueue({ kind: "chat", text: "Can you check the quote?", from: "Clerk", fromAgent: { id: "agt_mate", name: "Clerk" } });
+  await settle();
+  assert.deepEqual(sent.find((message) => message.type === "turn"), { type: "turn", untrusted: true });
+});
