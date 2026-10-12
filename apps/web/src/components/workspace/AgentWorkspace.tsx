@@ -14,6 +14,7 @@ import { messages } from "@/lib/messages";
 import { advancedTabs, barTabs, panelTabs, type WorkspaceTab } from "@/lib/workspace-tabs";
 import { SettingsPanel, type SettingsData } from "./SettingsPanel";
 import { TasksPanel, type RunSummary, type TaskSummary } from "./TasksPanel";
+import type { FollowupSummary } from "@/components/followups/FollowupList";
 
 export type OwnerData = {
   files: FileEntry[];
@@ -271,6 +272,7 @@ export function AgentWorkspace({
   approvals,
   recipes,
   runs,
+  followups = [],
   ownerData,
   feeds,
   tab,
@@ -285,6 +287,7 @@ export function AgentWorkspace({
   approvals: number;
   recipes: TaskSummary[];
   runs: RunSummary[];
+  followups?: FollowupSummary[];
   ownerData: OwnerData | null;
   feeds: ReturnType<typeof useWorkspaceFeeds>;
   tab: WorkspaceTab;
@@ -310,7 +313,7 @@ export function AgentWorkspace({
 
   function panel(name: WorkspaceTab) {
     if (name === "artifacts") return <ArtifactsPanel agentId={agent.id} agentName={agent.name} look={agent.look} owner={owner} send={owner ? link.send : undefined} />;
-    if (name === "tasks") return <TasksPanel agentId={agent.id} owner={owner} recipes={recipes} runs={runs} look={agent.look} />;
+    if (name === "tasks") return <TasksPanel agentId={agent.id} owner={owner} recipes={recipes} runs={runs} followups={followups} look={agent.look} />;
     if (!ownerData) return null;
     if (name === "files") return <FilesBrowser agentId={agent.id} live={link.live} send={link.send} files={feeds.files} look={agent.look} />;
     if (name === "terminal") return <TerminalPane agentId={agent.id} agentName={agent.name} link={link} active={tab === "terminal"} />;

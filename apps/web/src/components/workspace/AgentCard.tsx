@@ -14,6 +14,7 @@ import { fileUrl } from "@/lib/uploader";
 import { advancedTabs, type WorkspaceTab } from "@/lib/workspace-tabs";
 import { TAB_ICONS } from "./AgentWorkspace";
 import type { RunSummary } from "./TasksPanel";
+import { FollowupList, type FollowupSummary } from "@/components/followups/FollowupList";
 
 const a = messages.agentPage;
 const TasksIcon = TAB_ICONS.tasks;
@@ -85,6 +86,7 @@ export function AgentCard({
   owner,
   approvals,
   runs,
+  followups = [],
   files,
   subscribeFrames,
   onOpen,
@@ -97,6 +99,7 @@ export function AgentCard({
   owner: boolean;
   approvals: number;
   runs: RunSummary[];
+  followups?: FollowupSummary[];
   files: FileEntry[] | null;
   subscribeFrames: (listener: (frame: Frame) => void) => () => void;
   onOpen: (view: WorkspaceTab) => void;
@@ -199,6 +202,22 @@ export function AgentCard({
           </ul>
         )}
       </div>
+
+      {followups.length > 0 && (
+        <div className="ac-section">
+          <div className="ac-section-head">
+            <h3>{messages.followups.upcoming}</h3>
+            {followups.length > 3 && (
+              <button type="button" onClick={() => onOpen("tasks")}>
+                {a.seeAll}
+              </button>
+            )}
+          </div>
+          <div className="px-[18px]">
+            <FollowupList items={followups.slice(0, 3)} compact />
+          </div>
+        </div>
+      )}
 
       {(files || hasArtifacts) && (
         <div className="ac-section">

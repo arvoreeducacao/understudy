@@ -24,6 +24,7 @@ import { AgentRail, initials, type RailData } from "./AgentRail";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { useVisualViewport } from "@/components/useVisualViewport";
 import type { RunSummary, TaskSummary } from "@/components/workspace/TasksPanel";
+import type { FollowupSummary } from "@/components/followups/FollowupList";
 import { ARTIFACT_EVENT } from "@/components/artifacts/artifact-ui";
 import { useAttachments } from "./useAttachments";
 import { ApprovalCard, Composer, DayDivider, MessageRow, StepsGroup, StreamingRow, WorkingRow, useChatWidth } from "./ChatParts";
@@ -108,6 +109,7 @@ export function AgentInside({
   initialApprovals,
   runs,
   recipes,
+  followups = [],
   ownerData,
   rail,
   access = "owner",
@@ -121,6 +123,7 @@ export function AgentInside({
   initialApprovals: ApprovalView[];
   runs: RunSummary[];
   recipes: TaskSummary[];
+  followups?: FollowupSummary[];
   ownerData: OwnerData | null;
   access?: "owner" | "approver" | "viewer";
   initialChatWidth?: number | null;
@@ -268,6 +271,7 @@ export function AgentInside({
           owner={owner}
           approvals={approvals.length}
           runs={runs}
+          followups={followups}
           files={ownerData ? feeds.files : null}
           subscribeFrames={subscribeFrames}
           onOpen={open}
@@ -298,6 +302,7 @@ export function AgentInside({
         approvals={approvals.length}
         recipes={recipes}
         runs={runs}
+        followups={followups}
         ownerData={ownerData}
         feeds={feeds}
         tab={view}

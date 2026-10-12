@@ -16,6 +16,7 @@ import { approvalFields, MAX_APPROVAL_FIELDS, payloadHash, serverAllowedFor } fr
 import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
+import { followupTools } from "./followup-tools";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
@@ -240,6 +241,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
 
   builtins.push(...(teamTools(hub, agent) as Builtin[]));
   builtins.push(...(taskTools(hub, agent) as Builtin[]));
+  builtins.push(...(followupTools(hub, agent, { outsider, runId: () => runningRunId(agent.id) }) as Builtin[]));
 
   const guard = (input: GuardInput) =>
     guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask, waitOutcome, input.extra as Extra);

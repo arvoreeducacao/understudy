@@ -3,6 +3,7 @@ import Link from "next/link";
 import { messages } from "@/lib/messages";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { Look } from "@/lib/look";
+import { FollowupList, type FollowupSummary } from "@/components/followups/FollowupList";
 
 export type TaskSummary = { id: string; title: string; active: boolean };
 export type RunSummary = { id: string; when: string; label: string; status: string; waiting: boolean };
@@ -14,12 +15,14 @@ export function TasksPanel({
   owner,
   recipes,
   runs,
+  followups = [],
   look,
 }: {
   agentId: string;
   owner: boolean;
   recipes: TaskSummary[];
   runs: RunSummary[];
+  followups?: FollowupSummary[];
   look?: Look;
 }) {
   const t = messages.workspace;
@@ -52,6 +55,13 @@ export function TasksPanel({
             ))}
           </ul>
         )}
+      </section>
+      <section className="card p-[18px] flex flex-col gap-1" aria-labelledby="followups-title">
+        <div className="flex flex-col gap-1 pb-2">
+          <h3 id="followups-title" className="m-0 text-[14px] font-semibold">{messages.followups.upcoming}</h3>
+          <p className="m-0 text-[12.5px] text-ash">{messages.followups.lead}</p>
+        </div>
+        {followups.length === 0 ? <p className="m-0 text-[12.5px] text-smoke">{messages.followups.empty}</p> : <FollowupList items={followups} />}
       </section>
       <section className="card p-[18px] flex flex-col gap-1">
         <div className="flex items-center gap-2 pb-2">

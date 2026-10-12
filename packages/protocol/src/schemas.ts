@@ -73,7 +73,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat_delta"), streamId: id, text: z.string().max(64 * 1024), roomId: id.optional() }),
   z.object({ type: z.literal("activity"), runId: optionalText, text, roomId: id.optional() }),
   z.object({ type: z.literal("room_turn_done"), roomId: id, ok: z.boolean(), error: z.string().max(500).optional() }),
-  z.object({ type: z.literal("turn"), origin: id.optional() }),
+  z.object({ type: z.literal("turn"), origin: id.optional(), followup: id.optional() }),
   z.object({ type: z.literal("recorded"), recordingId: id, event: RecordedEventSchema }),
   z.object({ type: z.literal("recipe"), recordingId: id, recipe: RecipeSchema }),
   z.object({ type: z.literal("recipe_failed"), recordingId: id, error: text }),
@@ -113,7 +113,7 @@ export const InputEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const ServerToComputerSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), repeated: z.object({ times: z.number().int().min(2).max(1000), since: time }).optional(), external: z.object({ channel: z.string().min(1).max(40), sender: z.string().min(1).max(320) }).optional(), origin: id.optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(), artifactEdit: ArtifactEditContextSchema.optional() }),
+  z.object({ type: z.literal("chat"), text, from: text, fromAgent: z.object({ id: id, name: text }).optional(), repeated: z.object({ times: z.number().int().min(2).max(1000), since: time }).optional(), external: z.object({ channel: z.string().min(1).max(40), sender: z.string().min(1).max(320) }).optional(), followup: z.object({ id, bookedAt: time, emptyWakes: z.number().int().min(0).max(1000) }).optional(), origin: id.optional(), model: optionalText, attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(), artifactEdit: ArtifactEditContextSchema.optional() }),
   z.object({ type: z.literal("room_turn"), roomId: id, prompt: z.string().max(64 * 1024), model: optionalText }),
   z.object({ type: z.literal("input"), event: InputEventSchema }),
   z.object({ type: z.literal("record_start"), recordingId: id }),

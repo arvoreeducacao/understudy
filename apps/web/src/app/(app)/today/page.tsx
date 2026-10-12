@@ -7,6 +7,8 @@ import { getDb, schema } from "@/lib/db";
 import { formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
+import { FollowupList } from "@/components/followups/FollowupList";
+import { pendingFollowups, toSummaries } from "@/server/followups";
 import { nextRunAt } from "@/server/scheduler";
 
 export default async function TodayPage() {
@@ -39,10 +41,15 @@ export default async function TodayPage() {
     .map((r) => ({ recipe: r, at: r.cron ? nextRunAt(r.cron, r.timezone) : null }))
     .filter((x): x is { recipe: typeof x.recipe; at: Date } => x.at !== null && x.at.getTime() - Date.now() < 24 * 60 * 60 * 1000)
     .sort((a, b) => a.at.getTime() - b.at.getTime());
+  const followups = toSummaries(await pendingFollowups(ids, 20), {
+    format: formatWhen,
+    canCancel: (agentId) => byId.get(agentId)?.ownerId === user.id,
+    agentName: (agentId) => byId.get(agentId)?.name,
+  });
   const ok = runs.filter((r) => r.run.status === "ok");
   const failed = runs.filter((r) => r.run.status === "failed");
   const stuck = agents.filter((a) => a.state === "stuck");
-  const quiet = runs.length === 0 && pending.length === 0 && upcoming.length === 0 && stuck.length === 0;
+  const quiet = runs.length === 0 && pending.length === 0 && upcoming.length === 0 && stuck.length === 0 && followups.length === 0;
 
   return (
     <div className="page">
@@ -100,6 +107,14 @@ export default async function TodayPage() {
             ))
           )}
         </section>
+        {followups.length > 0 && (
+          <section className="card p-[18px] flex flex-col gap-1 col-span-full" aria-labelledby="today-followups">
+            <h2 id="today-followups" className="m-0 pb-1.5 text-[14px] font-semibold">
+              {messages.followups.upcoming}
+            </h2>
+            <FollowupList items={followups} />
+          </section>
+        )}
         <section className="card p-[18px] flex flex-col gap-2.5 col-span-full">
           <h2 className="m-0 text-[14px] font-semibold">{t.done}</h2>
           {stuck.map((a) => (

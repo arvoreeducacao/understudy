@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { fireDueFollowups } from "./followups";
 import type { Hub } from "./hub";
 
 const SYNC_INTERVAL_MS = 30_000;
@@ -50,6 +51,7 @@ export class Scheduler {
   }
 
   async sync() {
+    await fireDueFollowups(this.hub).catch((error) => console.error("followups_fire_error", error));
     const db = getDb();
     const rows = await db
       .select({ id: schema.recipes.id, cron: schema.recipes.cron, timezone: schema.recipes.timezone })

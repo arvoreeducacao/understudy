@@ -9,6 +9,8 @@ import { formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FollowupList } from "@/components/followups/FollowupList";
+import { pendingFollowups, recentFollowups, toSummaries } from "@/server/followups";
 
 const STATUSES = ["ok", "failed", "running"] as const;
 type StatusFilter = (typeof STATUSES)[number];
@@ -63,6 +65,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
     { count: 0, input: 0, output: 0, cost: 0, priced: false },
   );
 
+  const ownsAgent = agent.ownerId === user.id;
+  const [upcomingFollowups, pastFollowups] = await Promise.all([pendingFollowups([agentId], 20), recentFollowups(agentId, 10)]);
+  const followups = [...upcomingFollowups, ...pastFollowups];
+  const followupItems = toSummaries(followups, { format: formatWhen, canCancel: () => ownsAgent });
+
   const t = messages.runList;
   const anyRunning = rows.some((row) => row.run.status === "running");
   const filterHref = (value: string | null) => `/runs?agent=${encodeURIComponent(agentId)}${value ? `&status=${value}` : ""}`;
@@ -100,6 +107,15 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             </Link>
           ))}
         </nav>
+
+        {followupItems.length > 0 && (
+          <section className="card p-[18px] flex flex-col gap-1" aria-labelledby="runs-followups">
+            <h2 id="runs-followups" className="m-0 pb-1.5 text-[14px] font-semibold">
+              {messages.followups.title}
+            </h2>
+            <FollowupList items={followupItems} showStatus />
+          </section>
+        )}
 
         {rows.length === 0 ? (
           filter ? (

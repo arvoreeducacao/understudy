@@ -115,3 +115,11 @@ test("an owner chat can say how often the same thing was asked", () => {
   assert.deepEqual(parseServerToComputer(message), { ok: true, message });
   assert.equal(parseServerToComputer({ ...message, repeated: { times: 1, since: 0 } }).ok, false);
 });
+
+test("a follow-up wake carries the follow-up it came from, and the turn reports it back", () => {
+  const message = { type: "chat", text: "Check whether Northwind answered the quote", from: "follow-up", followup: { id: "fu_abc123", bookedAt: Date.parse("2026-03-02T09:00:00Z"), emptyWakes: 1 } };
+  assert.deepEqual(parseServerToComputer(message), { ok: true, message });
+  assert.equal(parseServerToComputer({ ...message, followup: { id: "", bookedAt: 0, emptyWakes: 0 } }).ok, false);
+  assert.equal(parseServerToComputer({ ...message, followup: { id: "fu_abc123", bookedAt: 0, emptyWakes: -1 } }).ok, false);
+  assert.deepEqual(parseComputerToServer({ type: "turn", followup: "fu_abc123" }), { ok: true, message: { type: "turn", followup: "fu_abc123" } });
+});
