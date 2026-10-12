@@ -257,7 +257,7 @@ export const recipeWatches = pgTable(
   (t) => [index("recipe_watches_agent_idx").on(t.agentId)],
 );
 
-export type RunTrigger = "schedule" | "test" | "manual" | "webhook" | "email" | "handoff" | "watch";
+export type RunTrigger = "schedule" | "test" | "manual" | "webhook" | "email" | "handoff" | "watch" | "followup";
 export type RunStatus = "running" | "ok" | "failed";
 
 export const runs = pgTable(
@@ -758,4 +758,30 @@ export const taskProposals = pgTable(
     answeredAt: timestamp("answered_at", { withTimezone: true }),
   },
   (t) => [index("task_proposals_agent_idx").on(t.agentId, t.status)],
+);
+
+export type FollowupStatus = "pending" | "fired" | "cancelled" | "stopped";
+
+export const followups = pgTable(
+  "followups",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+    recipeId: text("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
+    origin: text("origin"),
+    chainId: text("chain_id").notNull(),
+    emptyWakes: integer("empty_wakes").notNull().default(0),
+    bookedInRunId: text("booked_in_run_id"),
+    status: text("status").$type<FollowupStatus>().notNull().default("pending"),
+    runId: text("run_id"),
+    cancelledBy: text("cancelled_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    firedAt: timestamp("fired_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [index("followups_agent_idx").on(t.agentId, t.status, t.dueAt), index("followups_due_idx").on(t.status, t.dueAt)],
 );

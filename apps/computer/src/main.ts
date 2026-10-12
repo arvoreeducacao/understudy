@@ -174,6 +174,7 @@ async function main() {
           ...(message.fromAgent ? { fromAgent: message.fromAgent } : {}),
           ...(message.repeated ? { repeated: message.repeated } : {}),
           ...(message.external ? { external: message.external } : {}),
+          ...(message.followup ? { followup: message.followup } : {}),
           ...(message.origin ? { origin: message.origin } : {}),
           ...(message.model ? { model: message.model } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),

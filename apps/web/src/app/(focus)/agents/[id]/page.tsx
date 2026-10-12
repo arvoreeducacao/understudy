@@ -14,6 +14,7 @@ import { serverOptions } from "@/lib/server-options";
 import { requireAgentAccess } from "@/lib/session";
 import { loadChat, loadPendingApprovals, loadRuns } from "@/lib/views";
 import { channelSettings } from "@/server/channels/settings";
+import { pendingFollowups, toSummaries } from "@/server/followups";
 import { slackEnabled } from "@/server/slack";
 
 type Agent = typeof schema.agents.$inferSelect;
@@ -94,7 +95,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const chatWidth = parseStoredWidth(jar.get(CHAT_WIDTH_COOKIE)?.value ?? null);
   const workspaceHidden = jar.get(WORKSPACE_HIDDEN_COOKIE)?.value === "1";
   const db = getDb();
-  const [[owner], chat, approvals, runs, recipes, ownerData, rail] = await Promise.all([
+  const [[owner], chat, approvals, runs, recipes, ownerData, rail, followups] = await Promise.all([
     db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, agent.ownerId)),
     loadChat(id),
     loadPendingApprovals(id),
@@ -106,6 +107,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       .orderBy(desc(schema.recipes.updatedAt)),
     access === "owner" ? loadOwnerData(agent, user.email, Boolean(user.admin)) : null,
     loadRail(user.id, user.name || user.email),
+    pendingFollowups([id]),
   ]);
   const waiting = await loadWaitingRuns(runs.map((r) => r.id));
   const recipeTitles = new Map(recipes.map((r) => [r.id, r.title.title]));
@@ -136,6 +138,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
         waiting: waiting.has(r.id),
       }))}
       recipes={recipes.map((r) => ({ id: r.id, title: r.title.title, active: r.active }))}
+      followups={toSummaries(followups, { format: formatWhen, canCancel: () => access === "owner" })}
       ownerData={ownerData}
       rail={rail}
     />

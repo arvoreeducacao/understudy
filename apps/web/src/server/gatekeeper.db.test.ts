@@ -413,3 +413,33 @@ test("the restricted gatekeeper address serves only the three outside-sender too
   const normal = await mcp("/api/mcp", "tools/list", {});
   assert.ok(normal.result.tools.some((tool: { name: string }) => tool.name === "share_file"));
 });
+
+test("the owner's conversation books follow-ups through the gatekeeper, and an outside sender's turn cannot", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const listed = await mcp("/api/mcp", "tools/list", {});
+  const names = listed.result.tools.map((tool: { name: string }) => tool.name);
+  for (const name of ["schedule_followup", "list_followups", "cancel_followup"]) assert.ok(names.includes(name), name);
+  const booked = await rpc("schedule_followup", { when: "2h", note: "See whether the customer answered the quote" });
+  assert.match(booked, /^booked: /);
+  const followupId = booked.match(/\[followupId: (\S+)\]/)?.[1];
+  assert.ok(followupId);
+  assert.match(await rpc("list_followups", {}), new RegExp(followupId));
+  const restricted = await mcp("/api/mcp/restricted", "tools/call", { name: "schedule_followup", arguments: { when: "2h", note: "Call me back" } });
+  assert.match(restricted.result.content[0].text, /someone other than your owner/);
+  await db.delete(schema.agentChannels).where(eq(schema.agentChannels.id, "chn_gk_fu"));
+  await db.insert(schema.agentChannels).values({ id: "chn_gk_fu", agentId: ids.agent, kind: "telegram", address: "gk-fu-bot" });
+  await db.insert(schema.channelThreads).values({ id: "cth_gk_fu_outside", agentId: ids.agent, channelId: "chn_gk_fu", peer: "333333", trusted: false });
+  const { forgetTurn, startTurn } = await import("./channels/turns");
+  try {
+    await startTurn(ids.agent, "cth_gk_fu_outside");
+    assert.match(await rpc("schedule_followup", { when: "2h", note: "Call me back about the refund" }), /someone other than your owner/);
+    assert.match(await rpc("cancel_followup", { id: followupId }), /someone other than your owner/);
+  } finally {
+    forgetTurn(ids.agent);
+    await db.delete(schema.agentChannels).where(eq(schema.agentChannels.id, "chn_gk_fu"));
+  }
+  assert.match(await rpc("cancel_followup", { id: followupId }), /^cancelled/);
+  const rows = await db.select().from(schema.followups).where(eq(schema.followups.agentId, ids.agent));
+  assert.deepEqual(rows.map((row) => row.status), ["cancelled"]);
+});

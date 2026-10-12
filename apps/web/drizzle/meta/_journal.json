@@ -218,6 +218,13 @@
       "when": 1791769456520,
       "tag": "0030_channel_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791772732866,
+      "tag": "0031_followups",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import { taskLink } from "../task-tools";
 import { currentConversation, flushReplies, relayActivityText, relayDelta, relayReply } from "../channels/relay";
 import { appendPending } from "../channels/store";
 import { currentTurn, startTurn } from "../channels/turns";
+import { noteTurnWake } from "../followups";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
@@ -235,6 +236,7 @@ export const computerHandlers: Handlers = {
   },
 
   async turn(_hub, agentId, message) {
+    noteTurnWake(agentId, message.followup);
     await startTurn(agentId, message.origin);
   },
 

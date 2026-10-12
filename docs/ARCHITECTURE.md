@@ -57,6 +57,16 @@ After a successful chat turn with either signal, and when the brain did not alre
 
 `propose_task` takes a draft (title, why, steps with `ask_first`, inputs, an optional cron) and stores it in `task_proposals` after the usual recipe normalization, so commit-like steps ask first. It refuses a routine that is already a task or that the owner dismissed in the last 30 days, updates a waiting suggestion for the same routine instead of adding another, and keeps at most three waiting. The chat shows it as a card and, when Slack is on, it goes to the active Slack thread or as a direct message to the owner with Save task and Not now buttons. Only the owner can answer. Saving creates the task with the suggested schedule turned on (the first runs still ask before every step); "Save and edit" creates it paused and opens the editor. Nothing is saved without that choice.
 
+## Follow-ups
+
+An understudy can book its own next look at something with the gatekeeper tools `schedule_followup` (when, note, optional task, optional progress), `list_followups` and `cancel_followup`. There is no separate scheduler: rows in `followups` are fired by the same panel scheduler that runs task schedules, on its 30-second sync.
+
+- **When**: a delay ("2h", "1h 30m", "3d") or a time, read in `UNDERSTUDY_TIMEZONE` unless it carries an offset. At least 10 minutes and at most 60 days ahead, and at most 20 waiting per understudy.
+- **Where it wakes**: in the conversation it was booked from (a trusted channel thread keeps its origin), or as a normal run of a task (`trigger: "followup"`) when it was booked during that task's run or names one. A paused task wakes the chat instead. The wake runs as the owner's understudy with the usual approvals, rules and connector permissions; the note reaches the brain quoted as data that approves nothing.
+- **Chains**: a follow-up booked while handling a wake continues that wake's chain. The computer reports the wake in its `turn` message (`followup`), and runs are matched by run id. Rebooking without `progress` counts as an empty wake; at the third in a row the booking is refused, the chain's waiting follow-ups stop and the owner is told.
+- **Who may book**: never a turn answering someone other than the owner; the restricted gatekeeper address does not serve these tools either.
+- **Panel**: upcoming follow-ups appear on the agent card, in the Tasks tab, in Today and in the run history, where the owner can cancel them. Booking and waking each leave a line in the chat.
+
 ## Always on
 
 Understudies do not depend on their owner being online. The computer runs 24/7 on the host; the panel's scheduler and triggers start runs; approvals wait in the panel (and optionally Slack) until answered, and the run resumes from the approval.

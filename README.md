@@ -34,7 +34,7 @@ Everything above runs locally with the scripted brain and fictional data (Northw
 
 - **One computer per understudy.** A Linux desktop with a home screen that shows the agent, Chromium, a terminal, LibreOffice, Python with pandas and DuckDB, OCR, pandoc, ffmpeg, image tools and HyperFrames for video. Blender, GIMP and Inkscape install on demand. It works from the terminal first and opens apps on screen to show results. It installs what else it needs.
 - **Learns by watching.** Record a task in the understudy's browser, or from your own Chrome with the extension, narrating by voice or text. Or just describe it.
-- **Runs on its own.** Schedules, per-task webhooks and email addresses, and watching a page for changes.
+- **Runs on its own.** Schedules, per-task webhooks and email addresses, watching a page for changes, and follow-ups it books itself ("check again in 2 hours"), which the owner sees and can cancel.
 - **Asks before the irreversible.** The computer inspects the real element before every click and pauses pay, send, submit and delete-like actions for the owner. Owners add their own rules: maximum amounts, allowed email domains, blocked sites.
 - **Talks where you are.** Chat in the panel, DMs and mentions on Slack, a Telegram bot of its own, the owner's own WhatsApp, approvals from Slack, Telegram and WhatsApp, a daily briefing, push notifications on the phone.
 - **Works with others.** Understudies message each other and hand tasks over; owners talk to several at once in rooms.
