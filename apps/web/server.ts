@@ -70,6 +70,7 @@ async function main() {
   hub.watcher.start();
   hub.idle.start();
   startTelegramPolling(hub);
+  hub.whatsapp.restore().catch((error) => console.error("whatsapp_restore_error", error));
   const briefings = startBriefings();
   const extension = createExtensionRoutes(hub);
   const fileRoutes = createFileRoutes(hub);

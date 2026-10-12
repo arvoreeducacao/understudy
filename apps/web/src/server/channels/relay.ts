@@ -8,6 +8,7 @@ import type { ChannelAdapter } from "./adapter";
 import { slackAdapter } from "./slack/adapter";
 import { telegramAdapter } from "./telegram/adapter";
 import { currentTurn } from "./turns";
+import { whatsappAdapter } from "./whatsapp/adapter";
 import { activeRoute, appendPending, pendingThreads, stalePendingThreads, takePending, type ActiveRoute } from "./store";
 
 export const STALE_PENDING_MS = 90 * 1000;
@@ -15,6 +16,7 @@ export const STALE_PENDING_MS = 90 * 1000;
 const adapters = new Map<ChannelKind, ChannelAdapter>([
   ["slack", slackAdapter()],
   ["telegram", telegramAdapter()],
+  ["whatsapp", whatsappAdapter()],
 ]);
 
 export function registerAdapter(adapter: ChannelAdapter) {

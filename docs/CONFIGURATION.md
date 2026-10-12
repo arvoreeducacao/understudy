@@ -32,7 +32,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_INBOUND_EMAIL_DOMAIN` | Domain whose mail starts tasks; each task gets `<task>.<random>@<domain>`. Empty turns inbound email off |
 | `UNDERSTUDY_INBOUND_SNS_TOPIC_ARN`, `UNDERSTUDY_INBOUND_S3_BUCKET` | With Amazon SES receiving: the only SNS topic and S3 bucket the panel accepts mail from |
 | `UNDERSTUDY_INBOUND_TOKEN` | With any other provider: bearer token (24+ characters) for posting raw MIME to `/api/inbound/email` |
-| `UNDERSTUDY_CHANNELS` | Per-understudy conversation channels owners may turn on; default `telegram`. See [CHANNELS.md](CHANNELS.md) |
+| `UNDERSTUDY_CHANNELS` | Per-understudy conversation channels owners may turn on; default `telegram,whatsapp`. See [CHANNELS.md](CHANNELS.md) |
 | `UNDERSTUDY_TELEGRAM_POLL` | `1` makes the panel poll Telegram instead of registering a webhook; automatic when `UNDERSTUDY_PUBLIC_URL` is not HTTPS |
 | `UNDERSTUDY_TELEGRAM_API_URL` | A self-hosted Telegram Bot API server; default `https://api.telegram.org` |
 

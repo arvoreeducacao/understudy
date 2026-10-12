@@ -6,9 +6,10 @@ import { getHub } from "@/server/hub-access";
 import { discardHeld, releaseHeld, setChannelSenders, setUnknownSenders } from "@/server/channels/settings";
 import { channelEnabled } from "@/server/channels/enabled";
 import { connectTelegram, disconnectTelegram, forgetTelegramOwner } from "@/server/channels/telegram/connect";
+import { connectWhatsApp, disconnectWhatsApp, whatsappView } from "@/server/channels/whatsapp/connect";
 import { ownAgent } from "./shared";
 
-const KINDS: ChannelKind[] = ["telegram"];
+const KINDS: ChannelKind[] = ["telegram", "whatsapp"];
 
 function kindOf(value: unknown): ChannelKind | null {
   return KINDS.find((kind) => kind === value) ?? null;
@@ -68,4 +69,24 @@ export async function relinkTelegramOwner(agentId: string) {
   await forgetTelegramOwner(agent.id);
   refresh(agent.id);
   return { ok: true };
+}
+
+export async function setWhatsAppChannel(agentId: string, enabled: boolean) {
+  const { agent } = await ownAgent(agentId);
+  const hub = getHub();
+  if (!hub) return { ok: false as const };
+  if (!enabled) {
+    await disconnectWhatsApp(hub, agent.id);
+    refresh(agent.id);
+    return { ok: true as const };
+  }
+  if (!channelEnabled("whatsapp")) return { ok: false as const };
+  await connectWhatsApp(hub, agent.id);
+  refresh(agent.id);
+  return { ok: true as const };
+}
+
+export async function whatsappStatus(agentId: string) {
+  const { agent } = await ownAgent(agentId);
+  return whatsappView(getHub(), agent.id);
 }

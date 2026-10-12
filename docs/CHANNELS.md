@@ -7,10 +7,10 @@ A channel is a place outside the panel where people hold a conversation with an 
 | Slack | Built in | `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` (or pasted by an admin) | Writes to the app; their Slack account is matched to their panel account |
 | Telegram | Built in | Nothing (reaches `api.telegram.org`) | Creates a bot with @BotFather, pastes its token, presses Start in the bot |
 | Microsoft Teams | Documented adapter | An Azure Bot registration | Installs the app in Teams |
-| WhatsApp | Documented adapter | A WhatsApp Business Cloud API number | Adds their phone number |
+| WhatsApp | Built in, opt-in | Nothing | Links their own WhatsApp with a QR code, like WhatsApp Web |
 | SMS | Documented adapter | A Twilio (or compatible) number | Adds their phone number |
 
-`UNDERSTUDY_CHANNELS` (default `telegram`) lists the per-understudy channels owners may turn on. Remove one to hide it from Settings and refuse its traffic. Slack is configured for the whole workspace instead (see [CONFIGURATION.md](CONFIGURATION.md)).
+`UNDERSTUDY_CHANNELS` (default `telegram,whatsapp`) lists the per-understudy channels owners may turn on. Remove one to hide it from Settings and refuse its traffic. Slack is configured for the whole workspace instead (see [CONFIGURATION.md](CONFIGURATION.md)).
 
 Email is not a conversation channel. To let an understudy read, search and draft in its owner's mailbox, connect a mail server as a connector; tasks can still start from an email address of their own.
 
@@ -18,8 +18,8 @@ Email is not a conversation channel. To let an understudy read, search and draft
 
 Every channel sorts the person writing into one of three groups, per understudy:
 
-- **The owner**, recognised by an identity the channel can prove: the Slack account matched to the panel account, or the Telegram account that opened the bot with the one-time Start link shown in Settings. The owner's message is a normal chat turn.
-- **People the owner allowed** (Telegram usernames or ids, phone numbers in E.164; a username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no built-in tools and only the restricted gatekeeper address, which offers nothing but asking for approval and telling the owner (labelled with who the understudy was answering, and rate limited). The answer goes back to them.
+- **The owner**, recognised by an identity the channel can prove: the Slack account matched to the panel account, the Telegram account that opened the bot with the one-time Start link shown in Settings, or the owner's own WhatsApp "Message yourself" chat. The owner's message is a normal chat turn.
+- **People the owner allowed** (Telegram usernames or ids, phone numbers with country code for WhatsApp, matched on the number and never on the display name; a Telegram username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no built-in tools and only the restricted gatekeeper address, which offers nothing but asking for approval and telling the owner (labelled with who the understudy was answering, and rate limited). The answer goes back to them.
 - **Anyone else** is held for the owner (Settings › Channels lists it with Let it through, Always allow and Discard, and the owner gets a note in the chat and a push) or dropped, as the owner chooses.
 
 ## How a conversation flows
@@ -36,11 +36,25 @@ Every channel sorts the person writing into one of three groups, per understudy:
 - Only private chats are answered. Photos and documents up to 20 MB (the Bot API download limit) land in the understudy's inbox; replies attach files up to 45 MB each.
 - `UNDERSTUDY_TELEGRAM_API_URL` points at a self-hosted Bot API server if you run one.
 
+## WhatsApp
+
+The owner links their own WhatsApp account to one understudy, the way WhatsApp Web is linked: Settings › Channels › WhatsApp shows a QR code to scan from WhatsApp › Linked devices. The panel then holds a linked-device session for that account with [Baileys](https://github.com/WhiskeySockets/Baileys), the maintained open-source WhatsApp Web library (MIT).
+
+- **It is the person's own account, through an unofficial protocol.** It is not WhatsApp's business API, and WhatsApp may restrict or ban accounts that automate messages. The connect screen says so, and it is off until the owner turns it on for one understudy. An admin can remove `whatsapp` from `UNDERSTUDY_CHANNELS` to hide it.
+- **Who it listens to.** The owner talks to the understudy in their own "Message yourself" chat. People the owner lists by number reach it as someone else, and the understudy's replies to them go out from the owner's own number, written by the AI. Everything else, including every other conversation on the account, is ignored by default and never stored. The owner can choose to hold messages from unlisted people instead.
+- **Approvals.** An approval raised during a WhatsApp conversation arrives in the owner's own chat. The owner replies `1` to approve or `2` to deny. When more than one request is waiting, a reply without its three-letter code answers nothing and the understudy asks which one.
+- **Session.** The linked-device keys are stored in `channel_secrets`, encrypted with `UNDERSTUDY_SECRET_KEY`, and the panel reconnects them after a restart.
+  - A dropped connection retries with backoff.
+  - If WhatsApp ends the link (logged out from the phone, or the session is refused), the keys are deleted and the owner is told in the panel chat, on Slack and by push.
+- **Pace.** Before each message it shows "typing" for a time proportional to the length (about one to six seconds). It sends at most about 15 messages a minute per account, one at a time. It never marks the account online, so the phone keeps getting notifications.
+- **Limits.** Group chats, broadcasts and channels are ignored. Received photos, documents, voice notes and videos up to 20 MB land in the understudy's inbox (the download stops as soon as it passes the limit, whatever size the sender declared); replies attach files up to 30 MB.
+- **Deployment.** Sessions live in the panel process, so run one panel replica, or pin WhatsApp to one replica.
+
 ## Writing an adapter
 
 An adapter lives in `apps/web/src/server/channels/<kind>/` and is registered in `relay.ts`. Every reply the understudy writes goes through one place: `currentConversation` picks the conversation that spoke last, across the buffered routes in `channel_routes` and every adapter's live conversation, and `relayReply` hands the text to that adapter. An adapter implements one of two shapes:
 
-- **Buffered** (Telegram, and the documented WhatsApp, Teams and SMS): `send(hub, { agentId, agentName, channel, thread, reply })` delivers the turn's text and files (`readReplyFiles`) to `thread.peer`, split to the provider's limit, then calls `recordSent`. Optionally `sendApproval(hub, notice)` puts the approval in front of the owner with a way to answer that proves it is the owner.
+- **Buffered** (Telegram, WhatsApp, and the documented Teams and SMS): `send(hub, { agentId, agentName, channel, thread, reply })` delivers the turn's text and files (`readReplyFiles`) to `thread.peer`, split to the provider's limit, then calls `recordSent`. Optionally `sendApproval(hub, notice)` puts the approval in front of the owner with a way to answer that proves it is the owner.
 - **Live** (Slack): `live.activeSince(agentId)` says when its conversation last spoke; `say` posts each reply as it comes, `delta` streams a reply being written, `activity` shows what the understudy is doing, `approval` posts the approval in the conversation, `panelSaid` mirrors a message typed in the panel, and `runStarted`/`runFinished` keep a task's progress in place.
 
 `ready()` says whether the server settings it needs are present and the kind is enabled.
@@ -52,14 +66,6 @@ Inbound, the adapter's endpoint verifies the provider, maps the destination to a
 - Server: `UNDERSTUDY_TEAMS_APP_ID`, `UNDERSTUDY_TEAMS_APP_PASSWORD` and `UNDERSTUDY_TEAMS_TENANT_ID` from an Azure Bot registration (single tenant), messaging endpoint `https://<panel>/api/channels/teams`. One registration serves every understudy; the owner picks which understudy answers by installing a per-understudy app manifest the panel generates.
 - Inbound: validate the Bot Framework JWT (issuer, audience = app id, signing keys from the OpenID metadata, `serviceUrl` claim) before reading the activity. Owner = the Entra ID object id linked once from Settings with a one-time code, like Telegram's Start link. Allowed list = Entra ID object ids or user principal names.
 - Outbound: reply to the activity's `serviceUrl` and conversation id with an app token from `login.microsoftonline.com`; files go as attachments through a consent card in personal chats. Approvals are an Adaptive Card with Approve and Deny actions whose invoke is checked against the owner's object id.
-
-### WhatsApp (documented)
-
-- Use the official WhatsApp Business Platform Cloud API, directly with Meta or through a provider (360dialog, Twilio) that exposes the same webhooks. Unofficial WhatsApp Web libraries break the WhatsApp terms and get numbers banned; Understudy will not ship one.
-- Server: `UNDERSTUDY_WHATSAPP_TOKEN` (a system user token), `UNDERSTUDY_WHATSAPP_APP_SECRET`, `UNDERSTUDY_WHATSAPP_VERIFY_TOKEN` and `UNDERSTUDY_WHATSAPP_PHONE_NUMBER_ID`, webhook `https://<panel>/api/channels/whatsapp`. One business number per installation; each contact talks to one understudy at a time and switches with a short command, since a number per understudy multiplies phone lines, display name reviews and provider fees.
-- Inbound: answer the `hub.verify_token` challenge, check `X-Hub-Signature-256` with the app secret, then read `messages`. Owner = the phone number that sends a one-time code shown in Settings. Media is fetched with the token from the media id.
-- Outbound: free-form replies only within 24 hours of the contact's last message; anything later needs a template approved by Meta, so late replies wait in the panel. Approvals use interactive reply buttons, checked against the owner's number.
-- Meta's terms do not allow general-purpose AI assistants as the product itself; an understudy working for a business and its contacts is the allowed use, so describe it that way when registering.
 
 ### SMS (documented)
 
