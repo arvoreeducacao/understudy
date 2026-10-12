@@ -87,6 +87,8 @@ export const en = {
     telegramSendersHint: "Telegram usernames or numeric ids, separated by commas. Their messages reach the understudy as requests from someone else, never as yours.",
     telegramPaired: (name: string) => `Linked. Write to ${name} here like in the panel.`,
     telegramNotOwner: "Only the owner can answer this.",
+    whileAnswering: (who: string) => `While answering ${who}: `,
+    someoneElse: "someone other than you",
     kinds: { telegram: "Telegram", teams: "Microsoft Teams", whatsapp: "WhatsApp", sms: "SMS" } as Record<string, string>,
     via: (kind: string) => `via ${kind}`,
     held: (kind: string, peer: string) => `A message by ${kind} from ${peer} is waiting for you in Settings › Channels.`,

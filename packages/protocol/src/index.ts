@@ -68,4 +68,5 @@ export const PATHS = {
   hostSocket: "/api/ws/host",
   viewerSocket: "/api/ws/viewer",
   gatekeeperMcp: "/api/mcp",
+  gatekeeperMcpRestricted: "/api/mcp/restricted",
 } as const;

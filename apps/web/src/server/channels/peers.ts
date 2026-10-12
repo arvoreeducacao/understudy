@@ -13,6 +13,13 @@ export function cleanPeerList(kind: ChannelKind, value: string) {
   return [...new Set(entries)].slice(0, 50).join(", ");
 }
 
+export function bindPeer(allowed: string | null, handle: string, id: string) {
+  const rules = parseSenderList(allowed);
+  const name = handle.trim().toLowerCase().replace(/^@/, "");
+  if (!name || !rules.includes(name)) return null;
+  return [...new Set(rules.map((rule) => (rule === name ? id : rule)))].join(", ");
+}
+
 export function peerListed(kind: ChannelKind, ids: string[], allowed: string | null) {
   const rules = parseSenderList(allowed);
   const wanted = ids.map((id) => id.trim().toLowerCase().replace(/^@/, "")).filter(Boolean);

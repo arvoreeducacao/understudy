@@ -8,3 +8,7 @@ export function computerSocketUrl(serverUrl: string, agentId: string): string {
 export function gatekeeperUrl(serverUrl: string): string {
   return `${serverUrl.replace(/\/+$/, "")}${PATHS.gatekeeperMcp}`;
 }
+
+export function restrictedGatekeeperUrl(serverUrl: string): string {
+  return `${serverUrl.replace(/\/+$/, "")}${PATHS.gatekeeperMcpRestricted}`;
+}

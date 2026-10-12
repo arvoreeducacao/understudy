@@ -34,15 +34,17 @@ export async function deliverToAgent(
   const said = input.text.slice(0, 8000);
   const who = input.thread.peerName ? `${input.thread.peerName} (${input.thread.peer})` : input.thread.peer;
   await hub.addMessage(input.agentId, "user", said, null, input.trusted ? input.owner.id : undefined, input.kind, undefined, files.length ? files : undefined, undefined, input.trusted ? undefined : senderLabel(input.thread));
-  await setRoute(input.agentId, input.thread.id, new Date(now));
   const message = {
     type: "chat" as const,
     text: said,
     from: input.trusted ? input.owner.name : input.thread.peer,
     ...(input.trusted ? {} : { external: { channel: input.kind, sender: who } }),
+    origin: input.thread.id,
     ...(files.length ? { attachments: files } : {}),
   };
-  return hub.deliver(input.agentId, message, { source: "channel", channelThreadId: input.thread.id });
+  const result = await hub.deliver(input.agentId, message, { source: "channel", channelThreadId: input.thread.id });
+  if (result.status === "sent" && input.trusted) await setRoute(input.agentId, input.thread.id, new Date(now));
+  return result;
 }
 
 export function heldCopy(input: { subject: string; text: string; date: string | null; attachments: ParsedAttachment[] }): HeldMessage {

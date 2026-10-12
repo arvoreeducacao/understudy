@@ -21,6 +21,7 @@ const STRANGER_TG = 222222;
 type Call = { method: string; body: Record<string, unknown> };
 const calls: Call[] = [];
 let nextMessageId = 500;
+let botId = 987654321;
 
 async function fakeTelegram(input: string | URL | Request, init?: RequestInit) {
   const target = String(input);
@@ -29,7 +30,7 @@ async function fakeTelegram(input: string | URL | Request, init?: RequestInit) {
   const body = init?.body instanceof FormData ? Object.fromEntries([...init.body.entries()].map(([key, value]) => [key, typeof value === "string" ? value : `file:${(value as File).name}`])) : JSON.parse(String(init?.body ?? "{}"));
   calls.push({ method, body });
   const results: Record<string, unknown> = {
-    getMe: { id: 987654321, is_bot: true, username: "ada_example_bot" },
+    getMe: { id: botId, is_bot: true, username: "ada_example_bot" },
     getFile: { file_path: "documents/file_1.pdf", file_size: 13 },
   };
   return Response.json({ ok: true, result: results[method] ?? (method.startsWith("send") ? { message_id: nextMessageId++ } : true) });
@@ -73,6 +74,7 @@ beforeEach(async () => {
   calls.length = 0;
   const { getDb, schema } = await import("@/lib/db");
   await getDb().delete(schema.messages).where(eq(schema.messages.agentId, ids.agent));
+  botId = 987654321;
   const { disconnectTelegram, connectTelegram } = await import("./connect");
   await disconnectTelegram(ids.agent);
   assert.deepEqual(await connectTelegram(ids.agent, TOKEN), { ok: true, username: "ada_example_bot" });
@@ -103,7 +105,7 @@ function message(fromId: number, text: string, extra: Record<string, unknown> = 
 
 async function addressed() {
   const { channelByAddress } = await import("../store");
-  return (await channelByAddress("telegram", "987654321"))!;
+  return (await channelByAddress("telegram", String(botId)))!;
 }
 
 async function send(hub: unknown, update: unknown) {
@@ -146,6 +148,7 @@ test("the owner links their account once, then talks to the understudy and gets 
   assert.deepEqual([chat.text, chat.from, chat.external], ["What is on my calendar?", "Maya", undefined]);
 
   const { computerHandlers } = await import("../../hub/computer-handlers");
+  await computerHandlers.turn(hub, ids.agent, { type: "turn", origin: (chat as unknown as { origin: string }).origin } as never);
   await computerHandlers.chat(hub, ids.agent, { type: "chat", role: "understudy", text: "Two meetings today." } as never);
   await computerHandlers.state(hub, ids.agent, { type: "state", state: "calm" } as never);
   await settle(100);
@@ -242,4 +245,56 @@ test("Slack and Telegram share one reply path: the conversation that spoke last 
   const { getDb, schema } = await import("@/lib/db");
   await getDb().delete(schema.slackThreads).where(eq(schema.slackThreads.agentId, ids.agent));
   assert.equal(await currentConversation(ids.agent), null);
+});
+
+test("a reply goes to the conversation its turn came from, never to whoever spoke last", { skip }, async () => {
+  const { hub, ws } = await connected();
+  await pair(hub);
+  const { setChannelSenders } = await import("../settings");
+  await setChannelSenders(ids.agent, "telegram", "sam_example");
+  assert.equal(await send(hub, message(STRANGER_TG, "hi there")), "delivered");
+  const outside = (ws.received.filter((m) => m.type === "chat").at(-1) as { origin?: string }).origin;
+  assert.ok(outside);
+  const { activeRoute } = await import("../store");
+  assert.equal(await activeRoute(ids.agent), null);
+  const { computerHandlers } = await import("../../hub/computer-handlers");
+  calls.length = 0;
+  await computerHandlers.turn(hub, ids.agent, { type: "turn" } as never);
+  await computerHandlers.chat(hub, ids.agent, { type: "chat", role: "understudy", text: "The owner's private answer." } as never);
+  const { queueReplyFile } = await import("../relay");
+  assert.equal(await queueReplyFile(ids.agent, { path: "outbox/private.pdf", name: "private.pdf", size: 10, mime: "application/pdf" }), false);
+  await computerHandlers.state(hub, ids.agent, { type: "state", state: "calm" } as never);
+  await computerHandlers.turn(hub, ids.agent, { type: "turn", origin: outside } as never);
+  await computerHandlers.chat(hub, ids.agent, { type: "chat", role: "understudy", text: "Hello Sam." } as never);
+  await computerHandlers.state(hub, ids.agent, { type: "state", state: "calm" } as never);
+  await settle(100);
+  const texts = calls.filter((call) => call.method === "sendMessage").map((call) => [call.body.chat_id, call.body.text]);
+  assert.deepEqual(texts, [[String(STRANGER_TG), "Hello Sam."]]);
+  assert.equal(await activeRoute(ids.agent), null);
+  await send(hub, message(OWNER_TG, "Back to me"));
+  assert.ok(await activeRoute(ids.agent));
+});
+
+test("a listed username is pinned to the first account that uses it", { skip }, async () => {
+  const { hub } = await connected();
+  await pair(hub);
+  const { setChannelSenders, channelSettings } = await import("../settings");
+  await setChannelSenders(ids.agent, "telegram", "sam_example, 333333");
+  assert.equal(await send(hub, message(STRANGER_TG, "first contact")), "delivered");
+  assert.equal((await channelSettings(ids.agent)).telegram.senders, `${STRANGER_TG}, 333333`);
+  const impostor = { update_id: updateId++, message: { message_id: updateId, from: { id: 444444, first_name: "Other", username: "sam_example" }, chat: { id: 444444, type: "private" }, text: "it's me" } };
+  assert.equal(await send(hub, impostor), "held");
+});
+
+test("a used or replaced link code never works again, even after changing the bot", { skip }, async () => {
+  const { hub } = await connected();
+  const { channelSettings } = await import("../settings");
+  const first = new URL((await channelSettings(ids.agent)).telegram.pairLink as string).searchParams.get("start") as string;
+  botId = 123123123;
+  const { connectTelegram } = await import("./connect");
+  assert.equal((await connectTelegram(ids.agent, TOKEN)).ok, true);
+  const second = new URL((await channelSettings(ids.agent)).telegram.pairLink as string).searchParams.get("start") as string;
+  assert.notEqual(first, second);
+  assert.notEqual(await send(hub, message(OWNER_TG, `/start ${first}`)), "paired");
+  assert.equal(await send(hub, message(OWNER_TG, `/start ${second}`)), "paired");
 });

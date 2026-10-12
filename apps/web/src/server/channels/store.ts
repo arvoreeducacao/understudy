@@ -42,6 +42,14 @@ export async function setRoute(agentId: string, threadId: string, now = new Date
   await db.update(schema.slackThreads).set({ expiresAt: now }).where(and(eq(schema.slackThreads.agentId, agentId), gt(schema.slackThreads.expiresAt, now)));
 }
 
+export async function routeIfTrusted(agentId: string, threadId: string) {
+  const [thread] = await getDb()
+    .select({ trusted: schema.channelThreads.trusted })
+    .from(schema.channelThreads)
+    .where(and(eq(schema.channelThreads.id, threadId), eq(schema.channelThreads.agentId, agentId)));
+  if (thread?.trusted) await setRoute(agentId, threadId);
+}
+
 export async function clearRoute(agentId: string) {
   await getDb().delete(schema.channelRoutes).where(eq(schema.channelRoutes.agentId, agentId));
 }

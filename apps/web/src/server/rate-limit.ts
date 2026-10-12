@@ -25,6 +25,7 @@ export class RateLimiter {
 const LIMITS: Record<string, [number, number]> = {
   frame: [30, 60],
   chat: [5, 50],
+  turn: [5, 50],
   activity: [5, 50],
   recorded: [20, 200],
   approval_request: [1, 5],

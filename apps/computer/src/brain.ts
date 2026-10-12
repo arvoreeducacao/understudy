@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
 import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
-import { gatekeeperUrl } from "./endpoints.ts";
+import { gatekeeperUrl, restrictedGatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
 
@@ -51,6 +51,7 @@ export type TurnRequest = {
   prompt: string;
   system: string;
   resume?: string | null;
+  restricted?: boolean;
   onEvent: (event: BrainEvent) => void;
 };
 
@@ -130,7 +131,13 @@ export function validModel(model: string | undefined | null): string | undefined
   return value && MODEL_NAME.test(value) ? value : undefined;
 }
 
-export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string): string[] {
+export const OUTSIDER_TOOLS = ["mcp__gatekeeper__request_approval", "mcp__gatekeeper__wait_for_approval", "mcp__gatekeeper__notify_owner"];
+
+export function restrictedMcpConfig(config: BrainConfig) {
+  return { mcpServers: { gatekeeper: { type: "http", url: restrictedGatekeeperUrl(config.serverUrl), headers: { Authorization: `Bearer ${config.token}` } } } };
+}
+
+export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string, restricted = false): string[] {
   const args = [
     "-p",
     "--output-format",
@@ -142,6 +149,7 @@ export function claudeArgs(mcpConfig: string, system: string, resume?: string | 
     "--strict-mcp-config",
     "--permission-mode",
     "bypassPermissions",
+    ...(restricted ? ["--tools", "", "--allowedTools", ...OUTSIDER_TOOLS] : []),
     "--disallowedTools",
     ...PROTECTED_TOOL_RULES,
     "--append-system-prompt",
@@ -355,7 +363,7 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
   mkdirSync(config.workDir, { recursive: true });
   let child: ChildProcess;
   if (request.brain === "claude") {
-    child = spawn("claude", claudeArgs(JSON.stringify(claudeMcpConfig(config)), request.system, request.resume, request.model), {
+    child = spawn("claude", claudeArgs(JSON.stringify(request.restricted ? restrictedMcpConfig(config) : claudeMcpConfig(config)), request.system, request.resume, request.model, request.restricted), {
       cwd: config.workDir,
       env: claudeEnv(process.env, config.home),
       stdio: ["pipe", "pipe", "pipe"],

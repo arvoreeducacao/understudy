@@ -29,7 +29,8 @@ export async function connectTelegram(agentId: string, rawToken: string): Promis
   const mode = telegramMode(env.publicUrl);
   const existing = await agentChannel(agentId, "telegram");
   const sameBot = existing?.address === address;
-  const settings = { ...(sameBot ? telegramSettings(existing) : { pairVersion: 1 }), username: me.result.username, mode };
+  const previous = existing ? telegramSettings(existing) : null;
+  const settings = { ...(sameBot && previous ? previous : { pairVersion: (previous?.pairVersion ?? 0) + 1 }), username: me.result.username, mode };
   const id = existing?.id ?? newId("chn");
   if (existing) {
     await db.update(schema.agentChannels).set({ address, secret: seal(token), settings, updatedAt: new Date() }).where(eq(schema.agentChannels.id, existing.id));

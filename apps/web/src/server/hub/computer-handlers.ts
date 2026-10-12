@@ -7,6 +7,8 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { taskLink } from "../task-tools";
 import { currentConversation, flushReplies, relayActivityText, relayDelta, relayReply } from "../channels/relay";
+import { appendPending } from "../channels/store";
+import { currentTurn, startTurn } from "../channels/turns";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
@@ -59,8 +61,15 @@ export const computerHandlers: Handlers = {
   async chat(hub, agentId, message) {
     if (message.roomId) return hub.rooms.agentSaid(agentId, message.roomId, String(message.text ?? ""));
     const text = String(message.text ?? "").slice(0, 8000);
-    const conversation = message.runId ? null : await currentConversation(agentId);
     const streamId = message.runId ? undefined : message.streamId;
+    const origin = message.runId ? null : currentTurn(agentId);
+    if (origin) {
+      await hub.addMessage(agentId, "agent", text, null, undefined, origin.kind, streamId);
+      await appendPending(origin.threadId, { text }).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
+      return;
+    }
+    const found = message.runId ? null : await currentConversation(agentId);
+    const conversation = found && !found.route ? found : null;
     await hub.addMessage(agentId, "agent", text, message.runId, undefined, conversation?.kind, streamId);
     if (!conversation) return;
     const relayed = relayReply(conversation, agentId, text, streamId).catch((error) => log("channel_relay_error", { agentId, kind: conversation.kind, error: String(error) }));
@@ -71,7 +80,7 @@ export const computerHandlers: Handlers = {
     if (message.roomId) return hub.rooms.delta(agentId, message.roomId, message.streamId, String(message.text ?? "").slice(0, 8000));
     const text = String(message.text ?? "").slice(0, 8000);
     hub.broadcast(agentId, { type: "chat_delta", streamId: message.streamId, text });
-    relayDelta(agentId, message.streamId, text).catch((error) => log("channel_stream_error", { agentId, error: String(error) }));
+    if (!currentTurn(agentId)) relayDelta(agentId, message.streamId, text).catch((error) => log("channel_stream_error", { agentId, error: String(error) }));
   },
 
   terminal_output(hub, agentId, message) {
@@ -107,7 +116,7 @@ export const computerHandlers: Handlers = {
     const text = String(message.text ?? "").slice(0, 2000);
     if (message.roomId) return hub.rooms.activity(agentId, message.roomId, text);
     await hub.addMessage(agentId, "activity", text, message.runId);
-    relayActivityText(agentId, text).catch((error) => log("channel_status_error", { agentId, error: String(error) }));
+    if (!currentTurn(agentId)) relayActivityText(agentId, text).catch((error) => log("channel_status_error", { agentId, error: String(error) }));
   },
 
   async recorded(hub, agentId, message) {
@@ -223,6 +232,10 @@ export const computerHandlers: Handlers = {
 
   async room_turn_done(hub, agentId, message) {
     await hub.rooms.turnDone(agentId, message.roomId, message.ok, message.error);
+  },
+
+  async turn(_hub, agentId, message) {
+    await startTurn(agentId, message.origin);
   },
 
   pong() {},

@@ -7,6 +7,7 @@ import type { Hub } from "../hub";
 import type { ChannelAdapter } from "./adapter";
 import { slackAdapter } from "./slack/adapter";
 import { telegramAdapter } from "./telegram/adapter";
+import { currentTurn } from "./turns";
 import { activeRoute, appendPending, pendingThreads, stalePendingThreads, takePending, type ActiveRoute } from "./store";
 
 export const STALE_PENDING_MS = 90 * 1000;
@@ -77,9 +78,9 @@ export async function queueReplyText(route: ActiveRoute, text: string) {
 }
 
 export async function queueReplyFile(agentId: string, attachment: Attachment) {
-  const route = await activeRoute(agentId);
-  if (!route) return false;
-  await appendPending(route.threadId, { file: attachment });
+  const turn = currentTurn(agentId);
+  if (!turn?.trusted) return false;
+  await appendPending(turn.threadId, { file: attachment });
   return true;
 }
 

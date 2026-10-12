@@ -21,6 +21,10 @@ import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
+import { OUTSIDER_TOOLS, outsiderLabel, outsiderTurn } from "./channels/turns";
+import { RateLimiter } from "./rate-limit";
+
+const outsiderLimiter = new RateLimiter();
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
 const APPROVAL_CALL_CAP_MS = 30 * 60 * 1000;
@@ -109,7 +113,8 @@ function jsonSchemaOf(schema: z.ZodType) {
   return rest as { type: "object"; [key: string]: unknown };
 }
 
-async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
+async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restricted = false) {
+  const outsider = () => restricted || outsiderTurn(agent.id);
   const server = new Server({ name: "understudy-gatekeeper", version: "1.0.0" }, { capabilities: { tools: {}, logging: {} } });
   const enabled = toolsEnabled(agent.tools);
 
@@ -151,6 +156,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> } },
         extra: Extra,
       ) => {
+        const label = outsider() ? await outsiderLabel(agent.id) : null;
+        if (label && !outsiderLimiter.allow(`outsider:${agent.id}`, 1 / 60, 3)) return text(brainText.outsiderBusy, true);
         let fields = args.fields ?? [];
         let hash: string | undefined;
         if (args.action) {
@@ -164,7 +171,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         }
         const id = await hub.createApproval(
           agent.id,
-          { summary: args.summary, fields, runId: args.runId || undefined, stepId: args.stepId },
+          { summary: label ? `${label}${args.summary}`.slice(0, 500) : args.summary, fields, runId: args.runId || undefined, stepId: args.stepId },
           "mcp",
           APPROVAL_LIFETIME_SECONDS,
           hash,
@@ -222,7 +229,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         "Send a short message to your owner. It always lands in your chat with them in the panel and, when Slack is on, as a Slack direct message to them. This is how you reach your owner: you never need their Slack name, email or ID. Does not wait for an answer.",
       schema: z.object({ text: z.string().min(1).max(2000) }),
       run: (async (args: { text: string }) => {
-        const result = await hub.notifyOwner(agent.id, args.text);
+        const label = outsider() ? await outsiderLabel(agent.id) : null;
+        if (label && !outsiderLimiter.allow(`outsider:${agent.id}`, 1 / 60, 3)) return text(brainText.outsiderBusy, true);
+        const result = await hub.notifyOwner(agent.id, label ? `${label}${args.text}` : args.text);
         if (result.slack) return text({ delivered: true, slack: true });
         return text({ delivered: true, slack: false, note: ownerSlackNote(result.error) });
       }) as Builtin["run"],
@@ -248,7 +257,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     );
   }
 
-  const upstreams = (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail));
+  const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail));
   const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
   const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingOf(upstream, limits.get(upstream.id))]));
   const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
@@ -268,6 +277,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
+    if (outsider()) return { tools: builtins.filter((b) => OUTSIDER_TOOLS.has(b.name)).map((b) => ({ name: b.name, description: b.description, inputSchema: jsonSchemaOf(b.schema) })) };
     const proxied = await Promise.all(
       upstreams.map(async (upstream) => {
         try {
@@ -302,7 +312,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     const runId = builtin ? null : await runningRunId(agent.id);
     try {
       let result: ToolResult;
-      if (builtin) {
+      if (outsider() && !OUTSIDER_TOOLS.has(name)) {
+        result = text(brainText.outsiderTool, true);
+      } else if (builtin) {
         const parsed = builtin.schema.safeParse(args);
         result = parsed.success ? await builtin.run(parsed.data as never, callExtra) : text(parsed.error.message, true);
       } else {
@@ -433,7 +445,7 @@ export async function authenticateComputer(authorization: string | undefined) {
   return { ...row.agent, ownerEmail: row.ownerEmail };
 }
 
-export async function handleGatekeeper(hub: Hub, req: IncomingMessage, res: ServerResponse) {
+export async function handleGatekeeper(hub: Hub, req: IncomingMessage, res: ServerResponse, restricted = false) {
   const agent = await authenticateComputer(req.headers.authorization);
   if (!agent) return reject(res, 401, "unauthorized");
   if (req.method !== "POST") return reject(res, 405, "method not allowed");
@@ -443,7 +455,7 @@ export async function handleGatekeeper(hub: Hub, req: IncomingMessage, res: Serv
   } catch {
     return reject(res, 400, "invalid json");
   }
-  const server = await buildServer(hub, agent, agent.ownerEmail);
+  const server = await buildServer(hub, agent, agent.ownerEmail, restricted);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
     transport.close().catch(() => undefined);
