@@ -8,7 +8,7 @@ import { argsSubject, describeRule, findViolation, formatBytes } from "@understu
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
-import { canAlwaysAllow, effectivePermission, isDestructive, oneLine, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
+import { canAlwaysAllow, effectivePermission, isDestructive, oneLine, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
@@ -252,10 +252,19 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
   const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
   const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingOf(upstream, limits.get(upstream.id))]));
   const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
-    effectivePermission({ serverId: upstream.id, server: ceilings.get(upstream.id) ?? {}, tool, policy: agent.tools.toolPolicy, legacyAsk: agent.tools.askTools }).permission;
+    effectivePermission({
+      serverId: upstream.id,
+      server: ceilings.get(upstream.id) ?? {},
+      tool,
+      policy: agent.tools.toolPolicy,
+      legacyAsk: agent.tools.askTools,
+      seen: agent.tools.toolHints,
+    }).permission;
   const toolsOf = (upstream: UpstreamServer) => listUpstreamTools(upstream, agent.ownerId);
-  const findTool = async (upstream: UpstreamServer, toolName: string): Promise<UpstreamTool | { name: string; annotations?: undefined; description?: undefined }> =>
-    (await toolsOf(upstream).catch(() => [] as UpstreamTool[])).find((tool) => tool.name === toolName) ?? { name: toolName };
+  const findTool = async (upstream: UpstreamServer, toolName: string) => {
+    const tool = (await toolsOf(upstream).catch(() => [] as UpstreamTool[])).find((listed) => listed.name === toolName);
+    return tool && { ...tool, annotations: trustedHints(seenHintsFor(agent.tools.toolHints, upstream.id, tool.name), tool.annotations) };
+  };
   const splitProxied = (name: string) => {
     const [slug, ...rest] = name.split(PROXY_SEPARATOR);
     return { upstream: upstreams.find((u) => u.slug === slug), toolName: rest.join(PROXY_SEPARATOR) };
@@ -264,7 +273,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
     if (tool === "request_approval" || tool === "wait_for_approval") return false;
     if (builtins.some((b) => b.name === tool)) return true;
     const { upstream, toolName } = splitProxied(tool);
-    return Boolean(upstream && toolName && permissionOf(upstream, await findTool(upstream, toolName)) !== "never");
+    const found = upstream && toolName ? await findTool(upstream, toolName) : undefined;
+    return Boolean(upstream && found && permissionOf(upstream, found) !== "never");
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -312,7 +322,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string) {
         } else {
           const tool = await findTool(upstream, toolName);
           const ceiling = ceilings.get(upstream.id) ?? {};
-          result = await proxyCall(hub, agent, upstream, tool, args, permissionOf(upstream, tool), ceiling, runId, waitOutcome, callExtra);
+          result = tool
+            ? await proxyCall(hub, agent, upstream, tool, args, permissionOf(upstream, tool), ceiling, runId, waitOutcome, callExtra)
+            : { ...text(`not called: ${upstream.name} does not list ${toolName}`, true), verdict: "blocked" };
         }
       }
       const { verdict, ...shown } = result;

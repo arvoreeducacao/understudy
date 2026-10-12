@@ -10,8 +10,11 @@ import {
   cleanToolNames,
   defaultPermission,
   effectivePermission,
+  cleanSeenHints,
   grantedPolicy,
+  hintsLoosened,
   isDestructive,
+  recordedHints,
   oneLine,
   withChoice,
   withLegacyAsks,
@@ -76,18 +79,62 @@ test("an older ask-first choice still counts as ask", () => {
   assert.deepEqual(result, { permission: "ask", source: "owner" });
 });
 
-test("bulk controls reset each group to its default without touching the other group", () => {
+test("bulk controls set each group explicitly without touching the other group", () => {
   const custom = { search_threads: "never" as const, create_draft: "allow" as const, trash_message: "never" as const };
-  assert.deepEqual(allowReadOnly(custom, [search, draft, trash]), { create_draft: "allow", trash_message: "never" });
-  assert.deepEqual(askForRest(custom, [search, draft, trash]), { search_threads: "never" });
+  assert.deepEqual(allowReadOnly(custom, [search, draft, trash]), { search_threads: "allow", create_draft: "allow", trash_message: "never" });
+  assert.deepEqual(askForRest(custom, [search, draft, trash]), { search_threads: "never", create_draft: "ask", trash_message: "ask" });
 });
 
-test("choices equal to the default are not stored, so a tool that loses its read-only hint asks again", () => {
-  assert.deepEqual(withChoice({}, search, "allow"), {});
-  assert.deepEqual(withChoice({}, draft, "allow"), { create_draft: "allow" });
-  const stored = withChoice({}, search, "allow");
-  const changed: ToolInfo = { name: "search_threads", annotations: { readOnlyHint: false } };
-  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: changed, policy: { s: stored } }).permission, "ask");
+test("an explicit ask is stored even when it equals the default", () => {
+  assert.deepEqual(withChoice({}, draft, "ask"), { create_draft: "ask" });
+  assert.deepEqual(withChoice({}, search, "allow"), { search_threads: "allow" });
+});
+
+test("an owner's ask survives the connector later claiming the tool is read-only", () => {
+  const stored = withChoice({}, draft, "ask");
+  const relabeled: ToolInfo = { name: "create_draft", annotations: { readOnlyHint: true } };
+  assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool: relabeled, policy: { s: stored } }), { permission: "ask", source: "owner" });
+});
+
+test("a tool whose hints became less safe since they were recorded falls back to ask", () => {
+  const seen = { s: { create_draft: { readOnlyHint: false }, purge_all: { destructiveHint: true }, plain: {} } };
+  const relabeled: ToolInfo = { name: "create_draft", annotations: { readOnlyHint: true } };
+  const purge: ToolInfo = { name: "purge_all", annotations: { readOnlyHint: true, destructiveHint: false } };
+  const plain: ToolInfo = { name: "plain", annotations: { readOnlyHint: true } };
+  for (const tool of [relabeled, purge, plain]) {
+    assert.equal(hintsLoosened(seen.s[tool.name as keyof typeof seen.s], tool.annotations), true, tool.name);
+    assert.deepEqual(effectivePermission({ serverId: "s", server: {}, tool, seen }), { permission: "ask", source: "default" }, tool.name);
+  }
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: search, seen: { s: { search_threads: { readOnlyHint: true } } } }).permission, "allow");
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: draft, seen: { s: { create_draft: { readOnlyHint: true } } } }).permission, "ask");
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: search }).permission, "allow");
+});
+
+test("recorded hints keep the first ones seen until the owner makes a choice", () => {
+  const seen = { s: { create_draft: { readOnlyHint: false } } };
+  const relabeled: ToolInfo = { name: "create_draft", annotations: { readOnlyHint: true } };
+  assert.deepEqual(recordedHints(seen, "s", [relabeled, search]), { create_draft: { readOnlyHint: false, destructiveHint: false }, search_threads: { readOnlyHint: true } });
+  assert.deepEqual(recordedHints(seen, "s", [relabeled], { create_draft: "allow" }), { create_draft: { readOnlyHint: true } });
+});
+
+test("stored hints keep only enabled servers and boolean hints", () => {
+  const input = { s: { a: { readOnlyHint: true, extra: 1 }, b: { readOnlyHint: "yes" }, c: "x", "": {} }, t: { d: {} } };
+  assert.deepEqual(cleanSeenHints(input, ["s"]), { s: { a: { readOnlyHint: true }, b: {} } });
+  assert.deepEqual(cleanSeenHints([1], ["s"]), {});
+});
+
+test("tool names are compared without regard to case or compatible forms", () => {
+  const server = { neverTools: ["delete_repo"], askTools: ["Send_Mail"] };
+  assert.equal(ceilingFor(server, "Delete_Repo"), "never");
+  assert.equal(ceilingFor(server, "DELETE_REPO "), "never");
+  assert.equal(ceilingFor(server, "ｄｅｌｅｔｅ_ｒｅｐｏ"), "never");
+  assert.equal(ceilingFor(server, "send_mail"), "ask");
+  assert.equal(canAlwaysAllow(server, "Delete_Repo"), false);
+  assert.equal(canAlwaysAllow(server, "SEND_MAIL"), false);
+  const loud: ToolInfo = { name: "Delete_Repo", annotations: { readOnlyHint: true } };
+  assert.deepEqual(effectivePermission({ serverId: "s", server, tool: loud, policy: { s: { Delete_Repo: "allow" } } }), { permission: "never", source: "admin" });
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: loud, policy: { s: { delete_repo: "never", DELETE_REPO: "allow" } } }).permission, "never");
+  assert.equal(effectivePermission({ serverId: "s", server: {}, tool: loud, legacyAsk: ["s:delete_repo"] }).permission, "ask");
 });
 
 test("stored policy keeps only enabled servers and known permissions", () => {

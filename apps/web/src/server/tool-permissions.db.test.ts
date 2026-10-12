@@ -71,11 +71,15 @@ async function lastCall() {
   return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).at(-1);
 }
 
-async function setTools(toolPolicy: Record<string, Record<string, "allow" | "ask" | "never">>, askTools: string[] = []) {
+async function setTools(
+  toolPolicy: Record<string, Record<string, "allow" | "ask" | "never">>,
+  askTools: string[] = [],
+  toolHints: Record<string, Record<string, { readOnlyHint?: boolean; destructiveHint?: boolean }>> = {},
+) {
   const { getDb, schema } = await import("@/lib/db");
   await getDb()
     .update(schema.agents)
-    .set({ tools: { notifyOwner: true, slack: false, slackChannels: [], servers: [ids.server], askTools, toolPolicy } })
+    .set({ tools: { notifyOwner: true, slack: false, slackChannels: [], servers: [ids.server], askTools, toolPolicy, toolHints } })
     .where(eq(schema.agents.id, ids.agent));
 }
 
@@ -289,4 +293,27 @@ test("calls during a task run are recorded on that run with their verdict", { sk
     ["mail__label_message", "denied"],
     ["mail__search_threads", "allowed"],
   ]);
+});
+
+test("a tool name the connector did not list is refused without asking or reaching the server", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().insert(schema.mcpToolLimits).values({ serverId: ids.server, tool: "trash_message", level: "never" });
+  const result = call("mail__Trash_Message", { id: "1" });
+  assert.equal(await pendingApproval().catch(() => null), null);
+  assert.match(await result, /^not called: Mail does not list Trash_Message/);
+  assert.equal(calls.length, 0);
+  assert.equal((await lastCall())?.verdict, "blocked");
+  const asked = await call("request_approval", { summary: "Trash", action: { tool: "mail__Trash_Message", args: { id: "1" } } });
+  assert.match(asked, /^not asked/);
+});
+
+test("a tool that now claims to be read-only keeps asking when it was a write tool when first seen", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  await setTools({}, [], { [ids.server]: { search_threads: { readOnlyHint: false } } });
+  assert.match((await listed()).find((t) => t.name === "mail__search_threads")?.description ?? "", /owner approves/);
+  const pending = call("mail__search_threads", { query: "x" });
+  const approval = await pendingApproval();
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  assert.match(await pending, /^not called/);
+  assert.equal(calls.length, 0);
 });

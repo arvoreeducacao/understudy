@@ -1,6 +1,6 @@
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { Look } from "../look";
-import type { ToolPolicy, ToolVerdict } from "../tool-policy";
+import type { SeenHints, ToolPolicy, ToolVerdict } from "../tool-policy";
 import type { ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
 
 export const user = pgTable("user", {
@@ -67,6 +67,7 @@ export type AgentTools = {
   servers?: string[];
   askTools?: string[];
   toolPolicy?: ToolPolicy;
+  toolHints?: SeenHints;
 };
 
 export const hosts = pgTable("hosts", {

@@ -1399,6 +1399,8 @@ export const en = {
     listLabel: (name: string) => `Actions of ${name}`,
     readOnly: "Read-only",
     destructive: "Can delete",
+    hintsChanged: "Changed",
+    hintsChangedHint: "The connector now describes this action as safer than when you first saw it, so it asks first until you choose.",
     adminBlocked: "Turned off by your admin.",
     adminAtMostAsk: "Your admin requires approval for this one.",
     choiceLabel: (tool: string) => `Permission for ${tool}`,

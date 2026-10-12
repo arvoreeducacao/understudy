@@ -1399,6 +1399,8 @@ export const ptBR: Messages = {
     listLabel: (name: string) => `Ações do ${name}`,
     readOnly: "Só leitura",
     destructive: "Pode apagar",
+    hintsChanged: "Mudou",
+    hintsChangedHint: "O conector agora descreve esta ação como mais segura do que quando você a viu pela primeira vez, então ela pergunta antes até você escolher.",
     adminBlocked: "Desligada por quem administra o painel.",
     adminAtMostAsk: "Quem administra o painel exige aprovação nesta.",
     choiceLabel: (tool: string) => `Permissão de ${tool}`,

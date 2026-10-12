@@ -9,7 +9,7 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
-import { withLegacyAsks, type ConnectorCeiling, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { recordedHints, withLegacyAsks, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
 import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -84,6 +84,8 @@ function here() {
 function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; initial: AgentTools; admin: boolean }) {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
   const [policy, setPolicy] = useState<ToolPolicy>(() => withLegacyAsks(initial.toolPolicy, initial.askTools));
+  const seen: SeenHints = { ...(initial.toolHints ?? {}) };
+  for (const server of servers) if (server.tools) seen[server.id] = recordedHints(initial.toolHints, server.id, server.tools, policy[server.id]);
   const flip = (set: Set<string>, value: string) => {
     const next = new Set(set);
     if (next.has(value)) next.delete(value);
@@ -107,6 +109,7 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
   return (
     <div className="flex flex-col gap-2">
       <input type="hidden" name="toolPolicy" value={JSON.stringify(policy)} />
+      <input type="hidden" name="toolHints" value={JSON.stringify(seen)} />
       {servers.map((server) => {
         const enabled = on.has(server.id);
         return (
@@ -128,6 +131,7 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
                 serverName={server.name}
                 tools={server.tools}
                 ceiling={server.ceiling}
+                seen={initial.toolHints}
                 policy={policy[server.id] ?? {}}
                 onChange={(next) => setPolicy((current) => ({ ...current, [server.id]: next }))}
               />
