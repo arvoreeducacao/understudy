@@ -426,7 +426,7 @@ export function createAgent(options: {
     const steps = await record.finish();
     if (cancelled()) {
       options.send({ type: "run_record", runId: job.runId, steps });
-      options.send({ type: "run_finished", runId: job.runId, ok: false, summary: "Stopped by the owner.", ...(result.usage ? { usage: result.usage } : {}) });
+      options.send({ type: "run_finished", runId: job.runId, ok: false, summary: "Stopped by the owner.", outcome: "stopped", ...(result.usage ? { usage: result.usage } : {}) });
       memory.appendJournal(`run ${job.runId} "${job.recipe.title}": stopped by the owner`);
       return;
     }
@@ -436,7 +436,7 @@ export function createAgent(options: {
     writeFileSync(join(dir, "result.json"), JSON.stringify({ ok, summary, at: Date.now() }, null, 2));
     memory.appendJournal(`run ${job.runId} "${job.recipe.title}": ${ok ? "ok" : "failed"}: ${summary}`);
     options.send({ type: "run_record", runId: job.runId, steps, ...(parsed?.anomalies.length ? { unusual: parsed.anomalies } : {}) });
-    options.send({ type: "run_finished", runId: job.runId, ok, summary, ...(result.usage ? { usage: result.usage } : {}) });
+    options.send({ type: "run_finished", runId: job.runId, ok, summary, ...(!ok && result.needsLogin ? { outcome: "signed_out" as const } : {}), ...(result.usage ? { usage: result.usage } : {}) });
     setState(ok ? "done" : "stuck", ok ? undefined : summary.slice(0, 300));
   };
 
@@ -469,7 +469,7 @@ export function createAgent(options: {
     },
     stop() {
       for (const job of queue.splice(0)) {
-        if (job.kind === "run") options.send({ type: "run_finished", runId: job.runId, ok: false, summary: "Stopped by the owner." });
+        if (job.kind === "run") options.send({ type: "run_finished", runId: job.runId, ok: false, summary: "Stopped by the owner.", outcome: "stopped" });
         if (job.kind === "room") options.send({ type: "room_turn_done", roomId: job.roomId, ok: false, error: "Stopped by the owner." });
       }
       if (current) {

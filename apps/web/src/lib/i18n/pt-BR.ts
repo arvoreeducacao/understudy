@@ -51,7 +51,6 @@ export const ptBR: Messages = {
   },
   push: {
     approvalTitle: (name: string) => `${name} precisa da sua aprovação`,
-    stuckTitle: (name: string) => `${name} travou`,
   },
   channels: {
     title: "Canais",
@@ -688,6 +687,17 @@ export const ptBR: Messages = {
     approve: "Pode seguir",
     deny: "Não",
     goTo: "Ir para",
+  },
+  runAlerts: {
+    failed: (agent: string, task: string) => `${agent} não conseguiu terminar "${task}".`,
+    repeated: (count: number) => `Falhou ${count} vezes seguidas.`,
+    signedOut: (brain: string) => `O ${brain} saiu da conta neste computador. Conecte o ${brain} de novo nas configurações do agente e a tarefa roda no próximo horário.`,
+    signInAction: (brain: string) => `Conectar o ${brain} de novo`,
+    seeRun: "Ver o que aconteceu",
+    pushTitle: (agent: string, count: number) => (count > 1 ? `${agent} falhou ${count} vezes seguidas` : `${agent} não conseguiu terminar uma tarefa`),
+    waitingTitle: "Tarefas que não terminaram",
+    waitingRepeated: (count: number) => `${count} vezes seguidas`,
+    waitingFailed: "Não terminou",
   },
   workspace: {
     label: "Área de trabalho",

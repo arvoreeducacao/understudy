@@ -8,7 +8,7 @@ import type { RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
-import { sendPush } from "../push";
+import { notifyRunFailure, type RunOutcome } from "../run-alerts";
 import { relayRunFinished, relayRunStarted } from "../channels/relay";
 import { log } from "./shared";
 
@@ -59,7 +59,7 @@ export class Runs {
     return { ok: true as const, runId };
   }
 
-  async finish(agentId: string, runId: string, ok: boolean, summary: string, usage?: Usage) {
+  async finish(agentId: string, runId: string, ok: boolean, summary: string, usage?: Usage, outcome?: RunOutcome) {
     const db = getDb();
     const [run] = await db
       .update(schema.runs)
@@ -87,19 +87,13 @@ export class Runs {
     this.hub.broadcast(agentId, { type: "run_finished", runId, ok, summary });
     this.hub.broadcast(agentId, { type: "state", state, note: summary });
     await this.hub.addMessage(agentId, "system", ok ? copy.runs.finishedOk(summary) : copy.runs.finishedFail(summary), runId);
-    if (!ok) this.pushStuck(agentId, runId, summary).catch((error) => log("push_error", { error: String(error) }));
+    if (!ok) notifyRunFailure(agentId, runId, outcome).catch((error) => log("run_notice_error", { error: String(error) }));
     if (run.recipeId) {
       const [recipe] = await db.select({ recipe: schema.recipes.recipe }).from(schema.recipes).where(eq(schema.recipes.id, run.recipeId));
       if (recipe) {
         await relayRunFinished(agentId, runId, recipe.recipe.title, recipe.recipe.steps.map((step) => step.text), ok, summary).catch((error) => log("slack_progress_error", { error: String(error) }));
       }
     }
-  }
-
-  private async pushStuck(agentId: string, runId: string, summary: string) {
-    const [agent] = await getDb().select({ ownerId: schema.agents.ownerId, name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.id, agentId));
-    if (!agent) return;
-    await sendPush([agent.ownerId], { title: copy.push.stuckTitle(agent.name), body: summary.slice(0, 180), url: `/runs/${runId}`, tag: `run-${runId}` });
   }
 
   async saveRecord(agentId: string, runId: string, steps: RunStep[], unusual: string[]) {

@@ -187,6 +187,6 @@ test("a run that needs a new sign-in tells the owner instead of showing the raw 
   agent.enqueue({ kind: "run", runId: "r1", recipe: { title: "Weekly check", trigger: "x", steps: [{ id: "s1", text: "Check", mode: "auto" }], questions: [], askFirstRuns: 0 }, approvalsRequired: false });
   await settle();
   assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "login_done"), { type: "login_done", brain: "claude", ok: false, message });
-  assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "run_finished"), { type: "run_finished", runId: "r1", ok: false, summary: message });
+  assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "run_finished"), { type: "run_finished", runId: "r1", ok: false, summary: message, outcome: "signed_out" });
   assert.deepEqual(sent.filter((sentMessage) => sentMessage.type === "state").at(-1), { type: "state", state: "stuck", note: message });
 });

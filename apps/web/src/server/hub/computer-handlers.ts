@@ -158,7 +158,7 @@ export const computerHandlers: Handlers = {
   },
 
   async run_finished(hub, agentId, message) {
-    await hub.runs.finish(agentId, message.runId, message.ok, message.summary, message.usage);
+    await hub.runs.finish(agentId, message.runId, message.ok, message.summary, message.usage, message.outcome);
   },
 
   async run_record(hub, agentId, message) {

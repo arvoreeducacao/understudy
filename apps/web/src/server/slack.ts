@@ -69,7 +69,7 @@ export async function slackCall(method: string, body: Record<string, unknown>, t
   return data;
 }
 
-async function slackGet(method: string, params: Record<string, string>) {
+export async function slackGet(method: string, params: Record<string, string>) {
   const botToken = (await slackConfig())?.botToken;
   if (!botToken) return { ok: false, error: "slack_disabled" } as SlackResponse;
   const res = await fetch(`${slackApiBase()}/${method}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${botToken}` } });
@@ -136,6 +136,37 @@ export async function sendDirectMessage(to: SlackRecipient, text: string, blocks
   const userId = await slackUserIdFor(to);
   if (!userId) return { ok: false, error: "user_not_found" };
   return slackCall("chat.postMessage", { channel: userId, text, blocks, unfurl_links: false, ...identityFields(as) });
+}
+
+export const RUN_NOTICE_EVENT = "understudy_run_failed";
+
+type NoticeMessage = { ts: string; metadata?: { event_type?: string; event_payload?: Record<string, unknown> } };
+
+export type NoticeApi = {
+  call: (method: string, body: Record<string, unknown>) => Promise<SlackResponse>;
+  get: (method: string, params: Record<string, string>) => Promise<SlackResponse>;
+};
+
+const slackNoticeApi: NoticeApi = { call: (method, body) => slackCall(method, body), get: slackGet };
+
+export async function replaceDirectNotice(userId: string, key: string, text: string, as?: SlackIdentity, api: NoticeApi = slackNoticeApi) {
+  const opened = await api.call("conversations.open", { users: userId });
+  const channel = opened.ok ? (opened.channel as { id?: string } | undefined)?.id : undefined;
+  let replaced = false;
+  if (channel) {
+    const history = await api.get("conversations.history", { channel, limit: "100", include_all_metadata: "true" });
+    const messages = history.ok ? ((history.messages as NoticeMessage[] | undefined) ?? []) : [];
+    const previous = messages.find((message) => message.metadata?.event_type === RUN_NOTICE_EVENT && message.metadata.event_payload?.key === key);
+    if (previous) replaced = (await api.call("chat.delete", { channel, ts: previous.ts })).ok;
+  }
+  const posted = await api.call("chat.postMessage", {
+    channel: channel ?? userId,
+    text,
+    unfurl_links: false,
+    metadata: { event_type: RUN_NOTICE_EVENT, event_payload: { key } },
+    ...identityFields(as),
+  });
+  return { ok: posted.ok, error: posted.error, replaced };
 }
 
 export async function postMessage(input: { channel: string; text: string; threadTs?: string; blocks?: unknown[]; as?: SlackIdentity }) {

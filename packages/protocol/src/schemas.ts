@@ -77,7 +77,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("recipe"), recordingId: id, recipe: RecipeSchema }),
   z.object({ type: z.literal("recipe_failed"), recordingId: id, error: text }),
   z.object({ type: z.literal("approval_request"), request: ApprovalRequestSchema }),
-  z.object({ type: z.literal("run_finished"), runId: id, ok: z.boolean(), summary: text, usage: UsageSchema.optional() }),
+  z.object({ type: z.literal("run_finished"), runId: id, ok: z.boolean(), summary: text, usage: UsageSchema.optional(), outcome: z.enum(["stopped", "signed_out"]).optional() }),
   z.object({ type: z.literal("run_record"), runId: id, steps: z.array(RunStepSchema), unusual: z.array(text).optional() }),
   z.object({ type: z.literal("login_prompt"), brain: BrainSchema, url: optionalText, code: optionalText, message: text }),
   z.object({ type: z.literal("login_done"), brain: BrainSchema, ok: z.boolean(), account: optionalText, message: optionalText }),

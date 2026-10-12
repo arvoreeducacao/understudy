@@ -9,6 +9,7 @@ import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
+import { loadOpenFailures } from "@/server/run-alerts";
 
 function initials(name: string) {
   return name
@@ -31,6 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           .where(and(inArray(schema.approvals.agentId, ids), eq(schema.approvals.status, "pending")))
       ).length
     : 0;
+  const failing = (await loadOpenFailures(await accessibleAgentIds(user.id, ["owner"]))).length;
   const admin = user.admin;
   const pendingUsers = admin
     ? (await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.status, "pending"))).length
@@ -39,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="app">
       <SideShell
-        waiting={waiting}
+        waiting={waiting + failing}
         moreAlert={pendingUsers}
         brand={
         <Link href="/" className="brand">
@@ -53,7 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/" exact icon="agents">
             {messages.nav.agents}
           </NavLink>
-          <NavLink href="/waiting" icon="waiting" badge={waiting}>
+          <NavLink href="/waiting" icon="waiting" badge={waiting + failing}>
             {messages.nav.waiting}
           </NavLink>
           <NavLink href="/recipes" icon="tasks">{messages.nav.recipes}</NavLink>
