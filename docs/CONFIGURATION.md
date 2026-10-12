@@ -74,7 +74,7 @@ An understudy reads, searches and drafts in its owner's mailbox through a connec
 3. Each owner signs in with their own Google account from the understudy's settings.
 4. The panel asks Google only for `gmail.readonly` and `gmail.compose`, and asks for offline access so the sign-in keeps working.
 
-The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. Its label, spam and trash actions are free by default, like any connector action; mark them ask-first under the connector if you want them gated.
+The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. The server marks its search, read and list tools read-only and its draft, label, trash and spam tools as changes; the label, trash and spam tools also need a wider Google permission than the panel asks for, so they fail instead of acting.
 
 **Outlook.** Add a Microsoft 365 MCP server as a custom connector:
 
