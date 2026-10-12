@@ -8,7 +8,8 @@ import { messages } from "@/lib/messages";
 import { forgetServer, slugify, testConnection } from "@/server/upstream";
 import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
-import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath } from "@/server/connector-oauth";
+import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath, storedClient } from "@/server/connector-oauth";
+import { featuredFor } from "@/lib/connector-showcase";
 import { serverAllowedFor } from "@/server/approval-payload";
 import { requireAdmin, requireUser } from "@/lib/session";
 
@@ -39,6 +40,8 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     allowedEmails: null,
     oauthClient: null,
   };
+  const featured = featuredFor(url);
+  if (featured?.signIn && !headerValue) return { ok: false, message: "", signIn: { needsClient: featured.signIn.needsClient, returnAddress: oauthCallbackUrl() } };
   const test = await testConnection(row);
   if (!test.ok && test.problem === "unauthorized" && !headerValue) {
     const support = await oauthSupport(url);
@@ -114,7 +117,7 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
     url,
     headerName: null,
     headerValue: null,
-    oauthClient: seal(JSON.stringify(clientId ? { client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) } : null)),
+    oauthClient: seal(JSON.stringify(storedClient(clientId, clientSecret, featuredFor(url)?.oauth))),
     createdBy: admin.id,
     createdAt: new Date(),
     askAll: false,

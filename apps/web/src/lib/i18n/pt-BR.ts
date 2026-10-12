@@ -359,6 +359,7 @@ export const ptBR: Messages = {
       apify: "Roda robôs prontos que coletam dados de sites.",
       exa: "Pesquisa na web e lê páginas para responder perguntas.",
       huggingface: "Encontra modelos de IA, bases de dados e demos no Hugging Face.",
+      gmail: "Busca e lê seus e-mails e escreve rascunhos para você enviar. Não envia sozinho.",
       hubspot: "Lê e atualiza contatos, empresas e negócios do seu CRM.",
       mslearn: "Pesquisa na documentação oficial da Microsoft.",
       "cloudflare-docs": "Pesquisa na documentação oficial da Cloudflare.",

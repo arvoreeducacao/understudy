@@ -63,6 +63,26 @@ For example, to run every understudy on one Anthropic key, set `ANTHROPIC_API_KE
 
 Owners connect a bot of their own per understudy under Settings › Channels: create it with @BotFather, paste the token, then open the bot with the Start link shown there so their Telegram account counts as the owner. Nothing is needed on the server. Everything else (allowed people, held messages, approvals with buttons) works as described in [CHANNELS.md](CHANNELS.md).
 
+## Reading the owner's email
+
+An understudy reads, searches and drafts in its owner's mailbox through a connector, under the owner's own account. Nothing is configured on the server.
+
+**Gmail.** Uses Google's remote Gmail MCP server (`https://gmailmcp.googleapis.com/mcp/v1`, in preview at the time of writing).
+
+1. In a Google Cloud project, enable the Gmail API and the Gmail MCP API, and create an OAuth client of type Web application. Its authorized redirect URI is the return address the panel shows.
+2. In the panel, an admin opens People › Connectors, picks Gmail, and pastes the client ID and secret.
+3. Each owner signs in with their own Google account from the understudy's settings.
+4. The panel asks Google only for `gmail.readonly` and `gmail.compose`, and asks for offline access so the sign-in keeps working.
+
+The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. The server marks its search, read and list tools read-only and its draft, label, trash and spam tools as changes; the label, trash and spam tools also need a wider Google permission than the panel asks for, so they fail instead of acting.
+
+**Outlook.** Add a Microsoft 365 MCP server as a custom connector:
+
+- Microsoft's own Mail server in Agent 365 needs Copilot licensing.
+- A self-hosted open-source server such as `ms-365-mcp-server` can run read-only, or limited to `Mail.Read` and `Mail.ReadWrite`.
+
+If the server can send, mark its send, reply and send-draft actions ask-first. They then wait for the owner's approval, and the approval covers only those exact arguments.
+
 ## Starting tasks by email
 
 Each task can get its own email address. Mail to it starts the task with the email quoted as untrusted data (sender, subject, text) and its attachments saved in the understudy's inbox; approvals are always required on these runs. By default only senders from the owner's email domain are accepted, and each task can list other addresses or domains.

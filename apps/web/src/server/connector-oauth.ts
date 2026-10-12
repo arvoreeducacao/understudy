@@ -21,6 +21,25 @@ export function usesOAuth(server: Pick<Server, "oauthClient">) {
   return Boolean(server.oauthClient);
 }
 
+export type SignInRequest = { scope?: string; authorizeParams?: Record<string, string> };
+
+type StoredClient = OAuthClientInformationMixed & { requested_scope?: string; authorize_params?: Record<string, string> };
+
+export function storedClient(clientId: string, clientSecret: string, request: SignInRequest = {}) {
+  if (!clientId) return null;
+  return {
+    client_id: clientId,
+    ...(clientSecret ? { client_secret: clientSecret } : {}),
+    ...(request.scope ? { requested_scope: request.scope } : {}),
+    ...(request.authorizeParams && Object.keys(request.authorizeParams).length ? { authorize_params: request.authorizeParams } : {}),
+  };
+}
+
+export function signInRequestOf(server: Pick<Server, "oauthClient">): SignInRequest {
+  const client = readSealed<StoredClient>(server.oauthClient);
+  return { ...(client?.requested_scope ? { scope: client.requested_scope } : {}), ...(client?.authorize_params ? { authorizeParams: client.authorize_params } : {}) };
+}
+
 export class SignInNeededError extends Error {
   constructor() {
     super("Unauthorized: this person has not signed in to the connector yet");
@@ -77,7 +96,9 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 
   get clientMetadata(): OAuthClientMetadata {
+    const scope = signInRequestOf(this.server).scope;
     return {
+      ...(scope ? { scope } : {}),
       client_name: env.productName,
       redirect_uris: [oauthCallbackUrl()],
       grant_types: ["authorization_code", "refresh_token"],
@@ -93,7 +114,10 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 
   clientInformation() {
-    return readSealed<OAuthClientInformationMixed>(this.server.oauthClient);
+    const client = readSealed<StoredClient>(this.server.oauthClient);
+    if (!client) return undefined;
+    const { requested_scope: _scope, authorize_params: _params, ...information } = client;
+    return information as OAuthClientInformationMixed;
   }
 
   private async saveClient(sealed: string) {
@@ -102,7 +126,9 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 
   async saveClientInformation(information: OAuthClientInformationMixed) {
-    await this.saveClient(seal(JSON.stringify(information)));
+    const request = signInRequestOf(this.server);
+    const kept = { ...(request.scope ? { requested_scope: request.scope } : {}), ...(request.authorizeParams ? { authorize_params: request.authorizeParams } : {}) };
+    await this.saveClient(seal(JSON.stringify({ ...information, ...kept })));
   }
 
   tokens() {
@@ -114,6 +140,7 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 
   redirectToAuthorization(url: URL) {
+    for (const [key, value] of Object.entries(signInRequestOf(this.server).authorizeParams ?? {})) url.searchParams.set(key, value);
     this.authorizationUrl = url;
   }
 
@@ -135,6 +162,11 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
 }
 
+function scopeOf(server: Pick<Server, "oauthClient">) {
+  const scope = signInRequestOf(server).scope;
+  return scope ? { scope } : {};
+}
+
 export type OAuthSupport = { supported: false } | { supported: true; registers: boolean };
 
 export async function oauthSupport(url: string): Promise<OAuthSupport> {
@@ -151,7 +183,7 @@ export async function oauthSupport(url: string): Promise<OAuthSupport> {
 export async function beginSignIn(server: Server, userId: string, returnTo: string) {
   const provider = new StoredOAuthProvider(server, userId, null);
   await provider.saveLogin({ tokens: null, returnTo });
-  const result = await auth(provider, { serverUrl: server.url, fetchFn: safeFetch });
+  const result = await auth(provider, { serverUrl: server.url, fetchFn: safeFetch, ...scopeOf(server) });
   const page = provider.authorizationUrl;
   if (result !== "REDIRECT" || !page) throw new Error("The server did not send a sign-in page");
   const local = process.env.UNDERSTUDY_ALLOW_PRIVATE_MCP === "1" && page.protocol === "http:";
@@ -181,7 +213,7 @@ export async function finishSignIn(state: string, code: string, userId: string) 
   const provider = new StoredOAuthProvider(found.server, userId, found.login);
   let signedIn = true;
   try {
-    await auth(provider, { serverUrl: found.server.url, authorizationCode: code, fetchFn: safeFetch });
+    await auth(provider, { serverUrl: found.server.url, authorizationCode: code, fetchFn: safeFetch, ...scopeOf(found.server) });
   } catch (error) {
     signedIn = false;
     console.error(JSON.stringify({ event: "connector_sign_in_exchange_failed", url: found.server.url, error: String(error) }));

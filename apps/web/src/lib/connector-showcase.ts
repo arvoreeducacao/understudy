@@ -16,6 +16,7 @@ export type Connector = {
   keyPage?: string;
   icon?: string;
   signIn?: { needsClient: boolean };
+  oauth?: { scope: string; authorizeParams?: Record<string, string> };
   featured: boolean;
 };
 
@@ -42,6 +43,20 @@ export const FEATURED_CONNECTORS: Connector[] = [
     category: "work",
     signIn: { needsClient: true },
     keyPage: "https://developers.hubspot.com/mcp",
+    featured: true,
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    url: "https://gmailmcp.googleapis.com/mcp/v1",
+    publisher: by("google.com"),
+    category: "work",
+    signIn: { needsClient: true },
+    oauth: {
+      scope: "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose",
+      authorizeParams: { access_type: "offline", prompt: "consent" },
+    },
+    keyPage: "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
     featured: true,
   },
   {

@@ -32,7 +32,7 @@ Legend for Understudy: **has** = works end to end today, **partial** = some of i
 | Talk to the agent from Slack, Teams, SMS or phone | not stated | yes: Slack, Teams, audio; SMS coming | voice on glasses | not stated | **has**: Slack DMs and mentions reach the agent and it answers in the thread |
 | Approve from a chat app | not stated | through Slack and Teams | not stated | not stated | **has**: approve or deny from Slack |
 | Agent has its own email address | not stated | not stated | yes | not stated | **missing** |
-| Connectors to business apps | yes, plus computer use for the rest | 4,000+ apps | Gmail, calendar, Meta apps, shopping | builds connectors itself | **partial**: browser for everything; admin-registered MCP servers (Slack and others) with who-may-attach and forced approvals |
+| Connectors to business apps | yes, plus computer use for the rest | 4,000+ apps | Gmail, calendar, Meta apps, shopping | builds connectors itself | **partial**: browser for everything; admin-registered MCP servers (Slack, Gmail with read and draft scopes, and others) with per-owner sign-in, who-may-attach and forced approvals |
 | Notify the owner proactively | yes | yes | yes: proactive suggestions | surfaces anomalies | **has**: notify_owner, Slack DMs, a daily briefing DM and a Today page |
 | Surface anomalies and exceptions in each run | not stated | not stated | not stated | yes, every run | **has**: each run reports unusual things against past runs, shown highlighted on the run page |
 | Replayable execution history and audit trail | not stated | Activity View | not stated | yes: every run logged and replayable | **has**: run page with every step, screenshots, approvals and usage; runs list per agent; tool calls logged |

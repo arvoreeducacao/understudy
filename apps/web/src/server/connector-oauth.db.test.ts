@@ -20,6 +20,7 @@ const provider = {
   validTokens: new Set<string>(),
   issued: 0,
   tokenRequests: [] as URLSearchParams[],
+  advertised: [] as string[],
 };
 
 const ana = "usr_oauth_ana";
@@ -51,7 +52,7 @@ function issue(res: import("node:http").ServerResponse) {
 before(async () => {
   upstream = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
-    if (path.startsWith("/.well-known/oauth-protected-resource")) return json(res, 200, { resource: `${base}/mcp`, authorization_servers: [base] });
+    if (path.startsWith("/.well-known/oauth-protected-resource")) return json(res, 200, { resource: `${base}/mcp`, authorization_servers: [base], ...(provider.advertised.length ? { scopes_supported: provider.advertised } : {}) });
     if (path === "/.well-known/oauth-authorization-server")
       return json(res, 200, {
         issuer: base,
@@ -225,6 +226,25 @@ test("a system that needs its own app signs in with that app's id and secret", {
   assert.equal(page.searchParams.get("client_id"), "my-app");
   assert.ok(finished?.signedIn);
   assert.equal(provider.tokenRequests.at(-1)?.get("client_secret"), "app-secret");
+});
+
+test("a catalog sign-in asks only for the scopes it names and adds its extra sign-in parameters", { skip }, async () => {
+  provider.registers = false;
+  provider.advertised = ["mail.read", "mail.compose", "mail.send", "mail.all"];
+  const { storedClient, StoredOAuthProvider } = await import("./connector-oauth");
+  const row = await insert("mcp_oauth_scoped", storedClient("mail-app", "app-secret", { scope: "mail.read mail.compose", authorizeParams: { access_type: "offline", prompt: "consent" } }));
+  try {
+    const { page, finished } = await signIn(row, bia);
+    assert.equal(page.searchParams.get("scope"), "mail.read mail.compose");
+    assert.equal(page.searchParams.get("access_type"), "offline");
+    assert.equal(page.searchParams.get("prompt"), "consent");
+    assert.equal(page.searchParams.get("client_id"), "mail-app");
+    assert.ok(finished?.signedIn);
+    const client = await (await StoredOAuthProvider.for(row, bia)).clientInformation();
+    assert.deepEqual(client, { client_id: "mail-app", client_secret: "app-secret" });
+  } finally {
+    provider.advertised = [];
+  }
 });
 
 test("a wrong code or an unknown state connects nothing", { skip }, async () => {
