@@ -38,13 +38,14 @@ Every channel sorts the person writing into one of three groups, per understudy:
 
 ## Writing an adapter
 
-An adapter lives in `apps/web/src/server/channels/<kind>/` and is registered in `relay.ts`. It implements:
+An adapter lives in `apps/web/src/server/channels/<kind>/` and is registered in `relay.ts`. Every reply the understudy writes goes through one place: `currentConversation` picks the conversation that spoke last, across the buffered routes in `channel_routes` and every adapter's live conversation, and `relayReply` hands the text to that adapter. An adapter implements one of two shapes:
 
-- `ready()`: whether the server settings it needs are present and the kind is in `UNDERSTUDY_CHANNELS`.
-- `send(hub, { agentId, agentName, channel, thread, reply })`: deliver `reply.text` and `reply.files` (read them with `readReplyFiles`) to `thread.peer`, splitting text to the provider's limit, then `recordSent`.
-- `sendApproval(hub, notice)` (optional): put the approval in front of the owner on this channel, with a way to answer that proves it is the owner. Without it, approvals reach the owner by the panel, Slack and push only.
+- **Buffered** (Telegram, and the documented WhatsApp, Teams and SMS): `send(hub, { agentId, agentName, channel, thread, reply })` delivers the turn's text and files (`readReplyFiles`) to `thread.peer`, split to the provider's limit, then calls `recordSent`. Optionally `sendApproval(hub, notice)` puts the approval in front of the owner with a way to answer that proves it is the owner.
+- **Live** (Slack): `live.activeSince(agentId)` says when its conversation last spoke; `say` posts each reply as it comes, `delta` streams a reply being written, `activity` shows what the understudy is doing, `approval` posts the approval in the conversation, `panelSaid` mirrors a message typed in the panel, and `runStarted`/`runFinished` keep a task's progress in place.
 
-Inbound, the adapter's endpoint verifies the provider, maps the destination to an `agent_channels` row (`kind`, `address`), decides `owner`, `allowed` or `unknown`, and calls `holdMessage` or `deliverToAgent` from `deliver.ts`. Per-kind identifiers for the allowed list are cleaned in `peers.ts`. Keep secrets in `agent_channels.secret` (sealed) and per-channel state in `settings` (merge it with `mergeChannelSettings`).
+`ready()` says whether the server settings it needs are present and the kind is enabled.
+
+Inbound, the adapter's endpoint verifies the provider, maps the destination to an `agent_channels` row (`kind`, `address`), decides `owner`, `allowed` or `unknown`, and calls `holdMessage` or `deliverToAgent` from `deliver.ts`. Slack keeps its own inbound handling (workspace users matched to panel accounts, mentions routed by name, slash command) and its thread state in `slack_threads`. Per-kind identifiers for the allowed list are cleaned in `peers.ts`. Keep secrets in `agent_channels.secret` (sealed) and per-channel state in `settings` (merge it with `mergeChannelSettings`).
 
 ### Microsoft Teams (documented)
 

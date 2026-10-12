@@ -3,7 +3,7 @@ import { ArtifactEditSchema, MEMORY_FILE_MAX_BYTES } from "@understudy/protocol"
 import { getDb, schema } from "@/lib/db";
 import { credentialSite } from "@/lib/credential-site";
 import { clearRoute } from "../channels/store";
-import { mirrorPanelMessage } from "../slack-threads";
+import { relayPanelMessage } from "../channels/relay";
 import { messages as copy } from "@/lib/messages";
 import { prepareEdit } from "../artifacts/service";
 import type { Hub } from "../hub";
@@ -48,7 +48,7 @@ export const viewerHandlers: Handlers = {
     await clearRoute(agentId);
     const lead = prepared ? copy.artifacts.editMirror(prepared.title, prepared.card.version) : "";
     const mirrored = [lead, text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n");
-    mirrorPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("slack_mirror_error", { agentId, error: String(error) }));
+    relayPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("channel_mirror_error", { agentId, error: String(error) }));
     const artifactEdit = prepared
       ? { artifactId: prepared.card.artifactId, version: prepared.card.version, title: prepared.title, path: prepared.path, ...prepared.card.edit }
       : undefined;
