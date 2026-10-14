@@ -74,6 +74,8 @@ Every script is idempotent: it finds what already exists by name and tag and cre
 | `k8s/secret.sh` | Secret `<prefix>-env` (database URL, random auth secret and host token, public URL, email rules); copies the host token to SSM `/<prefix>/host/token` |
 | `host/deploy.sh [tag]` | Through SSM: pulls the computer and host images on the VM and (re)starts the host container with the Docker socket |
 
+RDS rotates the database password every seven days. With `WEB_ROLE_ARN` set, `k8s/secret.sh` lets that role read the database secret and stores the secret's ARN as `DATABASE_PASSWORD_SECRET_ARN` instead of putting the password in `DATABASE_URL`; the panel then reads the current password whenever it opens a connection, so a rotation needs no redeploy. Without `WEB_ROLE_ARN` the password is copied into `DATABASE_URL` and you must rerun `k8s/secret.sh` and restart the panel after every rotation.
+
 Random values are kept across runs: `k8s/secret.sh` reuses what the Secret already holds. Set `SLACK_BOT_TOKEN` or `ADMIN_EMAILS` in the environment and rerun it to change them.
 
 ## Continuous deployment
