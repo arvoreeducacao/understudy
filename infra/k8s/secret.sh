@@ -15,8 +15,15 @@ random_token() {
 db=$(aws rds describe-db-instances --db-instance-identifier "$DB_IDENTIFIER" --query 'DBInstances[0].[Endpoint.Address,MasterUserSecret.SecretArn]' --output text)
 db_host=$(cut -f1 <<<"$db")
 db_secret_arn=$(cut -f2 <<<"$db")
-db_pass=$(aws secretsmanager get-secret-value --secret-id "$db_secret_arn" --query SecretString --output text | python3 -c 'import json,sys,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["password"],safe=""))')
-database_url="postgresql://${DB_USER}:${db_pass}@${db_host}:5432/${DB_NAME}?sslmode=verify-full"
+db_password_secret_arn=""
+if [ -n "${WEB_ROLE_ARN:-}" ]; then
+  aws iam put-role-policy --role-name "${WEB_ROLE_ARN##*/}" --policy-name "${NAME_PREFIX}-database-password-read" --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"${db_secret_arn}\"}]}"
+  db_password_secret_arn="$db_secret_arn"
+  database_url="postgresql://${DB_USER}@${db_host}:5432/${DB_NAME}?sslmode=verify-full"
+else
+  db_pass=$(aws secretsmanager get-secret-value --secret-id "$db_secret_arn" --query SecretString --output text | python3 -c 'import json,sys,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["password"],safe=""))')
+  database_url="postgresql://${DB_USER}:${db_pass}@${db_host}:5432/${DB_NAME}?sslmode=verify-full"
+fi
 
 inbound_topic_arn=""
 inbound_bucket=""
@@ -32,6 +39,7 @@ slack_token="${SLACK_BOT_TOKEN:-$(existing SLACK_BOT_TOKEN)}"
 
 kubectl -n "$K8S_NAMESPACE" create secret generic "$secret" \
   --from-literal=DATABASE_URL="$database_url" \
+  --from-literal=DATABASE_PASSWORD_SECRET_ARN="$db_password_secret_arn" \
   --from-literal=BETTER_AUTH_SECRET="$auth_secret" \
   --from-literal=UNDERSTUDY_HOST_TOKEN="$host_token" \
   --from-literal=UNDERSTUDY_PUBLIC_URL="https://${PUBLIC_HOST}" \
