@@ -10,13 +10,21 @@ import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
 import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath, storedClient } from "@/server/connector-oauth";
 import { featuredFor } from "@/lib/connector-showcase";
-import { serverAllowedFor } from "@/server/approval-payload";
-import { requireAdmin, requireUser } from "@/lib/session";
+import { requireUser } from "@/lib/session";
+import { accessChangeAllowed, canManageConnector, canUseConnector, startingAccess } from "@/server/connector-rights";
+
+async function connectorFor(id: string, need: "use" | "manage") {
+  const user = await requireUser();
+  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
+  if (!server) return null;
+  const allowed = need === "manage" ? canManageConnector(user, server) : canUseConnector(user, server);
+  return allowed ? { user, server } : null;
+}
 
 export type AddServerState = { ok: boolean; message: string; id?: string; signIn?: { needsClient: boolean; returnAddress: string } } | null;
 
 export async function addMcpServer(_: AddServerState, form: FormData): Promise<AddServerState> {
-  const admin = await requireAdmin();
+  const user = await requireUser();
   const name = String(form.get("name") ?? "").trim().slice(0, 60);
   const url = String(form.get("url") ?? "").trim();
   const headerName = String(form.get("headerName") ?? "").trim().slice(0, 100);
@@ -33,11 +41,11 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     url,
     headerName: headerName || null,
     headerValue: headerName && headerValue ? seal(headerValue) : null,
-    createdBy: admin.id,
+    createdBy: user.id,
     createdAt: new Date(),
     askAll: false,
     askTools: [] as string[],
-    allowedEmails: null,
+    allowedEmails: startingAccess(user),
     oauthClient: null,
   };
   const featured = featuredFor(url);
@@ -49,37 +57,37 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
   }
   if (!test.ok) return { ok: false, message: messages.admin.serverProblem[test.problem] };
   await db.insert(schema.mcpServers).values(row);
-  revalidatePath("/admin", "layout");
+  revalidatePath("/connectors", "layout");
   return { ok: true, message: messages.admin.serverAddedWith(name, test.tools.length), id: row.id };
 }
 
 export async function checkMcpServer(id: string) {
-  const admin = await requireAdmin();
-  const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
-  if (!server) return { ok: false, message: messages.common.notFound };
-  const test = await testConnection(server, admin.id);
-  revalidatePath("/admin", "layout");
+  const found = await connectorFor(id, "use");
+  if (!found) return { ok: false, message: messages.common.notFound };
+  const test = await testConnection(found.server, found.user.id);
+  revalidatePath("/connectors", "layout");
   return test.ok ? { ok: true, message: messages.admin.serverWorks(test.tools.length) } : { ok: false, message: messages.admin.serverProblem[test.problem] };
 }
 
 export async function removeMcpServer(id: string) {
-  await requireAdmin();
+  if (!(await connectorFor(id, "manage"))) return;
   await getDb().delete(schema.mcpServers).where(eq(schema.mcpServers.id, id));
   forgetServer(id);
-  revalidatePath("/admin", "layout");
+  revalidatePath("/connectors", "layout");
 }
 
 export async function setServerApprovals(id: string, askAll: boolean, askTools: string[]) {
-  await requireAdmin();
+  if (!(await connectorFor(id, "manage"))) return;
   await getDb()
     .update(schema.mcpServers)
     .set({ askAll, askTools: askTools.map(String).slice(0, 500) })
     .where(eq(schema.mcpServers.id, id));
-  revalidatePath("/admin", "layout");
+  revalidatePath("/connectors", "layout");
 }
 
 export async function setServerAccess(id: string, everyone: boolean, emails: string) {
-  await requireAdmin();
+  const found = await connectorFor(id, "manage");
+  if (!found || !accessChangeAllowed(found.user, everyone)) return;
   const list = emails
     .split(/[\s,;]+/)
     .map((e) => e.trim().toLowerCase())
@@ -89,18 +97,18 @@ export async function setServerAccess(id: string, everyone: boolean, emails: str
     .update(schema.mcpServers)
     .set({ allowedEmails: everyone ? null : list })
     .where(eq(schema.mcpServers.id, id));
-  revalidatePath("/admin", "layout");
+  revalidatePath("/connectors", "layout");
 }
 
 export async function searchConnectorCatalog(query: string) {
-  await requireAdmin();
+  await requireUser();
   return searchCatalog(String(query ?? ""));
 }
 
 export type SignInState = { ok: false; message: string } | { ok: true; to: string } | null;
 
 export async function startConnectorSignIn(_: SignInState, form: FormData): Promise<SignInState> {
-  const admin = await requireAdmin();
+  const user = await requireUser();
   const name = String(form.get("name") ?? "").trim().slice(0, 60);
   const url = String(form.get("url") ?? "").trim();
   const clientId = String(form.get("clientId") ?? "").trim().slice(0, 500);
@@ -118,15 +126,15 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
     headerName: null,
     headerValue: null,
     oauthClient: seal(JSON.stringify(storedClient(clientId, clientSecret, featuredFor(url)?.oauth))),
-    createdBy: admin.id,
+    createdBy: user.id,
     createdAt: new Date(),
     askAll: false,
     askTools: [] as string[],
-    allowedEmails: null,
+    allowedEmails: startingAccess(user),
   };
   await db.insert(schema.mcpServers).values(row);
   try {
-    return { ok: true, to: await beginSignIn(row, admin.id, `/admin/connectors/${row.id}`) };
+    return { ok: true, to: await beginSignIn(row, user.id, `/connectors/${row.id}`) };
   } catch (error) {
     console.error(JSON.stringify({ event: "connector_sign_in_failed", url, error: String(error) }));
     await db.delete(schema.mcpServers).where(eq(schema.mcpServers.id, row.id));
@@ -137,7 +145,7 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
 export async function signInToConnector(id: string, returnTo: string): Promise<SignInState> {
   const user = await requireUser();
   const [server] = await getDb().select().from(schema.mcpServers).where(eq(schema.mcpServers.id, id));
-  if (!server || !serverAllowedFor(server.allowedEmails, user.email)) return { ok: false, message: messages.common.notFound };
+  if (!server || !canUseConnector(user, server)) return { ok: false, message: messages.common.notFound };
   try {
     forgetServer(id);
     return { ok: true, to: await beginSignIn(server, user.id, safeReturnPath(returnTo) ?? "/") };

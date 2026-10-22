@@ -4,8 +4,6 @@ import { count, desc, isNotNull } from "drizzle-orm";
 import { CreateUserForm } from "@/components/approvals/CreateUserForm";
 import { HostsAdmin } from "@/components/approvals/HostsAdmin";
 import { getHub } from "@/server/hub-access";
-import { ServersAdmin } from "@/components/approvals/ServersAdmin";
-import { listUpstreamTools } from "@/server/upstream";
 import { UserActions } from "@/components/approvals/UserActions";
 import { SettingsSection } from "@/components/ui/Section";
 import { getDb, schema } from "@/lib/db";
@@ -27,18 +25,6 @@ function initials(name: string) {
 export default async function AdminPage() {
   const me = await requireAdmin();
   const users = await getDb().select().from(schema.user).orderBy(desc(schema.user.createdAt));
-  const servers = await getDb().select().from(schema.mcpServers).orderBy(desc(schema.mcpServers.createdAt));
-  const serverRows = await Promise.all(
-    servers.map(async (server) => ({
-      id: server.id,
-      name: server.name,
-      url: server.url,
-      tools: await listUpstreamTools(server, me.id).then((tools) => tools.map((tool) => tool.name), () => null),
-      askAll: server.askAll,
-      askTools: server.askTools ?? [],
-      allowedEmails: server.allowedEmails ?? null,
-    })),
-  );
   const hostRows = await getDb().select().from(schema.hosts).orderBy(desc(schema.hosts.lastSeenAt));
   const bound = await getDb()
     .select({ hostId: schema.agents.hostId, agents: count() })
@@ -103,11 +89,6 @@ export default async function AdminPage() {
         </SettingsSection>
         <SettingsSection id="machines" title={t.hostsTitle} hint={t.hostsHint}>
           <HostsAdmin hosts={hosts} />
-        </SettingsSection>
-        <SettingsSection id="tools" title={t.serversTitle} hint={t.serversWhat}>
-          <div className="tools-slot">
-            <ServersAdmin servers={serverRows} />
-          </div>
         </SettingsSection>
         <SettingsSection id="slack" title={t.slackTitle} hint={t.slackHint}>
           <Link href="/admin/slack" className="card row row-link no-underline">

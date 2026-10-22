@@ -166,10 +166,10 @@ export const FEATURED_CONNECTORS: Connector[] = [
 export const CUSTOM_CONNECTOR = "new";
 
 export function connectorHref(connector: Connector, query?: string) {
-  if (connector.featured) return `/admin/connectors/${connector.id}`;
+  if (connector.featured) return `/connectors/${connector.id}`;
   const params = new URLSearchParams({ id: connector.id });
   if (query?.trim()) params.set("q", query.trim());
-  return `/admin/connectors/catalog?${params}`;
+  return `/connectors/catalog?${params}`;
 }
 
 export function featuredById(id: string) {

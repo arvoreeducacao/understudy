@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CalendarDays, Inbox, LayoutTemplate, ListChecks, MessagesSquare, Puzzle, Settings, UserCog, UsersRound, type LucideIcon } from "lucide-react";
+import { Bot, CalendarDays, Inbox, LayoutTemplate, ListChecks, MessagesSquare, Plug, Puzzle, Settings, UserCog, UsersRound, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,6 +15,7 @@ const ICONS = {
   rooms: MessagesSquare,
   people: UserCog,
   extension: Puzzle,
+  connectors: Plug,
 } satisfies Record<string, LucideIcon>;
 
 export type NavIcon = keyof typeof ICONS;

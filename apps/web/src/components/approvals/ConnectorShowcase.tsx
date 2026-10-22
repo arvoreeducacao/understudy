@@ -211,7 +211,7 @@ export function ManualConnectForm() {
   const set = (patch: Partial<typeof fields>) => setFields((current) => ({ ...current, ...patch }));
 
   useEffect(() => {
-    if (state?.ok && state.id) router.push(`/admin/connectors/${state.id}`);
+    if (state?.ok && state.id) router.push(`/connectors/${state.id}`);
   }, [state, router]);
 
   if (state?.signIn && !pending) return <SignInForm name={fields.name.trim()} url={fields.url.trim()} {...state.signIn} />;
@@ -258,7 +258,7 @@ export function ManualConnectForm() {
 function ManualCta() {
   const t = messages.admin;
   return (
-    <Link href={`/admin/connectors/${CUSTOM_CONNECTOR}`} className="conn-custom">
+    <Link href={`/connectors/${CUSTOM_CONNECTOR}`} className="conn-custom">
       <span className="conn-custom-icon" aria-hidden>
         <Plus size={20} />
       </span>

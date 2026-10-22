@@ -62,6 +62,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/extension" icon="extension">{messages.extension.nav}</NavLink>
           <NavLink href="/templates" icon="templates">{messages.nav.templates}</NavLink>
           <NavLink href="/rooms" icon="rooms">{messages.rooms.nav}</NavLink>
+          <NavLink href="/connectors" icon="connectors">{messages.nav.connectors}</NavLink>
           <NavLink href="/settings" icon="settings">{messages.nav.settings}</NavLink>
           {admin && (
             <NavLink href="/admin" icon="people" badge={pendingUsers}>
