@@ -81,7 +81,7 @@ function here() {
   return typeof window === "undefined" ? "/" : `${window.location.pathname}${window.location.search}`;
 }
 
-function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; initial: AgentTools; admin: boolean }) {
+function ServerPicker({ servers, initial }: { servers: ServerOption[]; initial: AgentTools }) {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
   const [policy, setPolicy] = useState<ToolPolicy>(() => {
     const merged = withLegacyAsks(initial.toolPolicy, initial.askTools);
@@ -100,13 +100,9 @@ function ServerPicker({ servers, initial, admin }: { servers: ServerOption[]; in
     return (
       <div className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-1.5 text-[12.5px]">
         <span className="text-ash">{t.noServersWhat}</span>
-        {admin ? (
-          <Link href="/admin#connected-tools" className="btn sec sm self-start">
-            {t.addConnector}
-          </Link>
-        ) : (
-          <span className="text-smoke">{t.noServersAskAdmin}</span>
-        )}
+        <Link href="/connectors" className="btn sec sm self-start">
+          {t.addConnector}
+        </Link>
       </div>
     );
   }
@@ -165,7 +161,7 @@ export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLa
       <div className="fld">
         <span className="fld-label">{t.toolServers}</span>
         <div className="fld-hint">{t.toolServersHint}</div>
-        <ServerPicker servers={servers} initial={tools} admin={admin} />
+        <ServerPicker servers={servers} initial={tools} />
       </div>
     </>
   );

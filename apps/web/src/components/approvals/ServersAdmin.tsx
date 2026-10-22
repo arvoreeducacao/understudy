@@ -100,7 +100,7 @@ function CeilingRules({ server, tools, limits }: { server: ServerRow; tools: Too
   );
 }
 
-function AccessRules({ server }: { server: ServerRow }) {
+function AccessRules({ server, everyoneAllowed }: { server: ServerRow; everyoneAllowed: boolean }) {
   const t = messages.admin;
   const [everyone, setEveryone] = useState(server.allowedEmails === null);
   const [emails, setEmails] = useState((server.allowedEmails ?? []).join(", "));
@@ -115,6 +115,7 @@ function AccessRules({ server }: { server: ServerRow }) {
   return (
     <div className="flex flex-col gap-2 text-[12.5px]">
       <div className="flex gap-3 flex-wrap items-center">
+        {everyoneAllowed ? (
         <Segmented
           label={t.serverAccess}
           options={[
@@ -129,6 +130,9 @@ function AccessRules({ server }: { server: ServerRow }) {
             } else setEveryone(false);
           }}
         />
+        ) : (
+          <span className="fld-hint">{t.serverOnlyYou}</span>
+        )}
         {saved && <span className="text-green">{t.serverSaved}</span>}
       </div>
       {!everyone && (
@@ -157,13 +161,14 @@ function CheckAgain({ id }: { id: string }) {
   );
 }
 
-export function ConnectedActions({ id }: { id: string }) {
+export function ConnectedActions({ id, removable }: { id: string; removable: boolean }) {
   const t = messages.admin;
   const router = useRouter();
   const [removing, startRemove] = useTransition();
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <CheckAgain id={id} />
+      {removable && (
       <button
         type="button"
         className="btn sec sm"
@@ -171,20 +176,21 @@ export function ConnectedActions({ id }: { id: string }) {
         onClick={() =>
           startRemove(async () => {
             await removeMcpServer(id);
-            router.push("/admin#connected-tools");
+            router.push("/connectors");
           })
         }
       >
         {t.serverRemove}
       </button>
+      )}
     </div>
   );
 }
 
-export function ConnectorSettings({ server, tools, limits }: { server: ServerRow; tools: ToolInfo[] | null; limits: { ask: string[]; never: string[] } }) {
+export function ConnectorSettings({ server, tools, limits, everyoneAllowed }: { server: ServerRow; tools: ToolInfo[] | null; limits: { ask: string[]; never: string[] }; everyoneAllowed: boolean }) {
   return (
     <div className="flex flex-col gap-4">
-      <AccessRules server={server} />
+      <AccessRules server={server} everyoneAllowed={everyoneAllowed} />
       <CeilingRules server={server} tools={tools} limits={limits} />
     </div>
   );
@@ -212,7 +218,7 @@ function ConnectedCard({ server }: { server: ServerRow }) {
   } catch {}
   return (
     <li>
-      <Link href={`/admin/connectors/${known?.id ?? server.id}`} className="conn-card conn-card-link">
+      <Link href={`/connectors/${known?.id ?? server.id}`} className="conn-card conn-card-link">
         <ConnectorLogo connector={known ?? { name: server.name, url: server.url, publisher: { kind: "domain", label: host } }} />
         <span className="min-w-0 flex-1">
           <span className="conn-name">{server.name}</span>
