@@ -7,6 +7,7 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { sendPush } from "../push";
 import { notifyApprovalOnChannel } from "../channels/approval-notify";
+import { dropFromAgentChannelLists } from "../channels/store";
 import { slackApprovalMessage } from "../channels/slack/adapter";
 import type { ApprovalView } from "../hub-types";
 import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
@@ -148,6 +149,7 @@ export class Approvals {
     for (const row of expired) {
       log("approval_expired", { approvalId: row.id, agentId: row.agentId });
       this.settle(row.id, { approved: false, status: "expired", note: brainText.expiredNote });
+      await this.leaveChannelLists(row.agentId, row.id);
       if (row.source === "computer") {
         this.hub.sendToComputer(row.agentId, {
           type: "approval_answer",
@@ -171,6 +173,7 @@ export class Approvals {
     for (const row of cancelled) {
       log("approval_cancelled", { approvalId: row.id, agentId });
       this.settle(row.id, { approved: false, status: "cancelled", note: brainText.stoppedNote });
+      await this.leaveChannelLists(agentId, row.id);
       if (row.source === "computer") {
         this.hub.sendToComputer(agentId, { type: "approval_answer", requestId: row.requestId ?? row.id, approved: false, note: brainText.stoppedNote });
       }
@@ -178,6 +181,10 @@ export class Approvals {
       if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "cancelled");
     }
     return cancelled.length;
+  }
+
+  private async leaveChannelLists(agentId: string, approvalId: string) {
+    await dropFromAgentChannelLists(agentId, "approvals", approvalId).catch((error) => log("approval_channel_list_error", { approvalId, error: String(error) }));
   }
 
   async status(id: string) {
@@ -200,6 +207,7 @@ export class Approvals {
       log("approval_grant", { approvalId: id, agentId: row.agentId, granted });
     }
     this.settle(id, { approved, note, status });
+    await this.leaveChannelLists(row.agentId, id);
     if (row.source === "computer") {
       this.hub.sendToComputer(row.agentId, { type: "approval_answer", requestId: row.requestId ?? id, approved, note });
     }

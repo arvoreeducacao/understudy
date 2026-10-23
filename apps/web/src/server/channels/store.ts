@@ -131,15 +131,17 @@ export async function recordSent(threadId: string, messageId: string, references
 
 const LIST_OF = "case when jsonb_typeof(settings -> $2) = 'array' then settings -> $2 else '[]'::jsonb end";
 
-export async function appendChannelList(channelId: string, key: string, item: Record<string, unknown>, max: number) {
-  await getPool().query(
+export async function appendChannelList(channelId: string, key: string, item: Record<string, unknown>, max: number, uniqueBy?: string) {
+  const unique = uniqueBy ? ` and not exists (select 1 from jsonb_array_elements(${LIST_OF}) as taken(e) where taken.e ->> $5 = $3::jsonb ->> $5)` : "";
+  const result = await getPool().query(
     `update agent_channels set settings = jsonb_set(settings, array[$2::text], (
        select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from (
          select e, n from jsonb_array_elements(${LIST_OF} || jsonb_build_array($3::jsonb)) with ordinality as t(e, n) order by n desc limit $4
        ) kept
-     ), true), updated_at = now() where id = $1`,
-    [channelId, key, JSON.stringify(item), max],
+     ), true), updated_at = now() where id = $1${unique}`,
+    uniqueBy ? [channelId, key, JSON.stringify(item), max, uniqueBy] : [channelId, key, JSON.stringify(item), max],
   );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function dropFromChannelList(channelId: string, key: string, id: string) {
@@ -148,6 +150,15 @@ export async function dropFromChannelList(channelId: string, key: string, id: st
        select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from jsonb_array_elements(${LIST_OF}) with ordinality as t(e, n) where e ->> 'id' is distinct from $3
      ), true), updated_at = now() where id = $1`,
     [channelId, key, id],
+  );
+}
+
+export async function dropFromAgentChannelLists(agentId: string, key: string, id: string) {
+  await getPool().query(
+    `update agent_channels set settings = jsonb_set(settings, array[$2::text], (
+       select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from jsonb_array_elements(${LIST_OF}) with ordinality as t(e, n) where e ->> 'id' is distinct from $3
+     ), true), updated_at = now() where agent_id = $1 and exists (select 1 from jsonb_array_elements(${LIST_OF}) as listed(e) where listed.e ->> 'id' = $3)`,
+    [agentId, key, id],
   );
 }
 
