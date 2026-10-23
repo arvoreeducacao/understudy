@@ -1333,7 +1333,7 @@ button.ac-out { width: 100%; text-align: left; cursor: pointer; font: inherit; f
 .tm-agent { display: flex; gap: 12px; align-items: flex-start; padding: 14px; transition: border-color .15s; }
 .tm-agent:hover { border-color: rgb(255 255 255 / .16); }
 .tm-letter { width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center; font-size: 11.5px; font-weight: 600; color: var(--ash); background: var(--graphite); }
-.tm-note { padding: 12px 14px; font-size: 12.5px; color: var(--ash); line-height: 1.5; }
+.tm-note { padding: 14px 18px; font-size: 12.5px; color: var(--ash); line-height: 1.5; }
 .tm-note b { color: var(--mist); font-weight: 600; }
 .tm-opts { display: flex; flex-direction: column; gap: 8px; }
 .tm-opt { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 11px 13px; border-radius: 14px; border: 1px solid var(--glass-edge); background: transparent; color: var(--ash); font-size: 12.5px; cursor: pointer; }
