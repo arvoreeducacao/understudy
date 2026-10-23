@@ -43,7 +43,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
               {t.agentsTitle} <span>{t.agentsHint(data.team.name)}</span>
             </h2>
             {data.agents.length === 0 ? (
-              <div className="card p-[18px] text-smoke text-[13px]">{t.noAgents}</div>
+              <div className="card p-[14px_18px] text-smoke text-[13px]">{t.noAgents}</div>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
                 {data.agents.map((agent) => (
@@ -70,32 +70,36 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
           <section aria-labelledby="team-chats">
             <h2 id="team-chats" className="tm-h2">
               {t.chatsTitle} <span>{t.chatsHint}</span>
-              <Link href={`/rooms?team=${data.team.id}`} className="ml-auto text-ash text-[12px]">
-                {t.newChat}
-              </Link>
             </h2>
-            {chats.length === 0 ? (
-              <div className="card p-[18px] text-smoke text-[13px]">{data.agents.length ? t.noChats : t.noChatsNoAgents}</div>
-            ) : (
-              <ul className="card st-list p-[14px_18px]">
-                {chats.map((chat) => (
-                  <li key={chat.id}>
-                    <Link href={`/rooms/${chat.id}`} className="flex items-center gap-2.5 min-w-0 flex-1 no-underline">
-                      <span className="tm-letter" aria-hidden>
-                        #
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-white font-medium">{chat.name}</span>
-                        <span className="block truncate text-smoke text-[12px]">{chat.last?.text ?? messages.rooms.noMessages}</span>
-                      </span>
-                      <span className="text-smoke text-[11.5px] flex-none" suppressHydrationWarning>
-                        {formatWhen(chat.last?.createdAt ?? chat.createdAt)}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="card p-[14px_18px] flex flex-col gap-3">
+              {chats.length === 0 ? (
+                <p className="m-0 text-smoke text-[13px]">{data.agents.length ? t.noChats : t.noChatsNoAgents}</p>
+              ) : (
+                <ul className="st-list">
+                  {chats.map((chat) => (
+                    <li key={chat.id}>
+                      <Link href={`/rooms/${chat.id}`} className="flex items-center gap-2.5 min-w-0 flex-1 no-underline">
+                        <span className="tm-letter" aria-hidden>
+                          #
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-white font-medium">{chat.name}</span>
+                          <span className="block truncate text-smoke text-[12px]">{chat.last?.text ?? messages.rooms.noMessages}</span>
+                        </span>
+                        <span className="text-smoke text-[11.5px] flex-none" suppressHydrationWarning>
+                          {formatWhen(chat.last?.createdAt ?? chat.createdAt)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {data.agents.length > 0 && (
+                <Link href={`/rooms?team=${data.team.id}`} className="btn sec sm self-start">
+                  {t.newChat}
+                </Link>
+              )}
+            </div>
           </section>
 
           <section aria-labelledby="team-connectors">
@@ -103,19 +107,21 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
               {t.connectorsTitle} <span>{t.connectorsHint}</span>
             </h2>
             {data.connectors.length === 0 ? (
-              <div className="card p-[18px] text-smoke text-[13px]">{t.noConnectors}</div>
+              <div className="card p-[14px_18px] text-smoke text-[13px]">{t.noConnectors}</div>
             ) : (
-              <ul className="card st-list p-[14px_18px]">
-                {data.connectors.map((connector) => (
-                  <li key={connector.id}>
-                    <span className="tm-letter" aria-hidden>
-                      {connector.name.slice(0, 1).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{connector.name}</span>
-                    <span className="text-smoke text-[12px] truncate">{connector.agents.join(", ")}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="card p-[14px_18px]">
+                <ul className="st-list">
+                  {data.connectors.map((connector) => (
+                    <li key={connector.id}>
+                      <span className="tm-letter" aria-hidden>
+                        {connector.name.slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{connector.name}</span>
+                      <span className="text-smoke text-[12px] truncate">{connector.agents.join(", ")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </section>
         </div>
