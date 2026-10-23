@@ -150,6 +150,13 @@ export const en = {
     answered: (summary: string, approved: boolean, who: string) => `${approved ? ":white_check_mark: Approved" : ":no_entry: Denied"} by ${who}: ${summary}`,
     alreadyAnswered: (summary: string) => `Already answered: ${summary}`,
     stoppedBeforeAnswer: (summary: string) => `:octagonal_sign: Stopped before anyone answered, so it was not done: ${summary}`,
+    approvalClosed: {
+      approved: (who: string, via: string) => `:white_check_mark: Approved by ${who} ${via}`,
+      denied: (who: string, via: string) => `:no_entry: Denied by ${who} ${via}`,
+      expired: ":hourglass: Expired before anyone answered, so it was not done",
+      cancelled: ":octagonal_sign: Stopped before anyone answered, so it was not done",
+      via: { panel: "in the panel", slack: "in Slack", whatsapp: "on WhatsApp", telegram: "on Telegram" } as Record<string, string>,
+    },
     statusTitle: (pending: number, url: string) => (pending > 0 ? `*${pending} waiting for you* (<${url}|open>)` : "*Nothing waiting for you.*"),
     howToTalk: "To talk to one of them, message me starting with its name.",
     state: { calm: "resting", working: "working", waiting_you: "waiting for you", stuck: "stuck", done: "done", thinking: "thinking", listening: "listening" } as Record<string, string>,

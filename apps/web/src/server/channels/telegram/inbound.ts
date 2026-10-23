@@ -138,7 +138,7 @@ async function onCallback(hub: Hub, addressed: AddressedChannel, token: string, 
     return "unknown_approval";
   }
   const approved = match[2] !== "n";
-  const ok = await hub.answerApproval(approval.id, approved, undefined, owner.id, match[2] === "a");
+  const ok = await hub.answerApproval(approval.id, approved, undefined, owner.id, match[2] === "a", "telegram");
   const status = ok ? (approved ? "approved" : "denied") : ((await hub.approvalStatus(approval.id)) ?? "closed");
   const outcome = ok ? copy.channels.answerDone(approved) : copy.channels.answerClosed(copy.approvals.status[status] ?? status);
   await answer(outcome);

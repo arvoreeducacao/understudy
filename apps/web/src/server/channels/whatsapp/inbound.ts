@@ -55,7 +55,7 @@ async function answerFromChat(hub: Hub, addressed: AddressedChannel, context: Wh
     .where(and(eq(schema.approvals.id, target.id), eq(schema.approvals.agentId, addressed.channel.agentId)));
   await dropFromChannelList(addressed.channel.id, "approvals", target.id);
   if (!approval) return null;
-  const ok = await hub.answerApproval(approval.id, reply.approved, undefined, addressed.owner.id);
+  const ok = await hub.answerApproval(approval.id, reply.approved, undefined, addressed.owner.id, false, "whatsapp");
   const status = ok ? (reply.approved ? "approved" : "denied") : ((await hub.approvalStatus(approval.id)) ?? "closed");
   await context.reply(ok ? copy.channels.answerDone(reply.approved) : copy.channels.answerClosed(copy.approvals.status[status] ?? status));
   return ok ? "answered" : "closed";

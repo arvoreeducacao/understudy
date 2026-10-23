@@ -260,6 +260,13 @@
       "when": 1792792157886,
       "tag": "0036_team_privacy",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792794276113,
+      "tag": "0037_approval_slack_messages",
+      "breakpoints": true
     }
   ]
 }
