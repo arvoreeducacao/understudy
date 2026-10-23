@@ -38,12 +38,15 @@ export async function agentAccess(userId: string, agentId: string): Promise<Acce
 }
 
 export async function accessibleAgentIds(userId: string, roles: Access[] = ["owner", "admin", "member", "approver", "viewer"]) {
+  if (roles.includes("viewer") && (await readsEveryAgent(userId))) {
+    return (await getDb().select({ id: schema.agents.id }).from(schema.agents)).map((a) => a.id);
+  }
+  return involvedAgentIds(userId, roles);
+}
+
+export async function involvedAgentIds(userId: string, roles: Access[] = ["owner", "admin", "member", "approver", "viewer"]) {
   const db = getDb();
   const ids = new Set<string>();
-  if (roles.includes("viewer") && (await readsEveryAgent(userId))) {
-    for (const a of await db.select({ id: schema.agents.id }).from(schema.agents)) ids.add(a.id);
-    return [...ids];
-  }
   if (roles.includes("owner")) {
     for (const a of await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.ownerId, userId))) ids.add(a.id);
   }

@@ -51,15 +51,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         nav={
         <nav className="nav">
           <NavLink href="/today" icon="today">{messages.nav.today}</NavLink>
-          <NavLink href="/" exact icon="agents">
-            {messages.nav.agents}
-          </NavLink>
           <NavLink href="/waiting" icon="waiting" badge={waiting + failing}>
             {messages.nav.waiting}
           </NavLink>
+          <NavLink href="/" exact icon="agents">
+            {messages.nav.agents}
+          </NavLink>
           <NavLink href="/recipes" icon="tasks">{messages.nav.recipes}</NavLink>
-          <NavLink href="/extension" icon="extension">{messages.extension.nav}</NavLink>
-          <NavLink href="/templates" icon="templates">{messages.nav.templates}</NavLink>
           <NavLink href="/rooms" icon="rooms">{messages.rooms.nav}</NavLink>
           <NavLink href="/teams" exact icon="team">{messages.teams.nav}</NavLink>
           {teams.map((team) => (
@@ -67,13 +65,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <span className="truncate">{team.name}</span>
             </NavLink>
           ))}
+          <div className="nav-group">{messages.nav.groupTeach}</div>
+          <NavLink href="/templates" icon="templates">{messages.nav.templates}</NavLink>
+          <NavLink href="/extension" icon="extension">{messages.extension.nav}</NavLink>
+          <div className="nav-group">{messages.nav.groupSetup}</div>
           <NavLink href="/connectors" icon="connectors">{messages.nav.connectors}</NavLink>
-          <NavLink href="/settings" icon="settings">{messages.nav.settings}</NavLink>
           {admin && (
             <NavLink href="/admin" icon="people" badge={pendingUsers}>
               {messages.nav.admin}
             </NavLink>
           )}
+          <NavLink href="/settings" icon="settings">{messages.nav.settings}</NavLink>
         </nav>
         }
         who={
