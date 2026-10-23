@@ -1409,6 +1409,10 @@ export const en = {
     deleteConfirm: (team: string) => `Delete ${team}? Its understudies go back to whoever runs them.`,
   },
   rooms: {
+    relayHandoff: (to: string, task: string, line: string) => `@${to}, “${task}” is yours: ${line}`,
+    relayMessage: (to: string, line: string) => `@${to}, ${line}`,
+    relayDone: (task: string, summary: string) => (summary ? `Done with “${task}”: ${summary}` : `Done with “${task}”.`),
+    relayFailed: (task: string, summary: string) => (summary ? `“${task}” did not finish: ${summary}` : `“${task}” did not finish.`),
     justMe: "Just me",
     all: "All",
     groupsTab: "Groups",

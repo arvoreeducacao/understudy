@@ -5,7 +5,10 @@ import { getDb, schema } from "@/lib/db";
 import type { AgentMessageKind } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
+import { messages as copy } from "@/lib/messages";
+import { relayGist } from "@/lib/rooms";
 import type { Hub } from "./hub";
+import { turnRunId } from "./followups";
 import { pairStopped } from "./pair-threads";
 
 export const TALK_KINDS: AgentMessageKind[] = ["message", "handoff"];
@@ -83,6 +86,15 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
     return { depth, refusal };
   };
 
+  const relay = async (to: Teammate, text: (line: string) => string, raw: { note?: string; body: string }, runId: string | null) => {
+    const ownRun = await turnRunId(agent.id, async () => null);
+    if (!ownRun && !hub.turnRoom(agent.id)) return;
+    const line = relayGist(raw.note?.trim() || raw.body);
+    if (!line) return;
+    await hub.rooms.relayTeamwork(agent.id, to.id, text(line), runId ?? ownRun).catch((error) => console.log(JSON.stringify({ event: "room_relay_error", agentId: agent.id, error: String(error) })));
+  };
+  const note = z.string().max(300).optional().describe("One short line for the team group you share with them, if any, written for the people reading it (for example: sweep for the week is ready, 2 changes and 8 with no news). Leave it out and the first words of your text are used.");
+
   return [
     {
       name: "list_teammates",
@@ -97,8 +109,8 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
     {
       name: "message_agent",
       description: "Send a short message to a teammate (by name). It reaches them as a chat turn marked as coming from you. Use it to ask or tell them something the work needs; keep it brief.",
-      schema: z.object({ agent: z.string().min(1).max(200), text: z.string().min(1).max(2000) }),
-      run: (async (args: { agent: string; text: string }) => {
+      schema: z.object({ agent: z.string().min(1).max(200), text: z.string().min(1).max(2000), note }),
+      run: (async (args: { agent: string; text: string; note?: string }) => {
         const to = pickTeammate(await listTeammates(agent), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
         const { depth, refusal } = await guard(to);
@@ -108,15 +120,16 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered, audienceId: hub.turnAudience(agent.id) });
         await hub.addMessage(to.id, "system", `${agent.name}: ${args.text}`, null, undefined, undefined, undefined, undefined, undefined, undefined, hub.turnAudience(agent.id));
+        await relay(to, (line) => copy.rooms.relayMessage(to.name, line), { note: args.note, body: args.text }, null);
         return reply(delivered ? `delivered to ${to.name}` : `${to.name}'s computer is reconnecting; the message is queued and reaches them as soon as it is back (up to 30 minutes)`);
       }) as TeamTool["run"],
     },
     {
       name: "hand_off",
       description:
-        "Start one of a teammate's own tasks (by its title, see list_teammates) with some input for it. The input reaches them as quoted data, and their owner still approves anything irreversible.",
-      schema: z.object({ agent: z.string().min(1).max(200), task: z.string().min(1).max(300), input: z.string().max(20000) }),
-      run: (async (args: { agent: string; task: string; input: string }) => {
+        "Start one of a teammate's own tasks (by its title, see list_teammates) with some input for it. The input reaches them as quoted data, and their owner still approves anything irreversible. During a task, if you share a team group with them, the people there see a short line about it and its result.",
+      schema: z.object({ agent: z.string().min(1).max(200), task: z.string().min(1).max(300), input: z.string().max(20000), note }),
+      run: (async (args: { agent: string; task: string; input: string; note?: string }) => {
         const to = pickTeammate(await listTeammates(agent), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
         const task = pickTask(to.tasks, args.task);
@@ -128,6 +141,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         await getDb()
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "handoff", text: args.input, task: task.title, runId: runId ?? null, depth, delivered: started.ok, audienceId: hub.turnAudience(agent.id) });
+        if (started.ok && runId) await relay(to, (line) => copy.rooms.relayHandoff(to.name, task.title, line), { note: args.note, body: args.input }, runId);
         return reply(started.ok ? `${to.name} started "${task.title}"` : `could not start "${task.title}" for ${to.name}: ${"reason" in started ? started.reason : "unknown"}`, !started.ok);
       }) as TeamTool["run"],
     },

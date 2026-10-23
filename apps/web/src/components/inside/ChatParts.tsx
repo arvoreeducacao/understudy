@@ -12,7 +12,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { answerApproval } from "@/app/actions/approvals";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalFields } from "@/components/approvals/ApprovalFields";
@@ -101,6 +101,7 @@ export function MessageRow({
   onOpenArtifact,
   canAnswerProposal = false,
   proposalHint,
+  footer,
 }: {
   entry: ChatEntry;
   continued: boolean;
@@ -110,6 +111,7 @@ export function MessageRow({
   onOpenArtifact?: () => void;
   canAnswerProposal?: boolean;
   proposalHint?: string;
+  footer?: ReactNode;
 }) {
   const files = agentId && entry.attachments?.length ? <AttachmentList agentId={agentId} attachments={entry.attachments} /> : null;
   if (entry.role === "system") return <SystemRow text={entry.text} at={entry.at} />;
@@ -144,6 +146,7 @@ export function MessageRow({
         {entry.artifact && <ArtifactCard artifact={entry.artifact} onOpen={onOpenArtifact} />}
         {entry.proposal && <ProposalCard proposal={entry.proposal} canAnswer={canAnswerProposal} hint={proposalHint} />}
         {files}
+        {footer}
       </div>
     </div>
   );
