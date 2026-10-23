@@ -332,10 +332,22 @@ export const en = {
     submit: "Save password",
     tooShort: "Use at least 8 characters.",
     expiredTitle: "This link no longer works",
-    expired: "It was used already or expired. Ask an admin for a new one.",
+    expired: "It was used already or expired. Ask for a new one.",
     doneTitle: "Password saved",
     doneBody: "Sign in with your new password.",
     signIn: "Go to sign in",
+    emailSubject: (product: string) => `Choose a new ${product} password`,
+    emailBody: (name: string, url: string) =>
+      `Hi ${name},\n\nSomeone asked to reset the password of your account. If it was you, choose a new one here (the link works once, for one hour):\n\n${url}\n\nIf it wasn't you, ignore this email: your password stays the same.`,
+  },
+  forgotPassword: {
+    link: "Forgot your password?",
+    title: "Reset your password",
+    body: "Type your account's email. We send you a link to choose a new password.",
+    submit: "Send link",
+    sentTitle: "Check your email",
+    sentBody: "If this email has an account, a link to choose a new password is on its way. It works once, for one hour.",
+    back: "Back to sign in",
   },
   setupFirst: {
     title: "Create the first account",

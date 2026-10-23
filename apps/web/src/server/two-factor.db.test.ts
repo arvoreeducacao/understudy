@@ -12,6 +12,7 @@ process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN = "tf.test,staff.tf.test";
 process.env.UNDERSTUDY_GOOGLE_ONLY_DOMAINS = "staff.tf.test";
 process.env.GOOGLE_CLIENT_ID = "test-client";
 process.env.GOOGLE_CLIENT_SECRET = "test-secret";
+process.env.UNDERSTUDY_SMTP_URL = "json";
 
 const ORIGIN = "http://localhost:3998";
 const PASSWORD = "a-long-password";
@@ -118,4 +119,19 @@ test("a Google-only address cannot sign up, sign in with a password or be create
   const ctx = await (await import("@/lib/auth")).getAuth().$context;
   await ctx.internalAdapter.linkAccount({ providerId: "credential", accountId: "usr_tf_bia", userId: "usr_tf_bia", password: await ctx.password.hash(PASSWORD) });
   assert.equal((await post("/sign-in/email", { email: "bia@staff.tf.test", password: PASSWORD })).status, 403);
+});
+
+test("a forgotten password sends a one-hour link, except to a Google-only address", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const resets = async () =>
+    (await getDb().select().from(schema.verification).where(eq(schema.verification.value, userId))).filter((row) => row.identifier.startsWith("reset-password:"));
+  const before = (await resets()).length;
+  const asked = await post("/request-password-reset", { email: "ana@tf.test" });
+  assert.equal(asked.status, 200, JSON.stringify(asked.body));
+  const rows = await resets();
+  assert.equal(rows.length, before + 1);
+  const ttl = rows[rows.length - 1].expiresAt.getTime() - Date.now();
+  assert.ok(ttl > 55 * 60 * 1000 && ttl <= 60 * 60 * 1000);
+  assert.equal((await post("/request-password-reset", { email: "nobody@tf.test" })).status, 200, "an unknown address looks the same");
+  assert.equal((await post("/request-password-reset", { email: "bia@staff.tf.test" })).status, 403);
 });

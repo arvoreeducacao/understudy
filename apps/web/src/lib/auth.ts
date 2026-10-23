@@ -5,6 +5,8 @@ import { nextCookies } from "better-auth/next-js";
 import { twoFactor } from "better-auth/plugins";
 import { accountSource, grantsAdmin, shouldAutoApprove, signUpRefusal } from "./approval-policy";
 import { getDb, schema } from "./db";
+import { sendMail } from "./mail";
+import { RESET_EMAIL_TTL_SECONDS, resetEmail } from "./reset-email";
 import { env, isAdmin, isAdminEmail, isAllowedEmail, isGoogleOnlyEmail } from "./env";
 import { messages } from "./messages";
 
@@ -22,7 +24,18 @@ function createAuth() {
         twoFactor: schema.twoFactor,
       },
     }),
-    emailAndPassword: { enabled: true, minPasswordLength: 8, revokeSessionsOnPasswordReset: true },
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 8,
+      revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: RESET_EMAIL_TTL_SECONDS,
+      sendResetPassword: env.smtpUrl
+        ? async ({ user, token }) => {
+            await sendMail(resetEmail(user, token));
+            console.log(JSON.stringify({ event: "reset_email_sent", userId: user.id }));
+          }
+        : undefined,
+    },
     socialProviders: env.googleEnabled
       ? {
           google: {
@@ -45,7 +58,7 @@ function createAuth() {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email") return;
+        if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email" && ctx.path !== "/request-password-reset") return;
         const email = (ctx.body as { email?: unknown } | undefined)?.email;
         if (typeof email === "string" && isGoogleOnlyEmail(email)) {
           throw new APIError("FORBIDDEN", { message: messages.auth.googleOnly });

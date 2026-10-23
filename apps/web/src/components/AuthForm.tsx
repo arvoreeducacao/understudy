@@ -6,7 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { messages } from "@/lib/messages";
 import { Input } from "@/components/ui/controls";
 
-export function AuthForm({ domains, google, googleOnly }: { domains: string[]; google: boolean; googleOnly: string[] }) {
+export function AuthForm({ domains, google, googleOnly, forgot }: { domains: string[]; google: boolean; googleOnly: string[]; forgot: boolean }) {
   const t = messages.auth;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,6 +112,11 @@ export function AuthForm({ domains, google, googleOnly }: { domains: string[]; g
         <div className="fld">
           <label htmlFor="password">{t.password}</label>
           <Input id="password" name="password" type="password" autoComplete="current-password" required />
+          {forgot && (
+            <Link href="/forgot-password" className="text-[11.5px] text-smoke hover:text-mist mt-1 self-end">
+              {messages.forgotPassword.link}
+            </Link>
+          )}
         </div>
         {error && <div className="err" role="alert">{error}</div>}
         <button type="submit" className="btn pri w-full" disabled={busy}>

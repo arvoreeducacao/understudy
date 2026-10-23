@@ -77,6 +77,12 @@ export const env = {
   get googleEnabled() {
     return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   },
+  get smtpUrl() {
+    return process.env.UNDERSTUDY_SMTP_URL?.trim() || undefined;
+  },
+  get mailFrom() {
+    return process.env.UNDERSTUDY_MAIL_FROM?.trim() || `${this.productName} <no-reply@${new URL(this.publicUrl).hostname}>`;
+  },
   get googleOnlyDomains() {
     if (!this.googleEnabled) return [];
     return list(process.env.UNDERSTUDY_GOOGLE_ONLY_DOMAINS).map((domain) => domain.replace(/^@/, ""));

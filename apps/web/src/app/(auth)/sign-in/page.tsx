@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/AuthForm";
 import { userBlock } from "@/lib/account-gate";
 import { env } from "@/lib/env";
+import { mailEnabled } from "@/lib/mail";
 import { currentUser } from "@/lib/session";
 import { bootstrapAllowed, hasAnyUser } from "@/lib/users";
 
@@ -12,5 +13,5 @@ export default async function SignInPage() {
     redirect(block ? `/${block}` : "/");
   }
   if (bootstrapAllowed() && !(await hasAnyUser())) redirect("/setup");
-  return <AuthForm domains={env.allowedEmailDomains} google={env.googleEnabled} googleOnly={env.googleOnlyDomains} />;
+  return <AuthForm domains={env.allowedEmailDomains} google={env.googleEnabled} googleOnly={env.googleOnlyDomains} forgot={mailEnabled()} />;
 }
