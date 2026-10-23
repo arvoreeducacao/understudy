@@ -1277,6 +1277,9 @@ test("a script that sends something from a page needs the owner's approval and o
   const player = post({ url: "https://abuse.video.example/$rpc/Token/Generate", body: '["x"]', pageUrl: "https://video.example/embed/abc" });
   assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], player, "read pricing table").kind, "drop");
   assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: [] }, [], player).kind, "drop");
+  const analytics = post({ url: "https://www.google-analytics.com/g/collect?v=2&tid=G-TEST", body: "en=page_view", pageUrl: "https://shop.example.com/" });
+  const adsBeacon = post({ url: "https://www.facebook.com/ajax/bz", body: "q=%5B%5D", pageUrl: "https://www.facebook.com/ads/library/" });
+  for (const background of [analytics, adsBeacon]) assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], background, "read pricing table").kind, "drop");
   assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, rules, post({ body: '{"to":["eve@evil.example"]}' })).kind, "rule");
   assert.equal(scriptRequestVerdict({ mode: "recipe" }, [], post()).kind, "block");
   assert.deepEqual(scriptRequestVerdict({ mode: "run", approvalsRequired: false }, [], post()), { kind: "pass" });
