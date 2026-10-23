@@ -5,6 +5,7 @@ import { getDb, schema } from "@/lib/db";
 import { formatWhen } from "@/lib/format";
 import { requireOwnAgent } from "@/lib/session";
 import { inboundConfig } from "@/server/inbound-email/config";
+import { teamGroupsOf } from "@/server/room-store";
 
 export default async function RecipePage({ params }: { params: Promise<{ id: string; recipeId: string }> }) {
   const { id, recipeId } = await params;
@@ -22,6 +23,7 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
     .orderBy(desc(schema.runs.startedAt))
     .limit(10);
   const [watch] = await db.select().from(schema.recipeWatches).where(eq(schema.recipeWatches.recipeId, recipeId));
+  const groups = (await teamGroupsOf(agent.id)).map(({ id, name }) => ({ id, name }));
   const domain = inboundConfig().domain;
   const [inbound] = domain ? await db.select().from(schema.recipeInbound).where(eq(schema.recipeInbound.recipeId, recipeId)) : [];
   const [owner] = domain ? await db.select({ email: schema.user.email }).from(schema.user).where(eq(schema.user.id, agent.ownerId)) : [];
@@ -35,6 +37,8 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
       initialCron={recipe.cron ?? ""}
       initialTimezone={recipe.timezone}
       initialAskAlways={recipe.askAlways}
+      initialRoomId={groups.some((group) => group.id === recipe.roomId) ? recipe.roomId : null}
+      groups={groups}
       initialActive={recipe.active}
       runsDone={recipe.runsDone}
       webhookEnabled={Boolean(recipe.webhookSecretHash)}

@@ -275,6 +275,7 @@ export const recipes = pgTable(
     timezone: text("timezone").notNull().default("UTC"),
     active: boolean("active").notNull().default(false),
     askAlways: boolean("ask_always").notNull().default(false),
+    roomId: text("room_id").references(() => rooms.id, { onDelete: "set null" }),
     runsDone: integer("runs_done").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

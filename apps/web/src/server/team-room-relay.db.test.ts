@@ -16,6 +16,7 @@ const ids = {
   editor: "agt_relay_editor",
   sweep: "rcp_relay_sweep",
   digest: "rcp_relay_digest",
+  scan: "rcp_relay_scan",
 };
 
 const recipe = (title: string): Recipe => ({ title, trigger: "every Monday", steps: [{ id: "s1", text: "Read the sources", mode: "auto" }] }) as Recipe;
@@ -71,6 +72,7 @@ before(async () => {
   await db.insert(schema.recipes).values([
     { id: ids.sweep, agentId: ids.analyst, recipe: recipe("Weekly analysis") },
     { id: ids.digest, agentId: ids.editor, recipe: recipe("Monday digest") },
+    { id: ids.scan, agentId: ids.scout, recipe: recipe("Source scan") },
   ]);
   const store = await import("./teams-store");
   const created = await store.createTeam(ids.owner, { name: "Marketing" });
@@ -111,15 +113,15 @@ async function toolsOf(hub: ReturnType<typeof fakeHub>, agentId: string) {
   const [agent] = await getDb().select().from(schema.agents).where(eq(schema.agents.id, agentId));
   const list = teamTools(hub as never, agent);
   const tool = (name: string) => list.find((t) => t.name === name)!.run as unknown as (args: object) => Promise<{ content: { text: string }[]; isError?: boolean }>;
-  return { handOff: tool("hand_off"), message: tool("message_agent") };
+  return { handOff: tool("hand_off"), message: tool("message_agent"), list: tool("list_teammates") };
 }
 
-async function inRun(agentId: string) {
+async function inRun(agentId: string, recipeId?: string) {
   const { getDb, schema } = await import("@/lib/db");
   const { newId } = await import("@/lib/ids");
   const { noteTurn } = await import("./followups");
   const runId = newId("run");
-  await getDb().insert(schema.runs).values({ id: runId, agentId, trigger: "schedule" });
+  await getDb().insert(schema.runs).values({ id: runId, agentId, trigger: "schedule", ...(recipeId ? { recipeId } : {}) });
   noteTurn(agentId, { runId });
   return runId;
 }
@@ -232,4 +234,124 @@ test("later, a person naming the agent wakes it with those lines in its transcri
   assert.deepEqual(woken.map((d) => d.agentId), [ids.analyst]);
   assert.match(woken[0].prompt ?? "", /Scout \(understudy\): "@Analyst, “Weekly analysis” is yours: sweep is ready"/);
   assert.match(woken[0].prompt ?? "", /The ones under your name are yours/);
+});
+
+test("list_teammates shows, for each teammate, the team groups both are in", { skip }, async () => {
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst, ids.editor]);
+  const editing = await openGroup("editing", [ids.scout, ids.editor]);
+  await openGroup("analysis-only", [ids.analyst, ids.editor]);
+  const { list } = await toolsOf(fakeHub(), ids.scout);
+  const mates = JSON.parse((await list({})).content[0].text) as { name: string; groups: { id: string; name: string }[] }[];
+  const groupsOf = (name: string) => mates.find((mate) => mate.name === name)?.groups.map((group) => group.id).sort();
+  assert.deepEqual(groupsOf("Analyst"), [radar]);
+  assert.deepEqual(groupsOf("Editor"), [radar, editing].sort());
+  assert.deepEqual(mates.find((mate) => mate.name === "Analyst")?.groups, [{ id: radar, name: "competitor-radar" }]);
+});
+
+test("the understudy picks the group by name or id, over the one with the latest activity, and the closing line follows it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { Runs } = await import("./hub/runs");
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  const launch = await openGroup("launch-week", [ids.scout, ids.analyst]);
+  await getDb().update(schema.rooms).set({ updatedAt: new Date(Date.now() - 60_000) }).where(eq(schema.rooms.id, radar));
+  await inRun(ids.scout);
+  const hub = fakeHub();
+  const { handOff, message } = await toolsOf(hub, ids.scout);
+  const result = await handOff({ agent: "Analyst", task: "Weekly analysis", input: "8 sources read", note: "sweep is ready", group: "Competitor-Radar" });
+  assert.equal(result.isError, undefined);
+  assert.equal((await said(radar)).length, 1);
+  assert.equal((await said(launch)).length, 0);
+  const [handoff] = await getDb().select().from(schema.agentMessages).where(eq(schema.agentMessages.fromAgentId, ids.scout));
+  await new Runs(hub as never).finish(ids.analyst, handoff.runId!, true, "Two real moves this week.");
+  assert.deepEqual((await said(radar)).map((line) => line.agentId), [ids.scout, ids.analyst]);
+  assert.equal((await said(launch)).length, 0);
+
+  await message({ agent: "Analyst", text: "Is the launch copy final?", group: launch });
+  assert.equal((await said(launch)).at(-1)?.text, "@Analyst, Is the launch copy final?");
+  assert.deepEqual(hub.delivered.filter((d) => d.type === "room_turn"), []);
+});
+
+test("\"none\" keeps the line out of every group, and the work still happens", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  await inRun(ids.scout);
+  const hub = fakeHub();
+  const { handOff, message } = await toolsOf(hub, ids.scout);
+  assert.equal((await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", group: "none" })).isError, undefined);
+  assert.equal((await message({ agent: "Analyst", text: "quick one", group: "None" })).isError, undefined);
+  assert.deepEqual(await said(radar), []);
+  const sent = await getDb().select().from(schema.agentMessages).where(eq(schema.agentMessages.fromAgentId, ids.scout));
+  assert.equal(sent.length, 2);
+  assert.deepEqual(hub.delivered.map((d) => [d.agentId, d.type]), [[ids.analyst, "chat"]]);
+});
+
+test("a group that is not theirs, or that lacks one of the two, is refused listing the valid ones, before anything is sent or started", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  await openGroup("editing", [ids.scout, ids.editor]);
+  await inRun(ids.scout);
+  const hub = fakeHub();
+  const { handOff, message } = await toolsOf(hub, ids.scout);
+  const wrong = await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", group: "editing" });
+  assert.equal(wrong.isError, true);
+  assert.equal(wrong.content[0].text, `no team group "editing" you can post to with Analyst; use one of: "competitor-radar" (${radar}), or "none" to post in no group`);
+  assert.equal((await message({ agent: "Analyst", text: "hi", group: "room_nope" })).isError, true);
+  assert.deepEqual(await getDb().select().from(schema.agentMessages).where(eq(schema.agentMessages.fromAgentId, ids.scout)), []);
+  assert.deepEqual(await getDb().select().from(schema.runs).where(eq(schema.runs.agentId, ids.analyst)), []);
+  assert.deepEqual(hub.delivered, []);
+});
+
+test("a task with a group of its own posts there, whatever the understudy picks", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  const launch = await openGroup("launch-week", [ids.scout, ids.analyst]);
+  await getDb().update(schema.recipes).set({ roomId: radar }).where(eq(schema.recipes.id, ids.scan));
+  try {
+    await inRun(ids.scout, ids.scan);
+    const { handOff, message } = await toolsOf(fakeHub(), ids.scout);
+    await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", group: "launch-week" });
+    await message({ agent: "Analyst", text: "one more", group: "none" });
+    assert.equal((await said(radar)).length, 2);
+    assert.equal((await said(launch)).length, 0);
+  } finally {
+    await getDb().update(schema.recipes).set({ roomId: null }).where(eq(schema.recipes.id, ids.scan));
+  }
+});
+
+test("a task's group without the teammate in it falls back to the understudy's pick", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const editing = await openGroup("editing", [ids.scout, ids.editor]);
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  await getDb().update(schema.recipes).set({ roomId: editing }).where(eq(schema.recipes.id, ids.scan));
+  try {
+    await inRun(ids.scout, ids.scan);
+    const { handOff } = await toolsOf(fakeHub(), ids.scout);
+    await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", group: "competitor-radar" });
+    assert.equal((await said(radar)).length, 1);
+    assert.deepEqual(await said(editing), []);
+  } finally {
+    await getDb().update(schema.recipes).set({ roomId: null }).where(eq(schema.recipes.id, ids.scan));
+  }
+});
+
+test("picking a group in a private chat still posts nothing", { skip }, async () => {
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  const { noteTurn } = await import("./followups");
+  noteTurn(ids.scout, {});
+  const { handOff, message } = await toolsOf(fakeHub(), ids.scout);
+  await handOff({ agent: "Analyst", task: "Weekly analysis", input: "my private notes", group: "competitor-radar" });
+  await message({ agent: "Analyst", text: "between us", group: radar });
+  assert.deepEqual(await said(radar), []);
+});
+
+test("speaking in a group, the line stays in that group: another one is refused", { skip }, async () => {
+  const radar = await openGroup("competitor-radar", [ids.scout, ids.analyst]);
+  const launch = await openGroup("launch-week", [ids.scout, ids.analyst]);
+  const { message } = await toolsOf(fakeHub(radar), ids.scout);
+  const refused = await message({ agent: "Analyst", text: "hi", group: "launch-week" });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, new RegExp(`use one of: "competitor-radar" \\(${radar}\\), or "none"`));
+  await message({ agent: "Analyst", text: "can you take it?", group: "competitor-radar" });
+  assert.equal((await said(radar)).length, 1);
+  assert.equal((await said(launch)).length, 0);
 });

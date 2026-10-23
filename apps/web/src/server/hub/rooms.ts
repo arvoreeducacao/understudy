@@ -316,9 +316,17 @@ export class Rooms {
     }
   }
 
-  async relayTeamwork(fromId: string, toId: string, text: string, runId: string | null) {
+  async relayTeamwork(fromId: string, toId: string, text: string, runId: string | null, target?: string) {
     const current = this.hub.turnRoom(fromId);
-    const roomId = current ? ((await this.participant(current, toId)) ? current : null) : await sharedTeamRoom(fromId, toId);
+    const roomId = target
+      ? (await this.participant(target, fromId)) && (await this.participant(target, toId))
+        ? target
+        : null
+      : current
+        ? (await this.participant(current, toId))
+          ? current
+          : null
+        : await sharedTeamRoom(fromId, toId);
     if (!roomId) return null;
     const [room] = await getDb().select({ teamId: schema.rooms.teamId }).from(schema.rooms).where(eq(schema.rooms.id, roomId));
     if (!room?.teamId) return null;
