@@ -48,7 +48,7 @@ const JOURNAL_SUMMARY_PROMPT = "The day is over. Write one or two short lines su
 type Job =
   | { kind: "chat"; text: string; from: string; askedBy?: string; fromAgent?: { id: string; name: string }; repeated?: { times: number; since: number }; external?: { channel: string; sender: string }; followup?: { id: string; bookedAt: number; emptyWakes: number }; origin?: string; model?: string; attachments?: Attachment[]; artifactEdit?: ArtifactEditContext }
   | { kind: "recipe"; recordingId: string; events: RecordedEvent[]; description?: string; ownerBrowser?: boolean }
-  | { kind: "room"; roomId: string; prompt: string; model?: string }
+  | { kind: "room"; roomId: string; prompt: string; model?: string; askedBy?: string }
   | { kind: "run"; runId: string; recipe: Recipe; approvalsRequired: boolean; context?: string; webhook?: boolean; model?: string };
 
 type ChatSession = { day: string; id: string };
@@ -533,7 +533,7 @@ export function createAgent(options: {
 
   const turnContext = (job: Job) => {
     if (job.kind === "run") return { runId: job.runId };
-    if (job.kind === "room") return { untrusted: true as const };
+    if (job.kind === "room") return { untrusted: true as const, ...(job.askedBy ? { askedBy: job.askedBy } : {}) };
     if (job.kind !== "chat") return {};
     return {
       ...(job.origin ? { origin: job.origin } : {}),

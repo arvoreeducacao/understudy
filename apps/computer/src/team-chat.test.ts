@@ -45,3 +45,19 @@ test("each team member chats in a session of their own and the turn says who ask
     [{ type: "turn", askedBy: "usr_rafael" }, { type: "turn", askedBy: "usr_tiago" }, { type: "turn", askedBy: "usr_rafael" }, { type: "turn" }],
   );
 });
+
+test("a team group turn says who it is working for", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-team-room-"));
+  const sent: ComputerToServer[] = [];
+  const agent = createAgent({
+    config: { home, workDir: join(home, "work"), serverUrl: "http://x", token: "t" },
+    memory: createMemory(home),
+    settingsFile: join(home, ".understudy", "settings.json"),
+    send: (message) => (sent.push(message), true),
+    today: () => "2026-10-23",
+    runTurn: (() => ({ done: Promise.resolve({ ok: true, text: "", sessionId: "s1" }), cancel: () => {} })) as never,
+  });
+  agent.enqueue({ kind: "room", roomId: "room_1", prompt: "TEAM GROUP CHAT", askedBy: "usr_rafael" });
+  await settle();
+  assert.deepEqual(sent.find((m) => m.type === "turn"), { type: "turn", untrusted: true, askedBy: "usr_rafael" });
+});

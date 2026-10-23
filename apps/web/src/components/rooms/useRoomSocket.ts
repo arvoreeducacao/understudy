@@ -8,6 +8,7 @@ type Handlers = {
   onEntries: (entries: RoomEntry[]) => void;
   onDelta: (agentId: string, streamId: string, text: string) => void;
   onPresence: (participants: RoomPresence[]) => void;
+  onApproval?: (approvalId: string, status: string) => void;
 };
 
 export function useRoomSocket(roomId: string, handlers: Handlers) {
@@ -50,6 +51,7 @@ export function useRoomSocket(roomId: string, handlers: Handlers) {
         } else if (message.type === "message") handlersRef.current.onEntries([message.entry]);
         else if (message.type === "delta") handlersRef.current.onDelta(message.agentId, message.streamId, message.text);
         else if (message.type === "presence") handlersRef.current.onPresence([message.participant]);
+        else if (message.type === "approval") handlersRef.current.onApproval?.(message.approvalId, message.status);
         else if (message.type === "error") setError(message.message);
       };
     }

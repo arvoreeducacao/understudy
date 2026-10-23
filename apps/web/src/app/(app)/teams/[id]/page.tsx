@@ -9,6 +9,8 @@ import { cleanLook } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { STATE_PILL } from "@/lib/state-pill";
+import { formatWhen } from "@/lib/format";
+import { listRooms } from "@/server/room-store";
 import { loadTeam } from "@/server/teams-store";
 
 export default async function TeamPage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,6 +18,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
   const user = await requireUser();
   const data = await loadTeam(id, user.id);
   if (!data) notFound();
+  const chats = (await listRooms(user.id)).filter((room) => room.teamId === id);
   const t = messages.teams;
   const admin = data.role === "admin";
   return (
@@ -62,6 +65,37 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
             {data.agents.length > 0 && <p className="m-0 mt-2.5 fld-hint">{t.addAgentHint}</p>}
+          </section>
+
+          <section aria-labelledby="team-chats">
+            <h2 id="team-chats" className="tm-h2">
+              {t.chatsTitle} <span>{t.chatsHint}</span>
+              <Link href={`/rooms?team=${data.team.id}`} className="ml-auto text-ash text-[12px]">
+                {t.newChat}
+              </Link>
+            </h2>
+            {chats.length === 0 ? (
+              <div className="card p-[18px] text-smoke text-[13px]">{data.agents.length ? t.noChats : t.noChatsNoAgents}</div>
+            ) : (
+              <ul className="card st-list p-[14px_18px]">
+                {chats.map((chat) => (
+                  <li key={chat.id}>
+                    <Link href={`/rooms/${chat.id}`} className="flex items-center gap-2.5 min-w-0 flex-1 no-underline">
+                      <span className="tm-letter" aria-hidden>
+                        #
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-white font-medium">{chat.name}</span>
+                        <span className="block truncate text-smoke text-[12px]">{chat.last?.text ?? messages.rooms.noMessages}</span>
+                      </span>
+                      <span className="text-smoke text-[11.5px] flex-none" suppressHydrationWarning>
+                        {formatWhen(chat.last?.createdAt ?? chat.createdAt)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section aria-labelledby="team-connectors">

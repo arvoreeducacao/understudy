@@ -678,11 +678,26 @@ export const rooms = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("rooms_owner_idx").on(t.ownerId, t.updatedAt)],
+  (t) => [index("rooms_owner_idx").on(t.ownerId, t.updatedAt), index("rooms_team_idx").on(t.teamId)],
+);
+
+export const roomPeople = pgTable(
+  "room_people",
+  {
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index("room_people_user_idx").on(t.userId)],
 );
 
 export const roomParticipants = pgTable(
@@ -697,12 +712,13 @@ export const roomParticipants = pgTable(
     turnDepth: integer("turn_depth"),
     turnStartedAt: timestamp("turn_started_at", { withTimezone: true }),
     followUp: boolean("follow_up").notNull().default(false),
+    askedBy: text("asked_by"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.agentId] }), index("room_participants_agent_idx").on(t.agentId)],
 );
 
-export type RoomAuthor = "owner" | "agent" | "system";
+export type RoomAuthor = "owner" | "person" | "agent" | "system";
 
 export const roomMessages = pgTable(
   "room_messages",
@@ -715,6 +731,7 @@ export const roomMessages = pgTable(
     agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     text: text("text").notNull(),
+    approvalId: text("approval_id"),
     depth: integer("depth").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

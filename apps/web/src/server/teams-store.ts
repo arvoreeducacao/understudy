@@ -21,6 +21,15 @@ function cleanRole(value: unknown): TeamRole {
   return value === "admin" ? "admin" : "member";
 }
 
+type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+function leaveTeamRooms(tx: Tx, teamId: string, who: { userId?: string; agentIds?: string[] }) {
+  const rooms = tx.select({ id: schema.rooms.id }).from(schema.rooms).where(eq(schema.rooms.teamId, teamId));
+  if (who.userId) return tx.delete(schema.roomPeople).where(and(eq(schema.roomPeople.userId, who.userId), inArray(schema.roomPeople.roomId, rooms)));
+  if (who.agentIds?.length) return tx.delete(schema.roomParticipants).where(and(inArray(schema.roomParticipants.agentId, who.agentIds), inArray(schema.roomParticipants.roomId, rooms)));
+  return Promise.resolve();
+}
+
 export async function teamRole(teamId: string, userId: string): Promise<TeamRole | null> {
   const [row] = await getDb()
     .select({ role: schema.teamMembers.role })
@@ -185,10 +194,13 @@ export async function removeMember(teamId: string, actorId: string, userId: stri
   if (!leaving) return { ok: false, error: messages.common.notFound };
   if (leaving === "admin" && (await otherAdmins(teamId, userId)) === 0) return { ok: false, error: messages.teams.lastAdmin };
   await getDb().transaction(async (tx) => {
-    await tx
+    const lent = await tx
       .update(schema.agents)
       .set({ teamId: null, updatedAt: new Date() })
-      .where(and(eq(schema.agents.teamId, teamId), eq(schema.agents.ownerId, userId), eq(schema.agents.teamOwned, false)));
+      .where(and(eq(schema.agents.teamId, teamId), eq(schema.agents.ownerId, userId), eq(schema.agents.teamOwned, false)))
+      .returning({ id: schema.agents.id });
+    await leaveTeamRooms(tx, teamId, { agentIds: lent.map((agent) => agent.id) });
+    await leaveTeamRooms(tx, teamId, { userId });
     await tx.delete(schema.teamMembers).where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.userId, userId)));
   });
   console.log(JSON.stringify({ event: "team_member_removed", teamId, actorId, userId }));
@@ -213,7 +225,10 @@ export async function bringAgent(agentId: string, actorId: string, teamId: strin
   const personal = await personalConnectors(agent.tools);
   const dropped = new Set(personal.map((connector) => connector.id));
   const tools: AgentTools = { ...agent.tools, servers: (agent.tools.servers ?? []).filter((id) => !dropped.has(id)) };
-  await db.update(schema.agents).set({ teamId, teamOwned: owned, tools, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+  await db.transaction(async (tx) => {
+    if (agent.teamId && agent.teamId !== teamId) await leaveTeamRooms(tx, agent.teamId, { agentIds: [agentId] });
+    await tx.update(schema.agents).set({ teamId, teamOwned: owned, tools, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+  });
   console.log(JSON.stringify({ event: "team_agent_added", teamId, agentId, actorId, owned, removedConnectors: personal.length }));
   return { ok: true, removed: personal.map((connector) => connector.name) };
 }
@@ -224,7 +239,11 @@ export async function releaseAgent(agentId: string, actorId: string): Promise<Te
   if (!agent?.teamId) return { ok: false, error: messages.common.notFound };
   const allowed = agent.teamOwned ? (await teamRole(agent.teamId, actorId)) === "admin" : agent.ownerId === actorId;
   if (!allowed) return { ok: false, error: messages.teams.adminsOnly };
-  await db.update(schema.agents).set({ teamId: null, teamOwned: false, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+  const teamId = agent.teamId;
+  await db.transaction(async (tx) => {
+    await leaveTeamRooms(tx, teamId, { agentIds: [agentId] });
+    await tx.update(schema.agents).set({ teamId: null, teamOwned: false, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+  });
   console.log(JSON.stringify({ event: "team_agent_released", teamId: agent.teamId, agentId, actorId }));
   return { ok: true };
 }
