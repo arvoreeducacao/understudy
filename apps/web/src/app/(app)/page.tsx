@@ -100,11 +100,11 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </div>
 
       {canSeeAll && involved.length > 0 && (
-        <nav className="flex gap-2 flex-wrap mt-4" aria-label={t.scopeLabel}>
-          <Link href="/" className={`pill ${showAll ? "" : "s"}`} aria-current={showAll ? undefined : "page"}>
+        <nav className="seg mt-4" aria-label={t.scopeLabel}>
+          <Link href="/" className={`seg-opt ${showAll ? "" : "is-on"}`} aria-current={showAll ? undefined : "page"}>
             {t.scopeMine(involved.length)}
           </Link>
-          <Link href="/?view=all" className={`pill ${showAll ? "s" : ""}`} aria-current={showAll ? "page" : undefined}>
+          <Link href="/?view=all" className={`seg-opt ${showAll ? "is-on" : ""}`} aria-current={showAll ? "page" : undefined}>
             {t.scopeAll(everyone.length)}
           </Link>
         </nav>
