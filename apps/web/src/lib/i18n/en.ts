@@ -237,6 +237,7 @@ export const en = {
     invalid: "Check the value and try again.",
     blocked: (rule: string, detail: string) => `Blocked by your rule "${rule}": ${detail}.`,
     pushTitle: (name: string) => `${name} was stopped by one of your rules`,
+    backgroundBlocked: (request: string, page: string) => `Blocked without asking: ${page} tried to send ${request}, which is not a step of the task. Nothing was sent.`,
   },
   models: {
     title: "How it thinks",

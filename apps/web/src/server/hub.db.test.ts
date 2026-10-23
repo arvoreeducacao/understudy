@@ -127,6 +127,20 @@ test("a computer that connects gets its owner's rules, and a block it reports re
   }
 });
 
+test("a background request the guard dropped is noted in the run it belongs to, and nowhere else", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { Hub } = await import("./hub");
+  const { handleComputerMessage } = await import("./hub/computer-handlers");
+  const hub = new Hub();
+  await handleComputerMessage(hub, ids.agentA, { type: "request_blocked", runId: ids.run, request: "POST https://abuse.video.example/token", pageUrl: "https://video.example/embed/abc" });
+  await handleComputerMessage(hub, ids.agentB, { type: "request_blocked", runId: ids.run, request: "POST https://tracker.example/hit", pageUrl: "https://shop.example/" });
+  const notes = await getDb().select().from(schema.messages).where(eq(schema.messages.role, "system"));
+  const note = notes.find((m) => m.text.includes("https://abuse.video.example/token"));
+  assert.equal(note?.runId, ids.run);
+  assert.equal(note?.agentId, ids.agentA);
+  assert.ok(!notes.some((m) => m.text.includes("tracker.example")));
+});
+
 test("terminal output reaches only the owner's screens, and only the owner can type", { skip }, async () => {
   const { Hub } = await import("./hub");
   const { handleComputerMessage } = await import("./hub/computer-handlers");

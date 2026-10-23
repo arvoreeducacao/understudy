@@ -65,7 +65,7 @@ export type Agent = {
   setModel: (model: string) => void;
   model: () => string | undefined;
   state: () => AgentState;
-  guardEvent: (event: { event: string; summary?: string; ruleId?: string; rule?: string; detail?: string }) => void;
+  guardEvent: (event: { event: string; summary?: string; ruleId?: string; rule?: string; detail?: string; request?: string; pageUrl?: string }) => void;
 };
 
 export const STREAM_INTERVAL_MS = 250;
@@ -604,6 +604,10 @@ export function createAgent(options: {
       if (event.event === "rule_blocked" && event.ruleId) {
         const runId = current?.job.kind === "run" ? current.job.runId : undefined;
         options.send({ type: "rule_blocked", ruleId: String(event.ruleId).slice(0, 200), rule: String(event.rule ?? "").slice(0, 400), detail: String(event.detail ?? "").slice(0, 400), ...(runId ? { runId } : {}) });
+      }
+      if (event.event === "request_blocked" && event.request) {
+        const runId = current?.job.kind === "run" ? current.job.runId : undefined;
+        if (runId) options.send({ type: "request_blocked", runId, request: String(event.request).slice(0, 300), pageUrl: String(event.pageUrl ?? "").slice(0, 300) });
       }
     },
   };

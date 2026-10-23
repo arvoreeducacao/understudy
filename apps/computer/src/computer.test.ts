@@ -814,7 +814,7 @@ test("an ask-first step asks the owner for the exact item, and the approval cove
   assert.equal(decide({ mode: "recipe" }, 'click "Retirar do acervo"', info, approval).kind, "block");
   assert.equal(coveringApproval(approval, run, approval.until + 1), null);
   const post = { method: "POST", url: "https://sheets.example.com/batchUpdate", body: "{}", pageUrl: "https://sheets.example.com/d/1" };
-  assert.equal(scriptRequestVerdict(run, [], post).kind, "ask");
+  assert.equal(scriptRequestVerdict(run, [], post).kind, "drop");
   assert.deepEqual(scriptRequestVerdict(run, [], post, "", approval), { kind: "pass", coveredBy: approval });
   assert.equal(scriptRequestVerdict(run, [{ id: "site", kind: "blocked_site" as const, site: "sheets.example.com" }], post, "", approval).kind, "rule");
   assert.ok(COMMIT_TOOLS.has("browser_handle_dialog"));
@@ -1273,7 +1273,14 @@ test("a script that sends something from a page needs the owner's approval and o
   const run = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post(), "send weekly report");
   assert.equal(run.kind === "ask" && run.stepId, "s4");
   const stray = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post({ method: "delete", body: undefined }));
-  assert.ok(stray.kind === "ask" && stray.summary === "Script sent a DELETE to mail.example.com" && stray.fields[0].value === "Not a step of the recipe" && stray.fields.length === 3);
+  assert.deepEqual(stray, { kind: "drop", request: "DELETE https://mail.example.com/api/send", pageUrl: "https://mail.example.com/inbox" });
+  const player = post({ url: "https://abuse.video.example/$rpc/Token/Generate", body: '["x"]', pageUrl: "https://video.example/embed/abc" });
+  assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], player, "read pricing table").kind, "drop");
+  assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: [] }, [], player).kind, "drop");
+  const analytics = post({ url: "https://www.google-analytics.com/g/collect?v=2&tid=G-TEST", body: "en=page_view", pageUrl: "https://shop.example.com/" });
+  const adsBeacon = post({ url: "https://www.facebook.com/ajax/bz", body: "q=%5B%5D", pageUrl: "https://www.facebook.com/ads/library/" });
+  for (const background of [analytics, adsBeacon]) assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], background, "read pricing table").kind, "drop");
+  assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, rules, post({ body: '{"to":["eve@evil.example"]}' })).kind, "rule");
   assert.equal(scriptRequestVerdict({ mode: "recipe" }, [], post()).kind, "block");
   assert.deepEqual(scriptRequestVerdict({ mode: "run", approvalsRequired: false }, [], post()), { kind: "pass" });
   for (const method of ["GET", "head", "OPTIONS"]) assert.deepEqual(scriptRequestVerdict({ mode: "recipe" }, rules, post({ method, url: "https://gamble.example/" })), { kind: "pass" });
@@ -1304,6 +1311,8 @@ test("owner rules are stored privately, reach the system prompt, and a guard blo
   const agent = createAgent({ config: { home, workDir: home, serverUrl: "http://x", token: "t" }, memory: createMemory(home), settingsFile: join(home, "settings.json"), rulesFile: file, send: (message) => (sent.push(message), true) });
   agent.guardEvent({ event: "rule_blocked", ruleId: "r1", rule: "Never open gamble.example.", detail: "https://gamble.example is on a site your owner blocked" });
   assert.deepEqual(sent.find((message) => message.type === "rule_blocked"), { type: "rule_blocked", ruleId: "r1", rule: "Never open gamble.example.", detail: "https://gamble.example is on a site your owner blocked" });
+  agent.guardEvent({ event: "request_blocked", request: "POST https://abuse.video.example/x", pageUrl: "https://video.example/embed/abc" });
+  assert.equal(sent.some((message) => message.type === "request_blocked"), false);
 });
 
 test("a watched page is read in a background tab, by part, and refused when a rule or scheme forbids it", async () => {
