@@ -10,6 +10,7 @@ import { relayGist } from "@/lib/rooms";
 import type { Hub } from "./hub";
 import { turnRunId } from "./followups";
 import { pairStopped } from "./pair-threads";
+import { teamGroupsOf, type TeamGroup } from "./room-store";
 
 export const TALK_KINDS: AgentMessageKind[] = ["message", "handoff"];
 
@@ -26,7 +27,9 @@ export type TeamTool = {
   run: (args: never) => Promise<ToolResult>;
 };
 
-export type Teammate = { id: string; name: string; role: string; tasks: { id: string; title: string }[] };
+export type Teammate = { id: string; name: string; role: string; tasks: { id: string; title: string }[]; groups: TeamGroup[] };
+
+export const NO_GROUP = "none";
 
 const reply = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
 
@@ -50,6 +53,18 @@ export function pickTask(tasks: { id: string; title: string }[], wanted: string)
   return tasks.find((task) => task.id === wanted.trim()) ?? tasks.find((task) => task.title.trim().toLowerCase() === key) ?? null;
 }
 
+export function pickGroup(groups: TeamGroup[], wanted: string): TeamGroup | null {
+  const key = wanted.trim().toLowerCase();
+  return groups.find((group) => group.id === wanted.trim()) ?? groups.find((group) => group.name.trim().toLowerCase() === key) ?? null;
+}
+
+export function groupRefusal(teammate: string, wanted: string, groups: TeamGroup[]): string {
+  const valid = groups.map((group) => `"${group.name}" (${group.id})`);
+  return groups.length
+    ? `no team group "${wanted}" you can post to with ${teammate}; use one of: ${valid.join(", ")}, or "${NO_GROUP}" to post in no group`
+    : `you share no team group with ${teammate} you can post to here; leave group out or use "${NO_GROUP}"`;
+}
+
 export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId">): Promise<Teammate[]> {
   const db = getDb();
   const agents = await db
@@ -57,6 +72,7 @@ export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId">): Pr
     .from(schema.agents)
     .where(and(ne(schema.agents.id, agent.id), eq(schema.agents.ownerId, agent.ownerId)));
   if (!agents.length) return [];
+  const groups = await teamGroupsOf(agent.id);
   const recipes = await db
     .select({ id: schema.recipes.id, agentId: schema.recipes.agentId, recipe: schema.recipes.recipe })
     .from(schema.recipes)
@@ -66,6 +82,7 @@ export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId">): Pr
     name: row.name,
     role: row.role ?? "",
     tasks: recipes.filter((recipe) => recipe.agentId === row.id).map((recipe) => ({ id: recipe.id, title: recipe.recipe.title })),
+    groups: groups.filter((group) => group.agentIds.includes(row.id)).map((group) => ({ id: group.id, name: group.name })),
   }));
 }
 
@@ -86,33 +103,67 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
     return { depth, refusal };
   };
 
-  const relay = async (to: Teammate, text: (line: string) => string, raw: { note?: string; body: string }, runId: string | null) => {
+  const taskGroup = async () => {
+    const runId = await turnRunId(agent.id, async () => null);
+    if (!runId) return null;
+    const [row] = await getDb()
+      .select({ roomId: schema.recipes.roomId })
+      .from(schema.runs)
+      .innerJoin(schema.recipes, eq(schema.recipes.id, schema.runs.recipeId))
+      .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agent.id)));
+    return row?.roomId ?? null;
+  };
+
+  type Place = { target?: string; skip?: true } | { error: string };
+  const place = async (to: Teammate, wanted: string | undefined): Promise<Place> => {
+    const current = hub.turnRoom(agent.id);
+    const choices = current ? to.groups.filter((group) => group.id === current) : to.groups;
+    const fixed = current ? null : await taskGroup();
+    if (fixed && to.groups.some((group) => group.id === fixed)) return { target: fixed };
+    if (wanted === undefined || !wanted.trim()) return {};
+    if (wanted.trim().toLowerCase() === NO_GROUP) return { skip: true };
+    const group = pickGroup(choices, wanted);
+    return group ? { target: group.id } : { error: groupRefusal(to.name, wanted, choices) };
+  };
+
+  const relay = async (to: Teammate, text: (line: string) => string, raw: { note?: string; body: string }, runId: string | null, where: Place) => {
+    if ("error" in where || where.skip) return;
     const ownRun = await turnRunId(agent.id, async () => null);
     if (!ownRun && !hub.turnRoom(agent.id)) return;
     const line = relayGist(raw.note?.trim() || raw.body);
     if (!line) return;
-    await hub.rooms.relayTeamwork(agent.id, to.id, text(line), runId ?? ownRun).catch((error) => console.log(JSON.stringify({ event: "room_relay_error", agentId: agent.id, error: String(error) })));
+    await hub.rooms.relayTeamwork(agent.id, to.id, text(line), runId ?? ownRun, where.target).catch((error) => console.log(JSON.stringify({ event: "room_relay_error", agentId: agent.id, error: String(error) })));
   };
   const note = z.string().max(300).optional().describe("One short line for the team group you share with them, if any, written for the people reading it (for example: sweep for the week is ready, 2 changes and 8 with no news). Leave it out and the first words of your text are used.");
+  const group = z
+    .string()
+    .max(200)
+    .optional()
+    .describe(
+      `Which team group you share with them shows that line: its id or exact name from list_teammates. Pick the group whose subject matches this work. "${NO_GROUP}" posts in no group. Leave it out and it goes to the shared group with the latest activity. If your task has a group of its own, that one is used.`,
+    );
 
   return [
     {
       name: "list_teammates",
-      description: "List the other understudies you may work with (same owner, or shared with your owner), with their role and the tasks they know.",
+      description:
+        "List the other understudies you may work with (same owner, or shared with your owner), with their role, the tasks they know and the team groups you share with them (id and name), where the people of the team see your hand-offs and messages to them.",
       schema: z.object({}),
       run: (async () => {
         const mates = await listTeammates(agent);
         if (!mates.length) return reply("You have no teammates yet.");
-        return reply(JSON.stringify(mates.map((mate) => ({ name: mate.name, role: mate.role, tasks: mate.tasks.map((task) => task.title) }))));
+        return reply(JSON.stringify(mates.map((mate) => ({ name: mate.name, role: mate.role, tasks: mate.tasks.map((task) => task.title), groups: mate.groups }))));
       }) as TeamTool["run"],
     },
     {
       name: "message_agent",
       description: "Send a short message to a teammate (by name). It reaches them as a chat turn marked as coming from you. Use it to ask or tell them something the work needs; keep it brief.",
-      schema: z.object({ agent: z.string().min(1).max(200), text: z.string().min(1).max(2000), note }),
-      run: (async (args: { agent: string; text: string; note?: string }) => {
+      schema: z.object({ agent: z.string().min(1).max(200), text: z.string().min(1).max(2000), note, group }),
+      run: (async (args: { agent: string; text: string; note?: string; group?: string }) => {
         const to = pickTeammate(await listTeammates(agent), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
+        const where = await place(to, args.group);
+        if ("error" in where) return reply(where.error, true);
         const { depth, refusal } = await guard(to);
         if (refusal) return reply(refusal, true);
         const delivered = (await hub.deliver(to.id, { type: "chat", text: args.text, from: agent.name, fromAgent: { id: agent.id, name: agent.name } }, { source: "team" })).status === "sent";
@@ -120,20 +171,22 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered, audienceId: hub.turnAudience(agent.id) });
         await hub.addMessage(to.id, "system", `${agent.name}: ${args.text}`, null, undefined, undefined, undefined, undefined, undefined, undefined, hub.turnAudience(agent.id));
-        await relay(to, (line) => copy.rooms.relayMessage(to.name, line), { note: args.note, body: args.text }, null);
+        await relay(to, (line) => copy.rooms.relayMessage(to.name, line), { note: args.note, body: args.text }, null, where);
         return reply(delivered ? `delivered to ${to.name}` : `${to.name}'s computer is reconnecting; the message is queued and reaches them as soon as it is back (up to 30 minutes)`);
       }) as TeamTool["run"],
     },
     {
       name: "hand_off",
       description:
-        "Start one of a teammate's own tasks (by its title, see list_teammates) with some input for it. The input reaches them as quoted data, and their owner still approves anything irreversible. During a task, if you share a team group with them, the people there see a short line about it and its result.",
-      schema: z.object({ agent: z.string().min(1).max(200), task: z.string().min(1).max(300), input: z.string().max(20000), note }),
-      run: (async (args: { agent: string; task: string; input: string; note?: string }) => {
+        "Start one of a teammate's own tasks (by its title, see list_teammates) with some input for it. The input reaches them as quoted data, and their owner still approves anything irreversible. During a task, if you share a team group with them, the people there see a short line about it and its result; choose that group with group.",
+      schema: z.object({ agent: z.string().min(1).max(200), task: z.string().min(1).max(300), input: z.string().max(20000), note, group }),
+      run: (async (args: { agent: string; task: string; input: string; note?: string; group?: string }) => {
         const to = pickTeammate(await listTeammates(agent), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
         const task = pickTask(to.tasks, args.task);
         if (!task) return reply(`${to.name} has no task called "${args.task}"; their tasks: ${to.tasks.map((t) => t.title).join(", ") || "none"}`, true);
+        const where = await place(to, args.group);
+        if ("error" in where) return reply(where.error, true);
         const { depth, refusal } = await guard(to);
         if (refusal) return reply(refusal, true);
         const started = await hub.startRun(task.id, "handoff", { input: `From ${agent.name}: ${args.input}` });
@@ -141,7 +194,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         await getDb()
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "handoff", text: args.input, task: task.title, runId: runId ?? null, depth, delivered: started.ok, audienceId: hub.turnAudience(agent.id) });
-        if (started.ok && runId) await relay(to, (line) => copy.rooms.relayHandoff(to.name, task.title, line), { note: args.note, body: args.input }, runId);
+        if (started.ok && runId) await relay(to, (line) => copy.rooms.relayHandoff(to.name, task.title, line), { note: args.note, body: args.input }, runId, where);
         return reply(started.ok ? `${to.name} started "${task.title}"` : `could not start "${task.title}" for ${to.name}: ${"reason" in started ? started.reason : "unknown"}`, !started.ok);
       }) as TeamTool["run"],
     },

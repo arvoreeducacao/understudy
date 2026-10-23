@@ -11,6 +11,7 @@ import { findViolation, normalizeRecipe } from "@understudy/protocol";
 import { hashToken } from "@/lib/ids";
 import { cleanSenderList, inboundLocalPart } from "@/lib/inbound-address";
 import { getHub } from "@/server/hub-access";
+import { teamGroupsOf } from "@/server/room-store";
 import { isValidCron } from "@/server/scheduler";
 import { WATCH_INTERVALS } from "@/lib/watch";
 import { ownRecipe } from "./shared";
@@ -20,6 +21,7 @@ export type RecipeSettings = {
   cron: string;
   timezone: string;
   askAlways: boolean;
+  roomId?: string | null;
 };
 
 export async function saveRecipe(recipeId: string, settings: RecipeSettings) {
@@ -27,6 +29,8 @@ export async function saveRecipe(recipeId: string, settings: RecipeSettings) {
   const cron = settings.cron.trim();
   const timezone = settings.timezone.trim() || process.env.UNDERSTUDY_TIMEZONE || "UTC";
   if (cron && !isValidCron(cron, timezone)) return { ok: false, error: messages.recipe.cronInvalid };
+  const roomId = settings.roomId || null;
+  if (roomId && !(await teamGroupsOf(agent.id)).some((group) => group.id === roomId)) return { ok: false, error: messages.recipe.groupInvalid };
   await getDb()
     .update(schema.recipes)
     .set({
@@ -34,6 +38,7 @@ export async function saveRecipe(recipeId: string, settings: RecipeSettings) {
       cron: cron || null,
       timezone,
       askAlways: settings.askAlways,
+      ...(settings.roomId === undefined ? {} : { roomId }),
       updatedAt: new Date(),
     })
     .where(eq(schema.recipes.id, recipeId));

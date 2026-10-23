@@ -118,22 +118,30 @@ export async function listRooms(userId: string) {
   }));
 }
 
-export async function sharedTeamRoom(agentA: string, agentB: string) {
+export type TeamGroup = { id: string; name: string };
+
+export async function teamGroupsOf(agentId: string): Promise<(TeamGroup & { agentIds: string[] })[]> {
   const db = getDb();
+  const rooms = await db
+    .select({ id: schema.rooms.id, name: schema.rooms.name })
+    .from(schema.roomParticipants)
+    .innerJoin(schema.rooms, eq(schema.rooms.id, schema.roomParticipants.roomId))
+    .where(and(eq(schema.roomParticipants.agentId, agentId), isNotNull(schema.rooms.teamId)))
+    .orderBy(desc(schema.rooms.updatedAt), desc(schema.rooms.createdAt));
+  if (!rooms.length) return [];
   const seats = await db
     .select({ roomId: schema.roomParticipants.roomId, agentId: schema.roomParticipants.agentId })
     .from(schema.roomParticipants)
-    .where(inArray(schema.roomParticipants.agentId, [agentA, agentB]));
-  const ofA = new Set(seats.filter((seat) => seat.agentId === agentA).map((seat) => seat.roomId));
-  const both = [...new Set(seats.filter((seat) => seat.agentId === agentB && ofA.has(seat.roomId)).map((seat) => seat.roomId))];
-  if (!both.length) return null;
-  const [room] = await db
-    .select({ id: schema.rooms.id })
-    .from(schema.rooms)
-    .where(and(inArray(schema.rooms.id, both), isNotNull(schema.rooms.teamId)))
-    .orderBy(desc(schema.rooms.updatedAt), desc(schema.rooms.createdAt))
-    .limit(1);
-  return room?.id ?? null;
+    .where(inArray(schema.roomParticipants.roomId, rooms.map((room) => room.id)));
+  return rooms.map((room) => ({ ...room, agentIds: seats.filter((seat) => seat.roomId === room.id).map((seat) => seat.agentId) }));
+}
+
+export async function sharedTeamGroups(agentA: string, agentB: string): Promise<TeamGroup[]> {
+  return (await teamGroupsOf(agentA)).filter((room) => room.agentIds.includes(agentB)).map(({ id, name }) => ({ id, name }));
+}
+
+export async function sharedTeamRoom(agentA: string, agentB: string) {
+  return (await sharedTeamGroups(agentA, agentB))[0]?.id ?? null;
 }
 
 export async function loadRoomMessages(roomId: string, limit = 200) {

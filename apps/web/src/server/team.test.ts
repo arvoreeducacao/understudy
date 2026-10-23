@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { limitRefusal, pickTask, pickTeammate } from "./team";
+import { groupRefusal, limitRefusal, pickGroup, pickTask, pickTeammate } from "./team";
 import { approvalsRequiredFor } from "../lib/run-policy";
 import { brainText } from "../lib/brain-text";
 
@@ -29,6 +29,18 @@ test("teammates and tasks are found by id or by name, case-insensitively", () =>
   const tasks = [{ id: "rcp_1", title: "Pay supplier invoices" }];
   assert.equal(pickTask(tasks, "pay supplier invoices")?.id, "rcp_1");
   assert.equal(pickTask(tasks, "Something else"), null);
+});
+
+test("team groups are found by id or by exact name, and a wrong one is refused listing the valid ones", () => {
+  const groups = [
+    { id: "room_a", name: "Competitor radar" },
+    { id: "room_b", name: "Launch week" },
+  ];
+  assert.equal(pickGroup(groups, "room_b")?.name, "Launch week");
+  assert.equal(pickGroup(groups, " competitor radar ")?.id, "room_a");
+  assert.equal(pickGroup(groups, "radar"), null);
+  assert.equal(groupRefusal("Ben", "radar", groups), 'no team group "radar" you can post to with Ben; use one of: "Competitor radar" (room_a), "Launch week" (room_b), or "none" to post in no group');
+  assert.match(groupRefusal("Ben", "radar", []), /^you share no team group with Ben .*"none"/);
 });
 
 test("a hand-off always needs approvals and its input is quoted as data", () => {

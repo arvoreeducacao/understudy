@@ -7,6 +7,7 @@ import type { Recipe } from "@understudy/protocol";
 import { runRecipeNow, saveRecipe, setRecipeActive, testRecipe } from "@/app/actions/recipes";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AskCard } from "@/components/recipe/AskCard";
+import { GroupCard } from "@/components/recipe/GroupCard";
 import { QuestionCards } from "@/components/recipe/QuestionCards";
 import { RecentRuns, type RecentRun } from "@/components/recipe/RecentRuns";
 import { ShareTemplateCard } from "@/components/recipe/ShareTemplateCard";
@@ -28,6 +29,8 @@ export function RecipeEditor({
   initialCron,
   initialTimezone,
   initialAskAlways,
+  initialRoomId,
+  groups,
   initialActive,
   runsDone,
   runs,
@@ -43,6 +46,8 @@ export function RecipeEditor({
   initialCron: string;
   initialTimezone: string;
   initialAskAlways: boolean;
+  initialRoomId: string | null;
+  groups: { id: string; name: string }[];
   initialActive: boolean;
   runsDone: number;
   runs: RecentRun[];
@@ -54,6 +59,7 @@ export function RecipeEditor({
   const [cron, setCron] = useState(initialCron);
   const [timezone, setTimezone] = useState(initialTimezone);
   const [askAlways, setAskAlways] = useState(initialAskAlways);
+  const [roomId, setRoomId] = useState(initialRoomId);
   const [active, setActive] = useState(initialActive);
   const [dirty, setDirty] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
@@ -74,7 +80,7 @@ export function RecipeEditor({
   }
 
   async function persist() {
-    const result = await saveRecipe(recipeId, { recipe, cron, timezone, askAlways });
+    const result = await saveRecipe(recipeId, { recipe, cron, timezone, askAlways, roomId });
     if (!result.ok) {
       setNotice({ text: result.error ?? messages.common.error, error: true });
       return false;
@@ -178,6 +184,8 @@ export function RecipeEditor({
         onAskFirstRuns={(askFirstRuns) => update({ askFirstRuns })}
         onAskAlways={edit(setAskAlways)}
       />
+
+      {groups.length > 0 && <GroupCard groups={groups} roomId={roomId} onRoomId={edit(setRoomId)} />}
 
       <div className="rp-more">
         <RecentRuns agentId={agentId} runs={runs} />
