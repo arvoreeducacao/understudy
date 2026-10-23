@@ -13,6 +13,7 @@ export const user = pgTable("user", {
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   admin: boolean("admin").notNull().default(false),
+  adminGrantedAt: timestamp("admin_granted_at", { withTimezone: true }),
   source: text("source"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -67,7 +67,7 @@ export async function authenticateExtension(authorization: string | undefined, n
   if (now.getTime() - row.token.lastUsedAt.getTime() > TOUCH_EVERY_MS) {
     await db.update(schema.extensionTokens).set({ lastUsedAt: now }).where(eq(schema.extensionTokens.id, row.token.id));
   }
-  return { id: row.user.id, name: row.user.name, email: row.user.email, admin: isAdmin(row.user.email, row.user.admin, row.user.source), tokenId: row.token.id };
+  return { id: row.user.id, name: row.user.name, email: row.user.email, admin: isAdmin(row.user.email, row.user.admin, row.user.source, row.user.adminGrantedAt), tokenId: row.token.id };
 }
 
 export async function listExtensionTokens(userId: string) {

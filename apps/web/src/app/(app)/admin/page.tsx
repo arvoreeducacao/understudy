@@ -7,7 +7,7 @@ import { getHub } from "@/server/hub-access";
 import { UserActions } from "@/components/approvals/UserActions";
 import { SettingsSection } from "@/components/ui/Section";
 import { getDb, schema } from "@/lib/db";
-import { isGoogleOnlyEmail } from "@/lib/env";
+import { adminFromServerList, isAdmin, isGoogleOnlyEmail } from "@/lib/env";
 import { formatDate, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireAdmin } from "@/lib/session";
@@ -52,7 +52,9 @@ export default async function AdminPage() {
         <div className="row-title">
           <span className="truncate">{u.name || u.email}</span>
           {u.id === me.id && <span className="pill s">{t.you}</span>}
-          {u.admin && <span className="pill">{t.adminBadge}</span>}
+          {isAdmin(u.email, u.admin, u.source, u.adminGrantedAt) && (
+            <span className="pill">{adminFromServerList(u.email, u.source) ? t.adminFromServerBadge : t.adminBadge}</span>
+          )}
           {u.mustChangePassword && u.status === "approved" && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.mustChange}</span>}
           {!u.mustChangePassword && u.status === "approved" && !u.twoFactorEnabled && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.noTwoFactor}</span>}
           {isGoogleOnlyEmail(u.email) && <span className="pill s">{t.googleOnly}</span>}
@@ -69,6 +71,8 @@ export default async function AdminPage() {
           self={u.id === me.id}
           googleOnly={isGoogleOnlyEmail(u.email)}
           twoFactorEnabled={u.twoFactorEnabled}
+          admin={isAdmin(u.email, u.admin, u.source, u.adminGrantedAt)}
+          adminFromServer={adminFromServerList(u.email, u.source)}
         />
       </div>
     </li>

@@ -51,6 +51,7 @@ function createAuth() {
         mustChangePassword: { type: "boolean", defaultValue: false, input: false },
         admin: { type: "boolean", defaultValue: false, input: false },
         source: { type: "string", required: false, input: false },
+        adminGrantedAt: { type: "date", required: false, input: false },
       },
     },
     session: {
@@ -123,7 +124,7 @@ export type SessionUser = {
 export async function sessionFromHeaders(headers: Headers): Promise<SessionUser | null> {
   const result = await getAuth().api.getSession({ headers });
   if (!result) return null;
-  const u = result.user as Omit<SessionUser, "googleOnly">;
+  const u = result.user as Omit<SessionUser, "googleOnly"> & { adminGrantedAt?: Date | null };
   return {
     id: u.id,
     name: u.name,
@@ -133,6 +134,6 @@ export async function sessionFromHeaders(headers: Headers): Promise<SessionUser 
     mustChangePassword: Boolean(u.mustChangePassword),
     twoFactorEnabled: Boolean(u.twoFactorEnabled),
     googleOnly: isGoogleOnlyEmail(u.email),
-    admin: isAdmin(u.email, Boolean(u.admin), u.source),
+    admin: isAdmin(u.email, Boolean(u.admin), u.source, u.adminGrantedAt),
   };
 }
