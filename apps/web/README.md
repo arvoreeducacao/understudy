@@ -18,7 +18,7 @@ pnpm --filter @understudy/web create-user --email you@example.com --name "Your N
 
 Anyone from a domain in `UNDERSTUDY_ALLOWED_EMAIL_DOMAIN` (one or more, comma separated) can sign up with email and password and waits for an admin to approve them; without an allowed domain, public sign-up is closed. Email and password sign-ups are never verified, so they never become admin and are never approved on their own, and signing up with an address listed in `UNDERSTUDY_ADMIN_EMAILS` is refused. An admin is a listed email whose account was created by an admin, by the `create-user` command, or through Google with a verified email; when the list is empty, the first account created on a fresh database (the `/setup` page) becomes the admin. Admins can create accounts with a temporary password that must be changed at first sign-in. When `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set, Google sign-in appears and verified accounts from an allowed domain get in directly.
 
-Every account that signs in with a password must turn on two-step sign-in (an authenticator app code, with one-time backup codes) before it can use anything; after that, each sign-in on a new device asks for the code. Domains in `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` sign in only with Google and rely on Google's own protection, so they skip the password and two-step steps. When someone forgets their password, an admin creates a one-time link on the People page (valid 24 hours, it signs the person out everywhere) and sends it to them; an admin can also reset someone's two-step sign-in when they lose their phone.
+Every account that signs in with a password must turn on two-step sign-in (an authenticator app code, with one-time backup codes) before it can use anything; after that, each sign-in on a new device asks for the code. Domains in `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` sign in only with Google and rely on Google's own protection, so they skip the password and two-step steps. When `UNDERSTUDY_SMTP_URL` is set, "Forgot your password?" on the sign-in page emails a one-time link valid for one hour. Without email, or for anyone, an admin can also create a one-time link on the People page (valid 24 hours, it signs the person out everywhere) and sends it to them; an admin can also reset someone's two-step sign-in when they lose their phone.
 
 To see the whole loop without real computers, run the fake host. It answers `computer_ensure` with a simulated computer that streams a fixed frame, records, returns a recipe, asks for approval through the gatekeeper and keeps a small memory:
 
@@ -60,6 +60,8 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `UNDERSTUDY_BRIEFING_CRON` | When the daily Slack briefing goes out, default `0 8 * * 1-5`; `off` disables it |
 | `SLACK_BOT_TOKEN` | Optional. Enables approval DMs (`users.lookupByEmail`, `chat.postMessage`) and the `slack_post` tool |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional Google sign-in |
+| `UNDERSTUDY_SMTP_URL` | Optional. Outgoing email as an SMTP URL (`smtps://user:password@host:465`); turns on "Forgot your password?". `json` builds messages without sending them (development) |
+| `UNDERSTUDY_MAIL_FROM` | Optional sender, like `Understudy <no-reply@example.com>`; defaults to no-reply at the panel's host |
 | `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` | Optional. Email domains (comma separated) that must sign in with Google: password sign-in, sign-up and admin-created password accounts are refused for them. Ignored unless Google sign-in is set |
 
 ## Gatekeeper

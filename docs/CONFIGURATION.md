@@ -31,6 +31,8 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_BRIEFING_CRON` | When owners get their daily Slack briefing; default `0 8 * * 1-5` |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Lets understudies talk on Slack; an admin can also paste both in the panel under People |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Adds Google sign-in |
+| `UNDERSTUDY_SMTP_URL` | Outgoing email as an SMTP URL (`smtps://user:password@host:465`); turns on self-service password reset by email. `json` builds messages without sending (development) |
+| `UNDERSTUDY_MAIL_FROM` | Sender of outgoing email; defaults to no-reply at the panel's host |
 | `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` | Domains (comma separated) that sign in only with Google; they skip password and two-step sign-in. Ignored unless Google sign-in is set |
 | `UNDERSTUDY_INBOUND_EMAIL_DOMAIN` | Domain whose mail starts tasks; each task gets `<task>.<random>@<domain>`. Empty turns inbound email off |
 | `UNDERSTUDY_INBOUND_SNS_TOPIC_ARN`, `UNDERSTUDY_INBOUND_S3_BUCKET` | With Amazon SES receiving: the only SNS topic and S3 bucket the panel accepts mail from |
