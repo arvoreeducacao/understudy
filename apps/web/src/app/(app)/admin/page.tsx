@@ -41,7 +41,8 @@ export default async function AdminPage() {
     lastSeen: formatWhen(host.lastSeenAt),
   }));
   const pending = users.filter((u) => u.status === "pending");
-  const others = users.filter((u) => u.status !== "pending");
+  const approved = users.filter((u) => u.status === "approved");
+  const removed = users.filter((u) => u.status === "rejected");
   const person = (u: (typeof users)[number]) => (
     <li key={u.id} className="row">
       <span className="row-av" aria-hidden>
@@ -52,7 +53,6 @@ export default async function AdminPage() {
           <span className="truncate">{u.name || u.email}</span>
           {u.id === me.id && <span className="pill s">{t.you}</span>}
           {u.admin && <span className="pill">{t.adminBadge}</span>}
-          {u.status === "rejected" && <span className="pill c">{t.rejected}</span>}
           {u.mustChangePassword && u.status === "approved" && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.mustChange}</span>}
           {!u.mustChangePassword && u.status === "approved" && !u.twoFactorEnabled && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.noTwoFactor}</span>}
           {isGoogleOnlyEmail(u.email) && <span className="pill s">{t.googleOnly}</span>}
@@ -94,9 +94,16 @@ export default async function AdminPage() {
         </SettingsSection>
         <SettingsSection id="people" title={t.approved} hint={t.approvedHint}>
           <ul className="card rows" aria-label={t.approved}>
-            {others.map(person)}
+            {approved.map(person)}
           </ul>
         </SettingsSection>
+        {removed.length > 0 && (
+          <SettingsSection id="removed" title={`${t.removedTitle} · ${removed.length}`} hint={t.removedHint}>
+            <ul className="card rows" aria-label={t.removedTitle}>
+              {removed.map(person)}
+            </ul>
+          </SettingsSection>
+        )}
         <SettingsSection id="machines" title={t.hostsTitle} hint={t.hostsHint}>
           <HostsAdmin hosts={hosts} />
         </SettingsSection>
