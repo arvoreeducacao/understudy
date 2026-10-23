@@ -7,7 +7,7 @@ import type { ParsedAttachment } from "../../inbound-email/parse";
 import { RateLimiter } from "../../rate-limit";
 import { deliverToAgent, heldCopy, holdMessage, openPeerThread } from "../deliver";
 import { peerListed } from "../peers";
-import { channelByAddress, mergeChannelSettings, type AddressedChannel } from "../store";
+import { channelByAddress, dropFromChannelList, type AddressedChannel } from "../store";
 import { isSelfChat, OWN_MESSAGE_PREFIX, parseApprovalReply, peerOf, type WaIdentity, type WaInbound } from "./message";
 
 export const STALE_MS = 5 * 60 * 1000;
@@ -53,7 +53,7 @@ async function answerFromChat(hub: Hub, addressed: AddressedChannel, context: Wh
     .select({ id: schema.approvals.id })
     .from(schema.approvals)
     .where(and(eq(schema.approvals.id, target.id), eq(schema.approvals.agentId, addressed.channel.agentId)));
-  await mergeChannelSettings(addressed.channel.id, { approvals: pending.filter((item) => item.id !== target.id) });
+  await dropFromChannelList(addressed.channel.id, "approvals", target.id);
   if (!approval) return null;
   const ok = await hub.answerApproval(approval.id, reply.approved, undefined, addressed.owner.id);
   const status = ok ? (reply.approved ? "approved" : "denied") : ((await hub.approvalStatus(approval.id)) ?? "closed");

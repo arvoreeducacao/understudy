@@ -71,6 +71,11 @@ async function settle(ms = 30) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function until(ready: () => boolean | Promise<boolean>, limitMs = 3000) {
+  const end = Date.now() + limitMs;
+  while (!(await ready()) && Date.now() < end) await settle(20);
+}
+
 let counter = 0;
 
 function incoming(remote: string, text: string, fromMe: boolean, extra: Record<string, unknown> = {}) {
@@ -291,8 +296,9 @@ test("with more than one request waiting, a bare answer asks for the code and ap
   await settle(80);
   const first = await hub.approvals.create(ids.agent, { summary: "Pay invoice 7" }, "mcp");
   const second = await hub.approvals.create(ids.agent, { summary: "Pay invoice 8" }, "mcp");
-  await settle(150);
   const code = (summary: string) => String(socket.sent.find((s) => String(s.content.text ?? "").includes(summary))?.content.text).match(/Reply 1 ([A-Z0-9]{3})/)?.[1];
+  await until(() => Boolean(code("Pay invoice 7") && code("Pay invoice 8")));
+  await settle(50);
   const secondCode = code("Pay invoice 8");
   assert.ok(secondCode);
   socket.emit("messages.upsert", { type: "notify", messages: [incoming(`${OWN}@s.whatsapp.net`, "yes", true)] });
@@ -318,4 +324,17 @@ test("a file larger than the limit is dropped while it downloads, whatever size 
   const chat = ws.received.find((m) => m.type === "chat") as { text: string; attachments?: unknown[] };
   assert.equal(chat.text, "here");
   assert.equal(chat.attachments, undefined);
+});
+
+test("requests raised at the same moment are all kept waiting for an answer", { skip }, async () => {
+  await linked();
+  const { getDb, schema } = await import("@/lib/db");
+  const { appendChannelList, dropFromChannelList } = await import("../store");
+  const { pendingApprovals } = await import("./inbound");
+  const [channel] = await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.agentId, ids.agent));
+  await Promise.all(["a", "b", "c", "d"].map((id, index) => appendChannelList(channel.id, "approvals", { code: `C${index}X`, id }, 3)));
+  const read = async () => pendingApprovals((await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.id, channel.id)))[0].settings);
+  assert.equal((await read()).length, 3);
+  await dropFromChannelList(channel.id, "approvals", (await read())[0].id);
+  assert.equal((await read()).length, 2);
 });

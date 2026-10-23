@@ -4,8 +4,8 @@ import type { ChannelAdapter } from "../adapter";
 import { approvalText } from "../approval-text";
 import { channelEnabled } from "../enabled";
 import { readReplyFiles } from "../reply-files";
-import { mergeChannelSettings, recordSent } from "../store";
-import { MAX_PENDING_APPROVALS, pendingApprovals } from "./inbound";
+import { appendChannelList, recordSent } from "../store";
+import { MAX_PENDING_APPROVALS } from "./inbound";
 import { jidOf } from "./message";
 
 export const WHATSAPP_TEXT_LIMIT = 3500;
@@ -51,8 +51,7 @@ export function whatsappAdapter(): ChannelAdapter {
       const me = hub.whatsapp.identity(notice.channel.id);
       if (!me) return false;
       const code = approvalCode();
-      const pending = [...pendingApprovals(notice.channel.settings), { code, id: notice.approval.id }].slice(-MAX_PENDING_APPROVALS);
-      await mergeChannelSettings(notice.channel.id, { approvals: pending });
+      await appendChannelList(notice.channel.id, "approvals", { code, id: notice.approval.id }, MAX_PENDING_APPROVALS);
       const text = [approvalText({ agentName: notice.agentName, approval: notice.approval }), "", copy.channels.whatsappApprovalHow(code)].join("\n");
       for (const part of splitWhatsApp(text)) await hub.whatsapp.send(notice.channel.id, me.jid, { text: part });
       return true;
