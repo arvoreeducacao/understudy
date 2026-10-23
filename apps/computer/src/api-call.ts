@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { describeRule, type OwnerRule } from "@understudy/protocol";
@@ -18,6 +19,12 @@ export const RESPONSE_LIMIT = 25 * 1024 * 1024;
 export const REQUEST_BODY_LIMIT = 1024 * 1024;
 
 export const API_TIMEOUT_MS = 60_000;
+
+export const TOKEN_LIMIT = 64 * 1024;
+
+export const DEFAULT_TOKEN_SECONDS = 23 * 60 * 60;
+
+const tokens = new Map<string, { token: string; until: number }>();
 
 const BLOCKED_HEADERS = /^(host|content-length|transfer-encoding|connection|cookie|proxy-authorization)$/i;
 
@@ -75,6 +82,7 @@ export function requestBody(raw: unknown): { text?: string; json: boolean } | st
 }
 
 export function authHeaderOf(credential: Revealed): string | null {
+  if (credential.tokenPath) return "Authorization";
   if (credential.sendAs === "query") return null;
   if (credential.sendAs === "header") return credential.field ?? null;
   return "Authorization";
@@ -87,6 +95,7 @@ export function basicToken(credential: Revealed): string {
 export function withKey(credential: Revealed, url: URL, headers: Record<string, string>): void {
   if (credential.sendAs === "query" && credential.field) url.searchParams.set(credential.field, credential.secret);
   else if (credential.sendAs === "header" && credential.field) headers[credential.field] = credential.secret;
+  else if (credential.sendAs === "scheme" && credential.field) headers.Authorization = `${credential.field} ${credential.secret}`;
   else if (credential.sendAs === "basic") headers.Authorization = `Basic ${basicToken(credential)}`;
   else headers.Authorization = `Bearer ${credential.secret}`;
 }
@@ -106,6 +115,66 @@ async function readLimited(response: Response, limit: number): Promise<{ bytes: 
     }
     parts.push(Buffer.from(value));
   }
+}
+
+export function forgetTokens(): void {
+  tokens.clear();
+}
+
+function jwtSeconds(token: string, now: number): number | undefined {
+  const payload = token.split(".")[1];
+  if (!payload) return undefined;
+  try {
+    const exp = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))?.exp;
+    return typeof exp === "number" ? exp - Math.floor(now / 1000) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function tokenFrom(text: string, now = Date.now()): { token: string; seconds: number } | null {
+  const trimmed = text.trim();
+  let token: string | undefined;
+  let seconds: number | undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "string") token = parsed.trim();
+    else if (parsed && typeof parsed === "object") {
+      token = [parsed.access_token, parsed.accessToken, parsed.token, parsed.jwt].find((value) => typeof value === "string" && value.trim());
+      seconds = [parsed.expires_in, parsed.expiresIn].find((value) => typeof value === "number");
+    }
+  } catch {
+    if (/^[A-Za-z0-9._~+/=-]{16,8192}$/.test(trimmed)) token = trimmed;
+  }
+  if (!token) return null;
+  return { token, seconds: seconds ?? jwtSeconds(token, now) ?? DEFAULT_TOKEN_SECONDS };
+}
+
+function tokenKey(credential: Revealed): string {
+  return `${credential.site} ${credential.tokenPath} ${createHash("sha256").update(credential.secret).digest("hex")}`;
+}
+
+async function accessToken(credential: Revealed, doFetch: typeof fetch, clean: (text: string) => string): Promise<{ token: string } | string> {
+  const key = tokenKey(credential);
+  const cached = tokens.get(key);
+  if (cached && cached.until > Date.now()) return { token: cached.token };
+  const url = apiTarget(credential.site ?? "", credential.tokenPath ?? "");
+  if (typeof url === "string") return `The token address of this key is not usable. ${url}`;
+  const headers: Record<string, string> = { Accept: "application/json, text/plain, */*" };
+  withKey(credential, url, headers);
+  let response: Response;
+  try {
+    response = await doFetch(url, { method: "POST", headers, redirect: "manual", signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  } catch (error) {
+    return `Could not get an access token: ${clean(String((error as Error).message ?? error))}`;
+  }
+  const { bytes } = await readLimited(response, TOKEN_LIMIT);
+  const text = bytes.toString("utf8");
+  if (response.status < 200 || response.status >= 300) return `Could not get an access token: HTTP ${response.status}. ${clean(text).slice(0, 300)}`.trim();
+  const found = tokenFrom(text);
+  if (!found) return "Could not find an access token in the answer of the token address.";
+  tokens.set(key, { token: found.token, until: Date.now() + Math.max(60, found.seconds - 300) * 1000 });
+  return { token: found.token };
 }
 
 function extensionOf(type: string): string {
@@ -175,13 +244,20 @@ export async function callApi(vault: Vault, args: ApiCallArgs, deps: ApiCallDeps
     if (!answer.approved) return `Not sent: your owner did not approve this call. ${clean(answer.text).slice(0, 300)}`;
   }
 
-  withKey(credential, url, headers);
+  const doFetch = deps.fetch ?? fetch;
+  if (credential.tokenPath) {
+    const got = await accessToken(credential, doFetch, clean);
+    if (typeof got === "string") return got;
+    secrets.push(got.token);
+    headers.Authorization = `Bearer ${got.token}`;
+  } else withKey(credential, url, headers);
   let response: Response;
   try {
-    response = await (deps.fetch ?? fetch)(url, { method, headers, body: body.text, redirect: "manual", signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    response = await doFetch(url, { method, headers, body: body.text, redirect: "manual", signal: AbortSignal.timeout(API_TIMEOUT_MS) });
   } catch (error) {
     return `Failed: ${clean(String((error as Error).message ?? error))}`;
   }
+  if (credential.tokenPath && response.status === 401) tokens.delete(tokenKey(credential));
   const type = response.headers.get("content-type") ?? "";
   const extra = [...response.headers.entries()].filter(([header]) => SHOWN_HEADERS.test(header)).map(([header, value]) => `${header}: ${clean(value)}`);
   const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;

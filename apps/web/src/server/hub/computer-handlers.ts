@@ -225,7 +225,7 @@ export const computerHandlers: Handlers = {
       name: c.name,
       username: c.username,
       site: c.site,
-      ...(c.kind === "api_key" ? { kind: c.kind, sendAs: c.sendAs, ...(c.field ? { field: c.field } : {}) } : {}),
+      ...(c.kind === "api_key" ? { kind: c.kind, sendAs: c.sendAs, ...(c.field ? { field: c.field } : {}), ...(c.tokenPath ? { tokenPath: c.tokenPath } : {}) } : {}),
     }));
     await getDb().update(schema.agents).set({ credentials, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
     hub.broadcast(agentId, { type: "credentials", credentials });

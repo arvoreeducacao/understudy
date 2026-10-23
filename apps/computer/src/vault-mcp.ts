@@ -132,7 +132,7 @@ function replyError(id: unknown, message: string) {
 }
 
 export function describeCredential(entry: CredentialInfo): string {
-  if (entry.kind === "api_key") return `${entry.name}: API key for ${entry.site} (use call_api)`;
+  if (entry.kind === "api_key") return `${entry.name}: API key for ${entry.site}${entry.tokenPath ? ", traded for an access token by the vault" : ""} (use call_api)`;
   return `${entry.name}: ${entry.username}${entry.site ? ` (${entry.site})` : ""}`;
 }
 

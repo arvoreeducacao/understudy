@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { credentialSendAs, credentialSite } from "./credential-site";
+import { credentialSendAs, credentialSite, credentialTokenPath } from "./credential-site";
 
 test("a login is tied to the host of its site", () => {
   assert.equal(credentialSite("https://Bank.example.com/login?x=1"), "bank.example.com");
@@ -23,4 +23,9 @@ test("an API key says how it goes in the call", () => {
   assert.equal(credentialSendAs("header", "bad header"), null);
   assert.equal(credentialSendAs("query", ""), null);
   assert.equal(credentialSendAs("cookie", "x"), null);
+  assert.deepEqual(credentialSendAs("scheme", "ApiKey"), { sendAs: "scheme", field: "ApiKey" });
+  assert.equal(credentialSendAs("scheme", "Api Key"), null);
+  assert.equal(credentialTokenPath(""), undefined);
+  assert.equal(credentialTokenPath(" /oauth/token "), "/oauth/token");
+  assert.equal(credentialTokenPath("https://evil.example/token"), null);
 });
