@@ -387,7 +387,7 @@ export function createAgent(options: {
     };
     let session = (person ? people[person] : persisted.chat[brain]) ?? null;
     if (session && session.day !== day) {
-      await closeDay(job, session).catch((error) => log("agent", `closing the day failed: ${(error as Error).message}`));
+      if (!person) await closeDay(job, session).catch((error) => log("agent", `closing the day failed: ${(error as Error).message}`));
       session = null;
       keep(null);
       save();

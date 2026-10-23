@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { after, before, test } from "node:test";
 import { eq, inArray } from "drizzle-orm";
 
@@ -133,7 +134,7 @@ test("a member's chat and approvals stay with that member", { skip }, async () =
   const hub = new Hub();
   hub.setTurnAudience(ids.ledger, ids.rafael);
   await hub.addMessage(ids.ledger, "user", "north list please", null, ids.rafael, undefined, undefined, undefined, undefined, undefined, ids.rafael);
-  await hub.addMessage(ids.ledger, "agent", "5 schools");
+  await hub.addMessage(ids.ledger, "agent", "5 schools", null, undefined, undefined, undefined, undefined, undefined, undefined, hub.turnAudience(ids.ledger));
   const approvalId = await hub.createApproval(ids.ledger, { summary: "send 3 emails" }, "mcp", 3600);
   hub.setTurnAudience(ids.ledger, null);
   await hub.addMessage(ids.ledger, "system", "weekly run done", "run_x");
@@ -157,4 +158,45 @@ test("a member's chat and approvals stay with that member", { skip }, async () =
   assert.equal(await hub.answerApproval(approvalId, true, undefined, ids.rafael), true);
   const [agent] = await db.select({ note: schema.agents.stateNote }).from(schema.agents).where(eq(schema.agents.id, ids.ledger));
   assert.ok(agent.note === null || !agent.note.includes("send 3 emails"));
+});
+
+test("what reaches a team agent outside a member's turn is not kept private to that member", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { loadChat } = await import("@/lib/views");
+  const { Hub } = await import("./hub");
+  const { computerHandlers } = await import("./hub/computer-handlers");
+  const store = await import("./teams-store");
+  const db = getDb();
+  const teamId = await makeTeam();
+  assert.ok((await store.bringAgent(ids.penny, ids.tiago, teamId, true)).ok);
+  const hub = new Hub();
+  const viewer = () => {
+    const ws = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, received: [] as { type: string }[], send(raw: string) { ws.received.push(JSON.parse(raw)); }, ping() {}, close() {} });
+    return ws;
+  };
+  const [tiagoWs, rafaelWs, marinaWs] = [viewer(), viewer(), viewer()];
+  await hub.attachViewer(tiagoWs as never, ids.penny, ids.tiago, "owner");
+  await hub.attachViewer(rafaelWs as never, ids.penny, ids.rafael, "member");
+  await hub.attachViewer(marinaWs as never, ids.penny, ids.marina, "member");
+
+  await computerHandlers.turn(hub, ids.penny, { type: "turn", askedBy: ids.rafael });
+  await computerHandlers.chat(hub, ids.penny, { type: "chat", role: "understudy", text: "the Aurora refund is 3 days late" } as never);
+  computerHandlers.frame(hub, ids.penny, { type: "frame", jpegBase64: "AAAA", width: 10, height: 10, url: "https://bank.example.test/refunds" });
+  await hub.notifyOwner(ids.penny, "Rafael asked about a refund");
+  await hub.addMessage(ids.penny, "user", "how is the week going?", null, ids.tiago, "slack");
+
+  const frames = (ws: { received: { type: string }[] }) => ws.received.filter((m) => m.type === "frame").length;
+  assert.equal(frames(rafaelWs), 1);
+  assert.equal(frames(tiagoWs), 1);
+  assert.equal(frames(marinaWs), 0);
+  const late = viewer();
+  await hub.attachViewer(late as never, ids.penny, ids.marina, "member");
+  const snapshot = late.received.find((m) => m.type === "snapshot") as { frame: unknown } | undefined;
+  assert.equal(snapshot?.frame, null);
+
+  const texts = async (userId: string) => (await loadChat(ids.penny, 50, userId)).map((m) => m.text);
+  assert.deepEqual(await texts(ids.rafael), ["the Aurora refund is 3 days late", "how is the week going?"]);
+  assert.deepEqual(await texts(ids.tiago), ["Rafael asked about a refund", "how is the week going?"]);
+  assert.deepEqual(await texts(ids.marina), ["how is the week going?"]);
+  await db.delete(schema.messages).where(eq(schema.messages.agentId, ids.penny));
 });

@@ -208,7 +208,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       const result = await hub.askComputer<Extract<ComputerReply, { type: "file_shared" }>>(agent.id, { type: "file_share", requestId: newId("share"), path: args.path }, 10 * 60 * 1000);
       if (result.type === "failed") return text(`not shared: ${result.error === "offline" ? "your computer is not connected to the panel" : "the copy took too long"}`, true);
       if (result.error || !result.attachment) return text(`not shared: ${result.error ?? "unknown error"}`, true);
-      await hub.addMessage(agent.id, "agent", (args.caption ?? "").trim().slice(0, 4000), null, undefined, undefined, undefined, [result.attachment]);
+      await hub.addMessage(agent.id, "agent", (args.caption ?? "").trim().slice(0, 4000), null, undefined, undefined, undefined, [result.attachment], undefined, undefined, hub.turnAudience(agent.id));
       await queueReplyFile(agent.id, result.attachment).catch(() => false);
       return text(`shared "${result.attachment.name}" (${formatBytes(result.attachment.size)}) with your owner; it is in the chat as ~/files/${result.attachment.path}. Do not paste its contents again.`);
     }) as Builtin["run"],
@@ -227,7 +227,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     run: (async (args: { path: string; title: string; artifact_id?: string; note?: string }) => {
       const result = await publishArtifact(hub, agent.id, { path: args.path, title: args.title, artifactId: args.artifact_id?.trim() || undefined, note: args.note });
       if (!result.ok) return text(`not published: ${result.error}`, true);
-      await hub.addMessage(agent.id, "agent", "", null, undefined, undefined, undefined, undefined, result.card);
+      await hub.addMessage(agent.id, "agent", "", null, undefined, undefined, undefined, undefined, result.card, undefined, hub.turnAudience(agent.id));
       return text(
         `published "${result.card.title}" as artifact_id ${result.artifactId}, version ${result.version}. Your owner sees it beside the chat, so do not paste its contents. To change it, edit the file and call publish_artifact again with artifact_id ${result.artifactId}.`,
       );

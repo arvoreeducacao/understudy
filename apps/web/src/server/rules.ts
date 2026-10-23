@@ -32,7 +32,7 @@ export function cleanRules(input: unknown): OwnerRule[] | null {
 }
 
 export async function reportRuleBlock(hub: Hub, agentId: string, rule: string, detail: string, runId?: string | null) {
-  await hub.addMessage(agentId, "system", copy.rules.blocked(rule.slice(0, 300), detail.slice(0, 300)), runId ?? null);
+  await hub.addMessage(agentId, "system", copy.rules.blocked(rule.slice(0, 300), detail.slice(0, 300)), runId ?? null, undefined, undefined, undefined, undefined, undefined, undefined, runId ? null : hub.turnAudience(agentId));
   const [agent] = await getDb().select({ ownerId: schema.agents.ownerId, name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.id, agentId));
   if (!agent) return;
   await sendPush([agent.ownerId], { title: copy.rules.pushTitle(agent.name), body: `${rule} ${detail}`.slice(0, 180), url: runId ? `/runs/${runId}` : `/agents/${agentId}`, tag: `rule-${agentId}` }).catch(() => {});
