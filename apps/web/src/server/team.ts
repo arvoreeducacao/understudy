@@ -53,12 +53,12 @@ export function pickTask(tasks: { id: string; title: string }[], wanted: string)
   return tasks.find((task) => task.id === wanted.trim()) ?? tasks.find((task) => task.title.trim().toLowerCase() === key) ?? null;
 }
 
-export function pickGroup(groups: TeamGroup[], wanted: string): TeamGroup | null {
+export function pickGroup<T extends { id: string; name: string }>(groups: T[], wanted: string): T | null {
   const key = wanted.trim().toLowerCase();
   return groups.find((group) => group.id === wanted.trim()) ?? groups.find((group) => group.name.trim().toLowerCase() === key) ?? null;
 }
 
-export function groupRefusal(teammate: string, wanted: string, groups: TeamGroup[]): string {
+export function groupRefusal(teammate: string, wanted: string, groups: { id: string; name: string }[]): string {
   const valid = groups.map((group) => `"${group.name}" (${group.id})`);
   return groups.length
     ? `no team group "${wanted}" you can post to with ${teammate}; use one of: ${valid.join(", ")}, or "${NO_GROUP}" to post in no group`
