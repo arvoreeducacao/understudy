@@ -160,12 +160,12 @@ test("linking shows a QR code, keeps the session sealed and shows only the end o
   socket.user = { id: `${OWN}:7@s.whatsapp.net` };
   socket.emit("creds.update");
   socket.emit("connection.update", { connection: "open" });
-  await settle();
+  const { getDb, schema } = await import("@/lib/db");
+  const savedCreds = async () => (await getDb().select().from(schema.channelSecrets)).find((row) => row.name === "creds");
+  await until(async () => (await whatsappView(hub, ids.agent)).state === "open" && Boolean(await savedCreds()));
   const open = await whatsappView(hub, ids.agent);
   assert.deepEqual([open.state, open.number], ["open", "+•••••••0000"]);
-  const { getDb, schema } = await import("@/lib/db");
-  const secrets = await getDb().select().from(schema.channelSecrets);
-  const creds = secrets.find((row) => row.name === "creds");
+  const creds = await savedCreds();
   assert.ok(creds && !creds.value.includes("noiseKey"));
   const [channel] = await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.agentId, ids.agent));
   assert.equal(channel.unknownSenders, "ignore");
@@ -179,6 +179,7 @@ test("only the owner's own chat and listed numbers reach the understudy; persona
   socket.emit("messages.upsert", { type: "notify", messages: [incoming(`${FRIEND}@s.whatsapp.net`, "sure, 8pm", true)] });
   socket.emit("messages.upsert", { type: "notify", messages: [incoming("120363000000000000@g.us", "group news", false)] });
   socket.emit("messages.upsert", { type: "append", messages: [incoming(`${OWN}@s.whatsapp.net`, "old history", true)] });
+  await until(() => ws.received.some((m) => m.type === "chat"));
   await settle(100);
   const chats = ws.received.filter((m) => m.type === "chat") as { text: string; from: string; external?: unknown }[];
   assert.deepEqual(chats.map((c) => [c.text, c.from, c.external]), [["What is on my calendar?", "Maya", undefined]]);
@@ -195,7 +196,7 @@ test("a listed number arrives as someone else with its file, and the reply goes 
     type: "notify",
     messages: [{ key: { remoteJid: `${CLIENT}@s.whatsapp.net`, fromMe: false, id: "DOC1" }, message: { documentMessage: { fileName: "invoice.pdf", mimetype: "application/pdf", caption: "Here is the invoice", fileLength: 13 } }, messageTimestamp: Math.floor(Date.now() / 1000), pushName: "Sam Example" }],
   });
-  await settle(100);
+  await until(() => ws.received.some((m) => m.type === "chat"));
   const chat = ws.received.find((m) => m.type === "chat") as { external?: { channel: string; sender: string }; attachments?: { name: string }[]; text: string };
   assert.deepEqual(chat.external, { channel: "whatsapp", sender: "Sam Example (+15550100042)" });
   assert.equal(chat.attachments?.[0].name, "invoice.pdf");
@@ -203,7 +204,7 @@ test("a listed number arrives as someone else with its file, and the reply goes 
   await computerHandlers.turn(hub, ids.agent, { type: "turn", origin: (chat as unknown as { origin: string }).origin } as never);
   await computerHandlers.chat(hub, ids.agent, { type: "chat", role: "understudy", text: "Thanks, I will file it." } as never);
   await computerHandlers.state(hub, ids.agent, { type: "state", state: "calm" } as never);
-  await settle(100);
+  await until(() => socket.sent.some((s) => s.content.text === "Thanks, I will file it."));
   const sent = socket.sent.find((s) => s.content.text === "Thanks, I will file it.");
   assert.equal(sent?.jid, `${CLIENT}@s.whatsapp.net`);
   assert.match(sent?.messageId ?? "", /^USTD[0-9A-F]{16}$/);
