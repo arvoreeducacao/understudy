@@ -73,7 +73,6 @@ export function TwoFactorSetup({ email, needsPassword }: { email: string; needsP
     <form action={confirm} className="card w-full p-6 flex flex-col gap-3">
       <h1 className="m-0 text-[17px] font-semibold">{t.scanTitle}</h1>
       <p className="m-0 text-ash text-[13px]">{t.scanBody}</p>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={enrollment.qr} alt={t.qrAlt} width={192} height={192} className="self-center rounded-[10px] bg-white" />
       <div className="text-smoke text-[12px] text-center">
         {t.manual} <code className="select-all break-all">{enrollment.secret}</code>

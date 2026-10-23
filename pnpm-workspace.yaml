@@ -3,3 +3,5 @@ packages:
   - packages/*
 onlyBuiltDependencies:
   - esbuild
+overrides:
+  ip-address: 10.7.4

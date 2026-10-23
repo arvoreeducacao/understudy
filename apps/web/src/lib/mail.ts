@@ -7,7 +7,6 @@ export function mailEnabled() {
   return Boolean(env.smtpUrl);
 }
 
-// "json" builds the message without sending it, for development and tests.
 function transport(url: string) {
   if (store.__understudyMail?.url !== url) {
     store.__understudyMail = { url, transport: url === "json" ? nodemailer.createTransport({ jsonTransport: true }) : nodemailer.createTransport(url) };

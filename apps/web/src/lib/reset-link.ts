@@ -6,7 +6,6 @@ import { env } from "./env";
 
 export const RESET_LINK_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Same identifier the auth library's own reset flow reads, so its reset endpoint redeems these links.
 const PREFIX = "reset-password:";
 
 export async function issueResetLink(userId: string, now = new Date()) {
