@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentTargets, cleanRoomName, findMentions, isPass, mightBePass, ownerTargets, relayGist, ROOM_LIMITS, roomPrompt, roomRows, teamRoomPrompt, turnActive, wakeRefusal } from "./rooms";
+import { agentTargets, cleanRoomName, findMentions, isPass, mentionHandles, mentionParts, mightBePass, ownerTargets, relayGist, shownText, ROOM_LIMITS, roomPrompt, roomRows, teamRoomPrompt, turnActive, wakeRefusal } from "./rooms";
 
 const members = [
   { id: "a", name: "Ada" },
@@ -105,4 +105,30 @@ test("a relay line keeps a short note as is, takes the first sentence of a long 
   const long = relayGist("word ".repeat(100));
   assert.ok(long.endsWith("…") && long.length <= 180);
   assert.equal(relayGist("   "), "");
+});
+
+test("mentions of people and understudies in the group are found for highlighting, and nothing else", () => {
+  const handles = mentionHandles(["Analyst", "Marina Souza", "Rafael Lima", "Rafael Costa"]);
+  assert.deepEqual(mentionParts("@Analyst, “Weekly analysis” is yours: ready", handles), [
+    { text: "@Analyst", mention: true },
+    { text: ", “Weekly analysis” is yours: ready" },
+  ]);
+  assert.deepEqual(mentionParts("thanks @marina and @Marina Souza, ping @todos", handles), [
+    { text: "thanks " },
+    { text: "@marina", mention: true },
+    { text: " and " },
+    { text: "@Marina Souza", mention: true },
+    { text: ", ping " },
+    { text: "@todos", mention: true },
+  ]);
+  assert.deepEqual(mentionParts("@Rafael and mail@Analyst and @Analysts", handles), [{ text: "@Rafael and mail@Analyst and @Analysts" }]);
+  assert.deepEqual(mentionParts("no handles here", []), [{ text: "no handles here" }]);
+});
+
+test("a team group line is shown from its parts in the language asked for, and any other message as written", async () => {
+  const { messagesFor } = await import("./messages");
+  const relay = { kind: "failed" as const, task: "Monday digest", line: "The page asked for a login." };
+  assert.equal(shownText(messagesFor("pt-BR"), { text: "stored", relay }), "“Monday digest” não terminou: The page asked for a login.");
+  assert.equal(shownText(messagesFor("en"), { text: "stored", relay }), "“Monday digest” did not finish: The page asked for a login.");
+  assert.equal(shownText(messagesFor("pt-BR"), { text: "@Scout can you check?", relay: null }), "@Scout can you check?");
 });

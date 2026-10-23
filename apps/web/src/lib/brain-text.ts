@@ -1,4 +1,8 @@
+export const LANGUAGE_NAMES: Record<string, string> = { en: "English", "pt-BR": "Brazilian Portuguese" };
+
 export const brainText = {
+  groupSummary: (group: string, locale: string) =>
+    `When this run ends, the people of the team group "${group}" see a line with the start of your final summary. They read ${LANGUAGE_NAMES[locale] ?? locale}: open your final summary with one plain sentence in that language saying what came out of the run.`,
   testContext: "This is a test run requested by the owner. Ask for approval before every step that cannot be undone.",
   expiredNote: "timed out",
   outsiderBusy: "not sent: you already reached your owner several times while answering this person. Wait for your owner.",

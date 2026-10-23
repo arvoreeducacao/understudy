@@ -32,9 +32,9 @@ export async function openTeam(input: { name: string; description?: string }) {
   return result;
 }
 
-export async function editTeam(teamId: string, input: { name: string; description?: string }) {
+export async function editTeam(teamId: string, input: { name: string; description?: string; language?: string }) {
   const user = await requireUser();
-  const result = await updateTeam(String(teamId ?? ""), user.id, { name: input?.name, description: input?.description });
+  const result = await updateTeam(String(teamId ?? ""), user.id, { name: input?.name, description: input?.description, language: input?.language });
   if (result.ok) refresh(teamId);
   return result;
 }

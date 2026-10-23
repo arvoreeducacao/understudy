@@ -8,8 +8,8 @@ import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { formatWhen } from "@/lib/format";
 import type { Look } from "@/lib/look";
-import { messages } from "@/lib/messages";
-import { ROOM_LIMITS } from "@/lib/rooms";
+import { messages, messagesFor } from "@/lib/messages";
+import { ROOM_LIMITS, shownText } from "@/lib/rooms";
 import { requireUser } from "@/lib/session";
 import { listPairs } from "@/server/pair-threads";
 import { listRooms } from "@/server/room-store";
@@ -109,7 +109,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
       people: [...room.people.filter((person) => person.id !== user.id).map((person) => person.name.split(" ")[0]), ...room.members.map((member) => member.name)].join(", "),
       faces: room.members,
       author,
-      line: room.last?.text ?? t.noMessages,
+      line: room.last ? shownText(messagesFor(room.teamLanguage), room.last) : t.noMessages,
       at: room.last?.createdAt ?? room.createdAt,
       tag: room.teamId ? (room.teamName ?? "") : t.justMe,
       teamTag: Boolean(room.teamId),

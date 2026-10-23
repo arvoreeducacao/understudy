@@ -5,14 +5,16 @@ import { useState, useTransition } from "react";
 import { editTeam, removeFromTeam, removeTeam } from "@/app/actions/teams";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Field, Input } from "@/components/ui/controls";
+import { Select } from "@/components/ui/Select";
 import { PanelSection } from "@/components/workspace/PanelSection";
-import { messages } from "@/lib/messages";
+import { LOCALES, messages } from "@/lib/messages";
 
-export function TeamAdmin({ teamId, admin, name, description, me }: { teamId: string; admin: boolean; name: string; description: string; me: string }) {
+export function TeamAdmin({ teamId, admin, name, description, language, me }: { teamId: string; admin: boolean; name: string; description: string; language: string; me: string }) {
   const t = messages.teams;
   const router = useRouter();
   const [draftName, setDraftName] = useState(name);
   const [draftDescription, setDraftDescription] = useState(description);
+  const [draftLanguage, setDraftLanguage] = useState(language);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -42,7 +44,7 @@ export function TeamAdmin({ teamId, admin, name, description, me }: { teamId: st
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault();
-          run(() => editTeam(teamId, { name: draftName, description: draftDescription }), () => router.refresh());
+          run(() => editTeam(teamId, { name: draftName, description: draftDescription, language: draftLanguage }), () => router.refresh());
         }}
       >
         <Field label={t.nameLabel}>
@@ -51,7 +53,10 @@ export function TeamAdmin({ teamId, admin, name, description, me }: { teamId: st
         <Field label={t.descriptionLabel}>
           <Input value={draftDescription} onChange={(e) => setDraftDescription(e.target.value)} maxLength={200} />
         </Field>
-        <button type="submit" className="btn pri sm self-start" disabled={pending || (draftName === name && draftDescription === description)}>
+        <Field label={t.languageLabel} hint={t.languageHint}>
+          <Select aria-label={t.languageLabel} value={draftLanguage} onChange={setDraftLanguage} options={LOCALES.map((locale) => ({ value: locale, label: t.languageName(locale) }))} />
+        </Field>
+        <button type="submit" className="btn pri sm self-start" disabled={pending || (draftName === name && draftDescription === description && draftLanguage === language)}>
           {t.save}
         </button>
       </form>

@@ -6,7 +6,8 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { TeamAdmin } from "@/components/teams/TeamAdmin";
 import { TeamPeople } from "@/components/teams/TeamPeople";
 import { cleanLook } from "@/lib/look";
-import { messages } from "@/lib/messages";
+import { localeOr, messages, messagesFor } from "@/lib/messages";
+import { shownText } from "@/lib/rooms";
 import { requireUser } from "@/lib/session";
 import { STATE_PILL } from "@/lib/state-pill";
 import { formatWhen } from "@/lib/format";
@@ -84,7 +85,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-white font-medium">{chat.name}</span>
-                          <span className="block truncate text-smoke text-[12px]">{chat.last?.text ?? messages.rooms.noMessages}</span>
+                          <span className="block truncate text-smoke text-[12px]">{chat.last ? shownText(messagesFor(chat.teamLanguage), chat.last) : messages.rooms.noMessages}</span>
                         </span>
                         <span className="text-smoke text-[11.5px] flex-none" suppressHydrationWarning>
                           {formatWhen(chat.last?.createdAt ?? chat.createdAt)}
@@ -136,7 +137,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
           <div className="card tm-note">
             <b>{t.rulesTitle}</b> {t.rulesBody}
           </div>
-          <TeamAdmin teamId={data.team.id} admin={admin} name={data.team.name} description={data.team.description} me={user.id} />
+          <TeamAdmin teamId={data.team.id} admin={admin} name={data.team.name} description={data.team.description} language={localeOr(data.team.language)} me={user.id} />
         </div>
       </div>
     </div>

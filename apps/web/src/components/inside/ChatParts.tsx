@@ -22,7 +22,7 @@ import { currentLocale, messages } from "@/lib/messages";
 import type { ApprovalView, ChatEntry } from "@/server/hub-types";
 import { ArtifactCard, ArtifactEditChip } from "@/components/artifacts/ArtifactCard";
 import { AttachmentChip, AttachmentList } from "./FileCards";
-import { Markdown } from "./Markdown";
+import { Markdown, MentionText } from "./Markdown";
 import { ProposalCard } from "./ProposalCard";
 import type { AttachmentsState } from "./useAttachments";
 
@@ -126,7 +126,11 @@ export function MessageRow({
           </div>
         )}
         {entry.artifact && <ArtifactEditChip artifact={entry.artifact} onOpen={onOpenArtifact} />}
-        {entry.text && <div className="cx-bubble">{entry.text}</div>}
+        {entry.text && (
+          <div className="cx-bubble">
+            <MentionText text={entry.text} />
+          </div>
+        )}
         {files}
       </div>
     );

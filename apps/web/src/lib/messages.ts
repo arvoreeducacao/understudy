@@ -15,6 +15,14 @@ export function currentLocale() {
   return serverLocale();
 }
 
+export function localeOr(wanted: string | null | undefined) {
+  return wanted && dictionaries[wanted] ? wanted : serverLocale();
+}
+
+export function messagesFor(locale: string | null | undefined): Messages {
+  return dictionaries[localeOr(locale)] ?? en;
+}
+
 function dictionary(): Messages {
   return dictionaries[currentLocale()] ?? en;
 }

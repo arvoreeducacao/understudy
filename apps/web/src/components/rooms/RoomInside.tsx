@@ -12,8 +12,9 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { Composer, DayDivider, MessageRow, StreamingRow, WorkingRow } from "@/components/inside/ChatParts";
 import { useSpeech } from "@/components/live/useSpeech";
 import type { Look } from "@/lib/look";
-import { messages } from "@/lib/messages";
-import { findMentions, mentionsEveryone, mightBePass, roomRows } from "@/lib/rooms";
+import { messages, messagesFor, type Messages } from "@/lib/messages";
+import { MentionHandles, MentionText } from "@/components/inside/Markdown";
+import { findMentions, mentionHandles, mentionsEveryone, mightBePass, roomRows, shownText } from "@/lib/rooms";
 import { Select } from "@/components/ui/Select";
 import type { ChatEntry, RoomEntry, RoomPresence } from "@/server/hub-types";
 import { useRoomSocket } from "./useRoomSocket";
@@ -24,8 +25,8 @@ type Draft = { agentId: string; streamId: string; text: string };
 
 type Person = { id: string; name: string };
 
-function asChat(entry: RoomEntry): ChatEntry {
-  return { id: entry.id, role: entry.author === "owner" || entry.author === "person" ? "user" : entry.author === "agent" ? "agent" : "system", text: entry.text, at: entry.at };
+function asChat(entry: RoomEntry, words: Messages): ChatEntry {
+  return { id: entry.id, role: entry.author === "owner" || entry.author === "person" ? "user" : entry.author === "agent" ? "agent" : "system", text: shownText(words, entry), at: entry.at };
 }
 
 function initials(name: string) {
@@ -48,7 +49,9 @@ function PersonRow({ entry, name, continued }: { entry: RoomEntry; name: string;
             <time dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
           </div>
         )}
-        <div className="rm-person-bubble">{entry.text}</div>
+        <div className="rm-person-bubble">
+          <MentionText text={entry.text} />
+        </div>
       </div>
     </div>
   );
@@ -120,7 +123,7 @@ export function RoomInside({
   initial: RoomEntry[];
   ceiling: number | null;
   me?: string;
-  team?: { id: string; name: string } | null;
+  team?: { id: string; name: string; language?: string } | null;
   people?: Person[];
   approvals?: Record<string, string>;
   addable?: { agents: Person[]; people: Person[] };
@@ -132,6 +135,8 @@ export function RoomInside({
   const [statuses, setStatuses] = useState(approvals);
   const [adding, setAdding] = useState("");
   const personName = useMemo(() => new Map(people.map((person) => [person.id, person.name])), [people]);
+  const words = useMemo(() => messagesFor(team?.language), [team?.language]);
+  const handles = useMemo(() => mentionHandles([...members, ...people].map((who) => who.name)), [members, people]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [presence, setPresence] = useState<Record<string, RoomPresence>>(() =>
     Object.fromEntries(members.map((member) => [member.id, { agentId: member.id, working: false, note: null, online: member.online }])),
@@ -243,44 +248,46 @@ export function RoomInside({
               <p>{team ? t.emptyTeamRoom : t.emptyRoom}</p>
             </div>
           )}
-          {rows.map((row) => {
-            if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
-            const member = row.entry.agentId ? byId.get(row.entry.agentId) : undefined;
-            if (row.entry.approvalId) {
+          <MentionHandles.Provider value={handles}>
+            {rows.map((row) => {
+              if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
+              const member = row.entry.agentId ? byId.get(row.entry.agentId) : undefined;
+              if (row.entry.approvalId) {
+                return (
+                  <ApprovalRow
+                    key={`${row.key}-${statuses[row.entry.approvalId] ?? "pending"}`}
+                    entry={row.entry}
+                    agentName={member?.name ?? t.someoneWhoLeft}
+                    look={member?.look ?? ({} as Look)}
+                    asker={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft}
+                    mine={row.entry.userId === me}
+                    status={statuses[row.entry.approvalId] ?? "pending"}
+                  />
+                );
+              }
+              if (row.entry.author === "person" && row.entry.userId !== me) {
+                return <PersonRow key={row.key} entry={row.entry} name={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft} continued={row.continued} />;
+              }
               return (
-                <ApprovalRow
-                  key={`${row.key}-${statuses[row.entry.approvalId] ?? "pending"}`}
-                  entry={row.entry}
+                <MessageRow
+                  key={row.key}
+                  entry={asChat(row.entry, words)}
+                  continued={row.continued}
                   agentName={member?.name ?? t.someoneWhoLeft}
                   look={member?.look ?? ({} as Look)}
-                  asker={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft}
-                  mine={row.entry.userId === me}
-                  status={statuses[row.entry.approvalId] ?? "pending"}
+                  footer={
+                    row.entry.runId && row.entry.author === "agent" ? (
+                      <div className="rm-run-link">
+                        <Link href={`/runs/${row.entry.runId}`} className="text-sky">
+                          {t.openRun}
+                        </Link>
+                      </div>
+                    ) : undefined
+                  }
                 />
               );
-            }
-            if (row.entry.author === "person" && row.entry.userId !== me) {
-              return <PersonRow key={row.key} entry={row.entry} name={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft} continued={row.continued} />;
-            }
-            return (
-              <MessageRow
-                key={row.key}
-                entry={asChat(row.entry)}
-                continued={row.continued}
-                agentName={member?.name ?? t.someoneWhoLeft}
-                look={member?.look ?? ({} as Look)}
-                footer={
-                  row.entry.runId && row.entry.author === "agent" ? (
-                    <div className="rm-run-link">
-                      <Link href={`/runs/${row.entry.runId}`} className="text-sky">
-                        {t.openRun}
-                      </Link>
-                    </div>
-                  ) : undefined
-                }
-              />
-            );
-          })}
+            })}
+          </MentionHandles.Provider>
           {visibleDrafts.map((d) => {
             const member = byId.get(d.agentId);
             return member ? <StreamingRow key={d.streamId} text={d.text} agentName={member.name} look={member.look} /> : null;

@@ -1,4 +1,27 @@
 import { pastCeiling } from "./agent-talk";
+import type { Messages } from "./messages";
+
+export type RoomRelay =
+  | { kind: "handoff"; to: string; task: string; line: string }
+  | { kind: "message"; to: string; line: string }
+  | { kind: "done" | "failed"; task: string; line: string };
+
+export function relayText(words: Messages, relay: RoomRelay) {
+  switch (relay.kind) {
+    case "handoff":
+      return words.rooms.relayHandoff(relay.to, relay.task, relay.line);
+    case "message":
+      return words.rooms.relayMessage(relay.to, relay.line);
+    case "done":
+      return words.rooms.relayDone(relay.task, relay.line);
+    case "failed":
+      return words.rooms.relayFailed(relay.task, relay.line);
+  }
+}
+
+export function shownText(words: Messages, entry: { text: string; relay?: RoomRelay | null }) {
+  return entry.relay ? relayText(words, entry.relay) : entry.text;
+}
 
 export const ROOM_LIMITS = {
   minParticipants: 2,
@@ -32,6 +55,36 @@ function firstName(name: string) {
 
 export function mentionsEveryone(text: string) {
   return EVERYONE.some((word) => mentioned(text, word));
+}
+
+export type MentionPart = { text: string; mention?: true };
+
+export function mentionHandles(names: string[]): string[] {
+  const firsts = new Map<string, number>();
+  for (const name of names) {
+    const key = firstName(name).toLowerCase();
+    firsts.set(key, (firsts.get(key) ?? 0) + 1);
+  }
+  const handles = names.flatMap((name) => {
+    const first = firstName(name);
+    return first !== name.trim() && firsts.get(first.toLowerCase()) === 1 ? [name.trim(), first] : [name.trim()];
+  });
+  return [...new Set([...handles, ...EVERYONE].filter(Boolean))].sort((a, b) => b.length - a.length);
+}
+
+export function mentionParts(text: string, handles: string[]): MentionPart[] {
+  if (!handles.length || !text.includes("@")) return [{ text }];
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_@])(@(?:${handles.map(escape).join("|")}))(?![\\p{L}\\p{N}_])`, "giu");
+  const parts: MentionPart[] = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = (match.index ?? 0) + match[1].length;
+    if (start > last) parts.push({ text: text.slice(last, start) });
+    parts.push({ text: match[2], mention: true });
+    last = start + match[2].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  return parts;
 }
 
 export function findMentions(text: string, members: RoomMember[]): string[] {

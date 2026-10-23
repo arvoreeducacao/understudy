@@ -1,15 +1,32 @@
 import { Check, Copy } from "lucide-react";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useMemo, useState, type ReactNode } from "react";
 import { chartScene, COMPACT_CHART, parseChart, type ChartTone } from "@/lib/chart";
 import { columnAlign, parseMarkdown, type Block, type Inline } from "@/lib/markdown";
 import { messages } from "@/lib/messages";
+import { mentionParts } from "@/lib/rooms";
+
+export const MentionHandles = createContext<string[]>([]);
+
+export function MentionText({ text }: { text: string }) {
+  const handles = useContext(MentionHandles);
+  const parts = useMemo(() => mentionParts(text, handles), [text, handles]);
+  return parts.map((part, i) =>
+    part.mention ? (
+      <span key={i} className="md-mention">
+        {part.text}
+      </span>
+    ) : (
+      <Fragment key={i}>{part.text}</Fragment>
+    ),
+  );
+}
 
 function renderInline(nodes: Inline[], keyPrefix = ""): ReactNode[] {
   return nodes.map((node, i) => {
     const key = `${keyPrefix}${i}`;
     switch (node.kind) {
       case "text":
-        return <Fragment key={key}>{node.value}</Fragment>;
+        return <MentionText key={key} text={node.value} />;
       case "code":
         return <code key={key} className="md-code">{node.value}</code>;
       case "strong":

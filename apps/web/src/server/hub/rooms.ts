@@ -3,8 +3,9 @@ import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
-import { messages as copy } from "@/lib/messages";
-import { agentTargets, isPass, ownerTargets, personTargets, relayGist, ROOM_LIMITS, roomPrompt, teamRoomPrompt, turnActive, wakeRefusal, type RoomMember } from "@/lib/rooms";
+import { en } from "@/lib/i18n/en";
+import { localeOr, messages as copy } from "@/lib/messages";
+import { agentTargets, isPass, ownerTargets, personTargets, relayGist, relayText, ROOM_LIMITS, roomPrompt, teamRoomPrompt, turnActive, wakeRefusal, type RoomMember, type RoomRelay } from "@/lib/rooms";
 import type { Hub } from "../hub";
 import { loadRoomMessages, sharedTeamRoom } from "../room-store";
 import type { RoomEntry, RoomPresence, RoomToServer, ServerToRoom } from "../hub-types";
@@ -14,7 +15,7 @@ type Participant = typeof schema.roomParticipants.$inferSelect;
 type MessageRow = typeof schema.roomMessages.$inferSelect;
 
 export function toRoomEntry(row: MessageRow): RoomEntry {
-  return { id: row.id, author: row.author, agentId: row.agentId, ...(row.userId ? { userId: row.userId } : {}), ...(row.approvalId ? { approvalId: row.approvalId } : {}), ...(row.runId ? { runId: row.runId } : {}), text: row.text, at: row.createdAt.toISOString() };
+  return { id: row.id, author: row.author, agentId: row.agentId, ...(row.userId ? { userId: row.userId } : {}), ...(row.approvalId ? { approvalId: row.approvalId } : {}), ...(row.runId ? { runId: row.runId } : {}), ...(row.relay ? { relay: row.relay } : {}), text: row.text, at: row.createdAt.toISOString() };
 }
 
 export async function roomFor(roomId: string, userId: string) {
@@ -128,11 +129,11 @@ export class Rooms {
     return row ?? null;
   }
 
-  private async post(roomId: string, values: { author: MessageRow["author"]; agentId?: string; userId?: string; approvalId?: string; runId?: string; text: string; depth: number }) {
+  private async post(roomId: string, values: { author: MessageRow["author"]; agentId?: string; userId?: string; approvalId?: string; runId?: string; relay?: RoomRelay; text: string; depth: number }) {
     const db = getDb();
     const [row] = await db
       .insert(schema.roomMessages)
-      .values({ id: newId("rmsg"), roomId, author: values.author, agentId: values.agentId ?? null, userId: values.userId ?? null, approvalId: values.approvalId ?? null, runId: values.runId ?? null, text: values.text, depth: values.depth })
+      .values({ id: newId("rmsg"), roomId, author: values.author, agentId: values.agentId ?? null, userId: values.userId ?? null, approvalId: values.approvalId ?? null, runId: values.runId ?? null, relay: values.relay ?? null, text: values.text, depth: values.depth })
       .returning();
     await db.update(schema.rooms).set({ updatedAt: row.createdAt }).where(eq(schema.rooms.id, roomId));
     this.broadcast(roomId, { type: "message", entry: toRoomEntry(row) });
@@ -316,7 +317,7 @@ export class Rooms {
     }
   }
 
-  async relayTeamwork(fromId: string, toId: string, text: string, runId: string | null, target?: string) {
+  async teamworkRoom(fromId: string, toId: string, target?: string) {
     const current = this.hub.turnRoom(fromId);
     const roomId = target
       ? (await this.participant(target, fromId)) && (await this.participant(target, toId))
@@ -328,9 +329,16 @@ export class Rooms {
           : null
         : await sharedTeamRoom(fromId, toId);
     if (!roomId) return null;
-    const [room] = await getDb().select({ teamId: schema.rooms.teamId }).from(schema.rooms).where(eq(schema.rooms.id, roomId));
-    if (!room?.teamId) return null;
-    await this.post(roomId, { author: "agent", agentId: fromId, text, depth: 0, ...(runId ? { runId } : {}) });
+    const [room] = await getDb()
+      .select({ id: schema.rooms.id, name: schema.rooms.name, language: schema.teams.language })
+      .from(schema.rooms)
+      .innerJoin(schema.teams, eq(schema.teams.id, schema.rooms.teamId))
+      .where(eq(schema.rooms.id, roomId));
+    return room ? { id: room.id, name: room.name, locale: localeOr(room.language) } : null;
+  }
+
+  async relayTeamwork(fromId: string, toId: string, roomId: string, relay: RoomRelay, runId: string | null) {
+    await this.post(roomId, { author: "agent", agentId: fromId, relay, text: relayText(en, relay), depth: 0, ...(runId ? { runId } : {}) });
     log("room_relay", { roomId, fromId, toId, runId });
     return roomId;
   }
@@ -344,8 +352,8 @@ export class Rooms {
       .orderBy(asc(schema.roomMessages.createdAt))
       .limit(1);
     if (!opening || !(await this.participant(opening.roomId, agentId))) return;
-    const line = relayGist(summary, 280);
-    await this.post(opening.roomId, { author: "agent", agentId, runId, text: ok ? copy.rooms.relayDone(task, line) : copy.rooms.relayFailed(task, line), depth: 0 });
+    const relay: RoomRelay = { kind: ok ? "done" : "failed", task, line: relayGist(summary, 280) };
+    await this.post(opening.roomId, { author: "agent", agentId, runId, relay, text: relayText(en, relay), depth: 0 });
   }
 
   async approvalRaised(agentId: string, roomId: string, approvalId: string, summary: string, askedBy: string) {

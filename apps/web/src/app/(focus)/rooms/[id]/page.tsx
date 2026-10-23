@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { RoomInside } from "@/components/rooms/RoomInside";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
+import { localeOr } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
 import { roomFor, roomMembers, roomPeopleOf, toRoomEntry } from "@/server/hub/rooms";
@@ -18,7 +19,7 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     roomMembers(id),
     loadRoomMessages(id),
     room.teamId ? roomPeopleOf(id) : Promise.resolve([]),
-    room.teamId ? db.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(eq(schema.teams.id, room.teamId)) : Promise.resolve([]),
+    room.teamId ? db.select({ id: schema.teams.id, name: schema.teams.name, language: schema.teams.language }).from(schema.teams).where(eq(schema.teams.id, room.teamId)) : Promise.resolve([]),
   ]);
   const memberIds = members.map((member) => member.id);
   const approvalIds = history.map((row) => row.approvalId).filter((value): value is string => Boolean(value));
@@ -49,7 +50,7 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     <RoomInside
       room={{ id: room.id, name: room.name }}
       me={user.id}
-      team={team ?? null}
+      team={team ? { id: team.id, name: team.name, language: localeOr(team.language) } : null}
       people={people}
       addable={{ agents: addableAgents, people: addablePeople }}
       canDelete={room.ownerId === user.id || seat?.role === "admin"}
