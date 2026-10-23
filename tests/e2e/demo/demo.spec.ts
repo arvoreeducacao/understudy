@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { answerTwoStep, turnOnTwoStep } from "../two-step";
 
 const SITE = process.env.E2E_SITE_URL || "http://host.docker.internal:39101/";
 const INVOICES = new URL("invoices.html", SITE).toString();
@@ -97,6 +98,7 @@ test("demo: teach a task once, run it with an approval, see what it did", async 
   await admin.getByLabel("Email").fill(ADMIN.email);
   await admin.getByLabel("Password").fill(ADMIN.password);
   await admin.getByRole("button", { name: "Create and sign in" }).click();
+  await turnOnTwoStep(admin, ADMIN.password);
   await expect(admin.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await admin.goto("/admin");
   const form = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Create account" }) });
@@ -113,6 +115,7 @@ test("demo: teach a task once, run it with an approval, see what it did", async 
   await prepPage.getByLabel("Temporary password").fill(OWNER.temporary);
   await prepPage.getByLabel("New password").fill(OWNER.password);
   await prepPage.getByRole("button", { name: "Save and continue" }).click();
+  const ownerSecret = await turnOnTwoStep(prepPage, OWNER.password);
   await expect(prepPage.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await createUnderstudy(prepPage, TEAMMATE, "Files paid invoices and tells accounting", false);
   await expect(prepPage.getByText("connected as fake-brain")).toBeVisible({ timeout: 5 * 60 * 1000 });
@@ -125,6 +128,7 @@ test("demo: teach a task once, run it with an approval, see what it did", async 
   timeline.reset();
 
   await signIn(page, OWNER.email, OWNER.password, true);
+  await answerTwoStep(page, ownerSecret);
   await expect(page.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await pause(page, 2200);
 

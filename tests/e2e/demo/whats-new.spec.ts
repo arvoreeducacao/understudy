@@ -1,6 +1,7 @@
 import { rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { turnOnTwoStep } from "../two-step";
 
 const SITE = process.env.E2E_SITE_URL || "http://host.docker.internal:39101/";
 const INVOICES = new URL("invoices.html", SITE).toString();
@@ -70,6 +71,7 @@ test("what's new: desktop and office files, terminal, rules, page watching", asy
   await admin.getByLabel("Email").fill(ADMIN.email);
   await admin.getByLabel("Password").fill(ADMIN.password);
   await admin.getByRole("button", { name: "Create and sign in" }).click();
+  await turnOnTwoStep(admin, ADMIN.password);
   await expect(admin.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await admin.goto("/admin");
   const form = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Create account" }) });
@@ -86,6 +88,7 @@ test("what's new: desktop and office files, terminal, rules, page watching", asy
   await helper.getByLabel("Temporary password").fill(OWNER.temporary);
   await helper.getByLabel("New password").fill(OWNER.password);
   await helper.getByRole("button", { name: "Save and continue" }).click();
+  await turnOnTwoStep(helper, OWNER.password);
   await expect(helper.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await helper.goto("/agents/new");
   await helper.getByLabel("Name").fill(AGENT);

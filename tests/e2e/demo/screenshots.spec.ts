@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { turnOnTwoStep } from "../two-step";
 
 const SITE = process.env.E2E_SITE_URL || "http://host.docker.internal:39101/";
 const INVOICES = new URL("invoices.html", SITE).toString();
@@ -52,6 +53,7 @@ test("screenshots for the README", async ({ browser }) => {
   await admin.getByLabel("Email").fill(ADMIN.email);
   await admin.getByLabel("Password").fill(ADMIN.password);
   await admin.getByRole("button", { name: "Create and sign in" }).click();
+  await turnOnTwoStep(admin, ADMIN.password);
   await expect(admin.getByRole("heading", { name: "My understudies" })).toBeVisible();
   await admin.goto("/admin");
   const form = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Create account" }) });
@@ -68,6 +70,7 @@ test("screenshots for the README", async ({ browser }) => {
   await page.getByLabel("Temporary password").fill(OWNER.temporary);
   await page.getByLabel("New password").fill(OWNER.password);
   await page.getByRole("button", { name: "Save and continue" }).click();
+  await turnOnTwoStep(page, OWNER.password);
   await expect(page.getByRole("heading", { name: "My understudies" })).toBeVisible();
 
   await createUnderstudy(page, TEAMMATE, "Files paid invoices and tells accounting");
