@@ -1103,7 +1103,7 @@ export const ptBR: Messages = {
     questionsTitle: (n: number) => (n === 1 ? "Uma pergunta antes de começar" : `${n} perguntas antes de começar`),
     questionsDone: "Obrigado, era só isso",
     questionUse: "Usar esta",
-    questionChange: "Mudar",
+    questionChange: "Editar",
     whenHint: "Escolha o que dá a partida. Você sempre pode rodar na mão com Rodar agora.",
     triggers: {
       schedule: "Numa agenda",
