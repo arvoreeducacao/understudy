@@ -905,6 +905,8 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 .ar.is-slim .ar-brand { padding: 0 0 12px; }
 .ar.is-slim .ar-new { width: 40px; padding: 0; justify-content: center; }
 .ar.is-slim .ar-agent { padding: 6px; }
+.ar.is-slim .ar-agents { scrollbar-width: none; }
+.ar.is-slim .ar-agents::-webkit-scrollbar { display: none; }
 .ar.is-slim .ar-link { padding: 9px; position: relative; }
 .ar.is-slim .ar-count { position: absolute; top: 0; right: -4px; font-size: 10px; padding: 0 5px; }
 .ar.is-slim .ar-who { padding: 12px 0 4px; justify-content: center; }
