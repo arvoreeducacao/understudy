@@ -180,6 +180,13 @@ export async function oauthSupport(url: string): Promise<OAuthSupport> {
   }
 }
 
+export async function renewSignIn(server: Server, provider: StoredOAuthProvider) {
+  const result = await auth(provider, { serverUrl: server.url, fetchFn: safeFetch, ...scopeOf(server) });
+  const token = provider.tokens()?.access_token;
+  if (result !== "AUTHORIZED" || !token) throw new SignInNeededError();
+  return token;
+}
+
 export async function beginSignIn(server: Server, userId: string, returnTo: string) {
   const provider = new StoredOAuthProvider(server, userId, null);
   await provider.saveLogin({ tokens: null, returnTo });
