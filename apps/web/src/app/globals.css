@@ -73,6 +73,7 @@ html, body { margin: 0; color: var(--mist); font-family: var(--font-ui), system-
 .nav a.on { background: rgb(255 255 255 / .1); color: #fff; box-shadow: inset 0 1px 0 rgb(255 255 255 / .06); }
 .nav .nav-label { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .nav .nav-label svg { flex: none; opacity: .85; }
+.nav .nav-group { padding: 14px 12px 4px; color: var(--smoke); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .nav .n { background: var(--coral); color: #fff; border-radius: 99px; font-size: 11px; font-weight: 600; padding: 0 7px; }
 .side .who { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 12px 10px 4px; border-top: 1px solid var(--glass-edge); font-size: 12.5px; color: var(--ash); }
 .side .who .av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #8aa8ff, #e79ab0); display: grid; place-items: center; color: #10121a; font-weight: 700; font-size: 11.5px; flex: none; }

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
 import type { OwnerData } from "@/components/workspace/AgentWorkspace";
 import type { RailData } from "@/components/inside/AgentRail";
-import { accessibleAgentIds, approvalScope, canManage } from "@/lib/access";
+import { approvalScope, canManage, involvedAgentIds } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { CHAT_WIDTH_COOKIE, WORKSPACE_HIDDEN_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
@@ -81,13 +81,16 @@ async function loadWaitingRuns(runIds: string[]) {
   return new Set(rows.map((row) => row.runId));
 }
 
-async function loadRail(userId: string, userName: string): Promise<RailData> {
+const RAIL_GROUPS = ["mine", "shared", "other"] as const;
+
+async function loadRail(userId: string, userName: string, currentId: string): Promise<RailData> {
   const db = getDb();
-  const [visible, answerable] = await Promise.all([accessibleAgentIds(userId), approvalScope(userId)]);
+  const [involved, answerable] = await Promise.all([involvedAgentIds(userId), approvalScope(userId)]);
+  const visible = involved.includes(currentId) ? involved : [...involved, currentId];
   const [agents, pending] = await Promise.all([
     visible.length
       ? db
-          .select({ id: schema.agents.id, name: schema.agents.name, look: schema.agents.look, state: schema.agents.state, note: schema.agents.stateNote })
+          .select({ id: schema.agents.id, name: schema.agents.name, look: schema.agents.look, state: schema.agents.state, note: schema.agents.stateNote, ownerId: schema.agents.ownerId })
           .from(schema.agents)
           .where(inArray(schema.agents.id, visible))
           .orderBy(asc(schema.agents.name))
@@ -100,7 +103,13 @@ async function loadRail(userId: string, userName: string): Promise<RailData> {
   const waitingBy = new Map<string, number>();
   for (const row of pending) waitingBy.set(row.agentId, (waitingBy.get(row.agentId) ?? 0) + 1);
   return {
-    agents: agents.map((agent) => ({ ...agent, waiting: waitingBy.get(agent.id) ?? 0 })),
+    agents: agents
+      .map(({ ownerId, ...agent }) => ({
+        ...agent,
+        group: ownerId === userId ? ("mine" as const) : involved.includes(agent.id) ? ("shared" as const) : ("other" as const),
+        waiting: waitingBy.get(agent.id) ?? 0,
+      }))
+      .sort((a, b) => RAIL_GROUPS.indexOf(a.group) - RAIL_GROUPS.indexOf(b.group)),
     waiting: pending.length,
     userName,
     productName: env.productName,
@@ -126,7 +135,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       .where(eq(schema.recipes.agentId, id))
       .orderBy(desc(schema.recipes.updatedAt)),
     canManage(access) ? loadOwnerData(agent, user.id, user.email, Boolean(user.admin)) : null,
-    loadRail(user.id, user.name || user.email),
+    loadRail(user.id, user.name || user.email, id),
     pendingFollowups([id]),
   ]);
   const waiting = await loadWaitingRuns(runs.map((r) => r.id));
