@@ -31,7 +31,7 @@ export function UserActions({
     <div className="flex gap-2 flex-wrap justify-end">
       {status !== "approved" && (
         <button className="btn ok sm" disabled={pending} onClick={() => start(() => setUserStatus(userId, "approved"))}>
-          {t.approve}
+          {status === "rejected" ? t.restore : t.approve}
         </button>
       )}
       {status === "pending" && (
