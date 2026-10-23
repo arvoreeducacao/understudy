@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { pairKey } from "@/lib/agent-talk";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
@@ -30,12 +30,16 @@ export async function pairStopped(a: string, b: string) {
   return latest?.kind === "stop";
 }
 
-export async function listPairs(agentIds: string[], limit = 500): Promise<PairSummary[]> {
+function visibleTo(viewerId: string | undefined) {
+  return viewerId === undefined ? undefined : or(isNull(schema.agentMessages.audienceId), eq(schema.agentMessages.audienceId, viewerId));
+}
+
+export async function listPairs(agentIds: string[], limit = 500, viewerId?: string): Promise<PairSummary[]> {
   if (!agentIds.length) return [];
   const rows = await getDb()
     .select()
     .from(schema.agentMessages)
-    .where(or(inArray(schema.agentMessages.fromAgentId, agentIds), inArray(schema.agentMessages.toAgentId, agentIds)))
+    .where(and(or(inArray(schema.agentMessages.fromAgentId, agentIds), inArray(schema.agentMessages.toAgentId, agentIds)), visibleTo(viewerId)))
     .orderBy(desc(schema.agentMessages.createdAt))
     .limit(limit);
   const pairs = new Map<string, Row[]>();
@@ -46,8 +50,8 @@ export async function listPairs(agentIds: string[], limit = 500): Promise<PairSu
   return [...pairs.values()].map((list) => ({ ids: pairKey(list[0].fromAgentId, list[0].toAgentId), last: list[0], stopped: isStopped(list) }));
 }
 
-export async function loadPair(a: string, b: string, limit = 200) {
-  const rows = await getDb().select().from(schema.agentMessages).where(between(a, b)).orderBy(desc(schema.agentMessages.createdAt)).limit(limit);
+export async function loadPair(a: string, b: string, limit = 200, viewerId?: string) {
+  const rows = await getDb().select().from(schema.agentMessages).where(and(between(a, b), visibleTo(viewerId))).orderBy(desc(schema.agentMessages.createdAt)).limit(limit);
   const stopped = isStopped(rows);
   return { rows: rows.reverse(), stopped };
 }

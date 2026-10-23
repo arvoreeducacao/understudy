@@ -20,7 +20,7 @@ export default async function PairPage({ params }: { params: Promise<{ a: string
   ]);
   const pair = [a, b].map((id) => agents.find((agent) => agent.id === id));
   if (!pair[0] || !pair[1] || (!access[0] && !access[1])) notFound();
-  const { rows, stopped } = await loadPair(a, b);
+  const { rows, stopped } = await loadPair(a, b, 200, user.id);
   const both = pair.every((agent) => agent?.ownerId === user.id);
   return (
     <PairThread

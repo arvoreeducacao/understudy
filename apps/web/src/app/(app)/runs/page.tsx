@@ -66,7 +66,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   );
 
   const ownsAgent = agent.ownerId === user.id;
-  const [upcomingFollowups, pastFollowups] = await Promise.all([pendingFollowups([agentId], 20), recentFollowups(agentId, 10)]);
+  const [upcomingFollowups, pastFollowups] = await Promise.all([pendingFollowups([agentId], 20, user.id), recentFollowups(agentId, 10, user.id)]);
   const followups = [...upcomingFollowups, ...pastFollowups];
   const followupItems = toSummaries(followups, { format: formatWhen, canCancel: () => ownsAgent });
 

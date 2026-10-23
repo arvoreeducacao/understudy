@@ -7,6 +7,7 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import type { ParsedAttachment } from "../inbound-email/parse";
 import { sendPush } from "../push";
+import { ownerAudience } from "../teams-store";
 import { setRoute, type AddressedChannel, type ChannelThread } from "./store";
 
 export const MAX_HELD_PER_CHANNEL = 50;
@@ -33,11 +34,13 @@ export async function deliverToAgent(
   }
   const said = input.text.slice(0, 8000);
   const who = input.thread.peerName ? `${input.thread.peerName} (${input.thread.peer})` : input.thread.peer;
-  await hub.addMessage(input.agentId, "user", said, null, input.trusted ? input.owner.id : undefined, input.kind, undefined, files.length ? files : undefined, undefined, input.trusted ? undefined : senderLabel(input.thread));
+  const audience = await ownerAudience(input.agentId);
+  await hub.addMessage(input.agentId, "user", said, null, input.trusted ? input.owner.id : undefined, input.kind, undefined, files.length ? files : undefined, undefined, input.trusted ? undefined : senderLabel(input.thread), audience);
   const message = {
     type: "chat" as const,
     text: said,
     from: input.trusted ? input.owner.name : input.thread.peer,
+    ...(audience ? { askedBy: audience } : {}),
     ...(input.trusted ? {} : { external: { channel: input.kind, sender: who } }),
     origin: input.thread.id,
     ...(files.length ? { attachments: files } : {}),
@@ -84,7 +87,7 @@ export async function holdMessage(
     held: input.held,
   });
   const who = input.peerName ? `${input.peerName} (${input.peer})` : input.peer;
-  await hub.addMessage(channel.agentId, "system", copy.channels.held(copy.channels.kinds[channel.kind] ?? channel.kind, who));
+  await hub.addMessage(channel.agentId, "system", copy.channels.held(copy.channels.kinds[channel.kind] ?? channel.kind, who), null, undefined, undefined, undefined, undefined, undefined, undefined, await ownerAudience(channel.agentId));
   sendPush([owner.id], { title: copy.channels.heldPush(addressed.agentName, copy.channels.kinds[channel.kind] ?? channel.kind), body: who, url: `/agents/${channel.agentId}?tab=settings`, tag: `held-${channel.id}` }).catch(() => undefined);
   return "held";
 }

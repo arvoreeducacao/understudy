@@ -253,6 +253,13 @@
       "when": 1792789258166,
       "tag": "0035_admin_granted_at",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792792142341,
+      "tag": "0036_team_privacy",
+      "breakpoints": true
     }
   ]
 }

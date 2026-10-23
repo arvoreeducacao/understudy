@@ -59,7 +59,33 @@ test("a team group turn says who it is working for", async () => {
   });
   agent.enqueue({ kind: "room", roomId: "room_1", prompt: "TEAM GROUP CHAT", askedBy: "usr_rafael" });
   await settle();
-  assert.deepEqual(sent.find((m) => m.type === "turn"), { type: "turn", untrusted: true, askedBy: "usr_rafael" });
+  assert.deepEqual(sent.find((m) => m.type === "turn"), { type: "turn", untrusted: true, roomId: "room_1", askedBy: "usr_rafael" });
+});
+
+test("a follow-up a member booked wakes in that member's own chat, and an outsider's turn says whose channel it is", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-team-followup-"));
+  const requests: TurnRequest[] = [];
+  const sent: ComputerToServer[] = [];
+  const agent = createAgent({
+    config: { home, workDir: join(home, "work"), serverUrl: "http://x", token: "t" },
+    memory: createMemory(home),
+    settingsFile: join(home, ".understudy", "settings.json"),
+    send: (message) => (sent.push(message), true),
+    today: () => "2026-10-23",
+    runTurn: ((_config: unknown, request: TurnRequest) => {
+      requests.push(request);
+      return { done: Promise.resolve({ ok: true, text: "", sessionId: `s${requests.length}` }), cancel: () => {} };
+    }) as never,
+  });
+  agent.enqueue({ kind: "chat", text: "Refund for Aurora?", from: "Tiago", askedBy: "usr_tiago" });
+  await settle();
+  agent.enqueue({ kind: "chat", text: "check the refund", from: "follow-up", askedBy: "usr_tiago", followup: { id: "fu_1", bookedAt: 1, emptyWakes: 0 } });
+  await settle();
+  assert.equal(requests[1].resume, "s1");
+  assert.deepEqual(sent.filter((m) => m.type === "turn")[1], { type: "turn", askedBy: "usr_tiago", followup: "fu_1" });
+  agent.enqueue({ kind: "chat", text: "hi", from: "+55 11 0000", askedBy: "usr_owner", external: { channel: "whatsapp", sender: "+55 11 0000" }, origin: "cth_1" });
+  await settle();
+  assert.deepEqual(sent.filter((m) => m.type === "turn")[2], { type: "turn", origin: "cth_1", askedBy: "usr_owner", untrusted: true });
 });
 
 test("a member's day is not summarized into the journal the whole team shares", async () => {

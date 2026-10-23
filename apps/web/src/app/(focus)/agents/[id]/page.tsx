@@ -136,7 +136,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       .orderBy(desc(schema.recipes.updatedAt)),
     canManage(access) ? loadOwnerData(agent, user.id, user.email, Boolean(user.admin)) : null,
     loadRail(user.id, user.name || user.email, id),
-    pendingFollowups([id]),
+    pendingFollowups([id], 100, user.id),
   ]);
   const waiting = await loadWaitingRuns(runs.map((r) => r.id));
   const recipeTitles = new Map(recipes.map((r) => [r.id, r.title.title]));

@@ -157,14 +157,14 @@ export class Rooms {
     if (turnActive(current.turnStartedAt)) {
       await db
         .update(schema.roomParticipants)
-        .set({ followUp: true, ...(askedBy ? { askedBy } : {}) })
+        .set({ followUp: true, followUpAskedBy: askedBy })
         .where(and(eq(schema.roomParticipants.roomId, roomId), eq(schema.roomParticipants.agentId, agentId)));
       return;
     }
     const startedAt = new Date();
     await db
       .update(schema.roomParticipants)
-      .set({ turnDepth: depth, turnStartedAt: startedAt, followUp: false, askedBy })
+      .set({ turnDepth: depth, turnStartedAt: startedAt, followUp: false, followUpAskedBy: null, askedBy })
       .where(and(eq(schema.roomParticipants.roomId, roomId), eq(schema.roomParticipants.agentId, agentId)));
     const prompt = await this.promptFor(roomId, agentId, askedBy);
     if (!prompt) return;
@@ -259,7 +259,7 @@ export class Rooms {
     const db = getDb();
     const halted = await db
       .update(schema.roomParticipants)
-      .set({ turnStartedAt: null, followUp: false })
+      .set({ turnStartedAt: null, followUp: false, followUpAskedBy: null })
       .where(and(eq(schema.roomParticipants.roomId, roomId), isNotNull(schema.roomParticipants.turnStartedAt)))
       .returning();
     await db.delete(schema.inboundQueue).where(and(eq(schema.inboundQueue.source, "room"), sql`${schema.inboundQueue.message}->>'roomId' = ${roomId}`));
@@ -293,7 +293,7 @@ export class Rooms {
     if (!participant || !participant.turnStartedAt) return;
     await db
       .update(schema.roomParticipants)
-      .set({ turnStartedAt: null, followUp: false })
+      .set({ turnStartedAt: null, followUp: false, followUpAskedBy: null })
       .where(and(eq(schema.roomParticipants.roomId, roomId), eq(schema.roomParticipants.agentId, agentId)));
     this.notes.delete(`${roomId}:${agentId}`);
     const idle = { ...participant, turnStartedAt: null, followUp: false };
@@ -305,7 +305,7 @@ export class Rooms {
     }
     if (participant.followUp) {
       const next = (participant.turnDepth ?? 1) + 1;
-      if (!wakeRefusal({ depth: next, ceiling: env.agentTalkCeiling })) await this.wake(roomId, agentId, next, participant.askedBy);
+      if (!wakeRefusal({ depth: next, ceiling: env.agentTalkCeiling })) await this.wake(roomId, agentId, next, participant.followUpAskedBy);
     }
   }
 
@@ -316,16 +316,14 @@ export class Rooms {
     }
   }
 
-  async approvalRaised(agentId: string, approvalId: string, summary: string, askedBy: string) {
-    const rows = await getDb()
+  async approvalRaised(agentId: string, roomId: string, approvalId: string, summary: string, askedBy: string) {
+    const [row] = await getDb()
       .select({ participant: schema.roomParticipants })
       .from(schema.roomParticipants)
       .innerJoin(schema.rooms, eq(schema.rooms.id, schema.roomParticipants.roomId))
-      .where(and(eq(schema.roomParticipants.agentId, agentId), eq(schema.roomParticipants.askedBy, askedBy), isNotNull(schema.rooms.teamId), isNotNull(schema.roomParticipants.turnStartedAt)))
-      .orderBy(desc(schema.roomParticipants.turnStartedAt));
-    const active = rows.map((row) => row.participant).find((participant) => turnActive(participant.turnStartedAt));
-    if (!active) return;
-    await this.post(active.roomId, { author: "system", agentId, userId: askedBy, approvalId, text: summary, depth: active.turnDepth ?? 0 });
+      .where(and(eq(schema.roomParticipants.roomId, roomId), eq(schema.roomParticipants.agentId, agentId), eq(schema.roomParticipants.askedBy, askedBy), isNotNull(schema.rooms.teamId)));
+    if (!row || !turnActive(row.participant.turnStartedAt)) return;
+    await this.post(roomId, { author: "system", agentId, userId: askedBy, approvalId, text: summary, depth: row.participant.turnDepth ?? 0 });
   }
 
   async approvalClosed(approvalId: string, status: string) {

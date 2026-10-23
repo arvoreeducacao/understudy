@@ -5,6 +5,7 @@ import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import {
   activeShareLinks,
+  artifactVisible,
   createShareLink,
   listArtifacts,
   loadArtifactView,
@@ -28,33 +29,36 @@ function checkId(artifactId: string) {
 }
 
 export async function agentArtifacts(agentId: string): Promise<ArtifactSummary[]> {
-  await readable(agentId);
-  return listArtifacts(agentId);
+  const user = await readable(agentId);
+  return listArtifacts(agentId, 200, user.id);
 }
 
 export async function artifactView(agentId: string, artifactId: string, version?: number): Promise<ArtifactView | null> {
-  await readable(agentId);
+  const user = await readable(agentId);
   checkId(artifactId);
+  if (!(await artifactVisible(agentId, artifactId, user.id))) return null;
   return loadArtifactView(agentId, artifactId, Number.isInteger(version) ? version : undefined);
 }
 
 export async function artifactLinks(agentId: string, artifactId: string) {
-  await ownAgent(agentId);
+  const { user } = await ownAgent(agentId);
   checkId(artifactId);
+  if (!(await artifactVisible(agentId, artifactId, user.id))) return [];
   return activeShareLinks(agentId, artifactId);
 }
 
 export async function shareArtifact(agentId: string, artifactId: string, version: number): Promise<ShareLink> {
   const { user } = await ownAgent(agentId);
   checkId(artifactId);
-  if (!Number.isInteger(version) || version < 1) throw new Error(messages.common.notFound);
+  if (!Number.isInteger(version) || version < 1 || !(await artifactVisible(agentId, artifactId, user.id))) throw new Error(messages.common.notFound);
   const link = await createShareLink(agentId, artifactId, version, user.id);
   if (!link) throw new Error(messages.common.notFound);
   return link;
 }
 
 export async function unshareArtifact(agentId: string, artifactId: string) {
-  await ownAgent(agentId);
+  const { user } = await ownAgent(agentId);
   checkId(artifactId);
+  if (!(await artifactVisible(agentId, artifactId, user.id))) throw new Error(messages.common.notFound);
   return revokeShareLinks(agentId, artifactId);
 }

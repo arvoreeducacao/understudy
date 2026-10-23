@@ -14,7 +14,7 @@ export async function cancelFollowupAction(followupId: string) {
     .innerJoin(schema.agents, eq(schema.agents.id, schema.followups.agentId))
     .where(and(eq(schema.followups.id, String(followupId)), eq(schema.agents.ownerId, user.id)));
   if (!row) return { ok: false as const };
-  const cancelled = await cancelFollowup(row.agentId, String(followupId), user.id);
+  const cancelled = await cancelFollowup(row.agentId, String(followupId), user.id, new Date(), user.id);
   if (!cancelled) return { ok: false as const };
   revalidatePath(`/agents/${row.agentId}`, "layout");
   revalidatePath("/today");

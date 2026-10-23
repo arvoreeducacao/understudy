@@ -81,7 +81,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
           .orderBy(asc(schema.user.name)),
       ])
     : [[], []];
-  const pairs = await listPairs(visible);
+  const pairs = await listPairs(visible, 500, user.id);
   const pairAgentIds = [...new Set(pairs.flatMap((pair) => pair.ids))];
   const pairAgents = pairAgentIds.length
     ? await db
