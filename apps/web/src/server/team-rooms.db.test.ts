@@ -111,8 +111,8 @@ test("an approval raised in a group turn shows up in the group for everyone, bou
   const rooms = new Rooms(hub as never);
   const roomId = await openChat();
   await rooms.personSaid(roomId, ids.rafael, "@Penny send the reminders");
-  await rooms.approvalRaised(ids.penny, "apr_troom_1", "Send 3 emails", ids.rafael);
-  await rooms.approvalRaised(ids.penny, "apr_troom_2", "Somebody else's", ids.marina);
+  await rooms.approvalRaised(ids.penny, roomId, "apr_troom_1", "Send 3 emails", ids.rafael);
+  await rooms.approvalRaised(ids.penny, roomId, "apr_troom_2", "Somebody else's", ids.marina);
   const rows = await getDb().select().from(schema.roomMessages).where(eq(schema.roomMessages.roomId, roomId));
   const approval = rows.filter((row) => row.approvalId);
   assert.deepEqual(approval.map((row) => [row.approvalId, row.userId, row.text]), [["apr_troom_1", ids.rafael, "Send 3 emails"]]);
@@ -128,4 +128,23 @@ test("leaving the team takes a person out of its groups", { skip }, async () => 
   const { getDb, schema } = await import("@/lib/db");
   const left = await getDb().select().from(schema.roomParticipants).where(eq(schema.roomParticipants.roomId, roomId));
   assert.deepEqual(left.map((row) => row.agentId), [ids.ledger]);
+});
+
+test("an understudy named while it is busy works for whoever named it next, not for whoever it is working for now", { skip }, async () => {
+  const { Rooms } = await import("./hub/rooms");
+  const store = await import("./teams-store");
+  const hub = fakeHub();
+  const rooms = new Rooms(hub as never);
+  if (!(await store.teamRole(teamId, ids.tiago))) await store.addMember(teamId, ids.marina, "tiago@troom.test", "member");
+  await store.bringAgent(ids.penny, ids.tiago, teamId, false);
+  const roomId = await openChat([ids.rafael, ids.tiago]);
+  await rooms.personSaid(roomId, ids.rafael, "@Ledger send the North reminders");
+  await rooms.personSaid(roomId, ids.tiago, "@Ledger and the South ones");
+  const { getDb, schema } = await import("@/lib/db");
+  const [busy] = (await getDb().select().from(schema.roomParticipants).where(eq(schema.roomParticipants.roomId, roomId))).filter((row) => row.agentId === ids.ledger);
+  assert.equal(busy.askedBy, ids.rafael);
+  await rooms.agentSaid(ids.ledger, roomId, "@Penny draft the North reminders");
+  assert.equal(hub.delivered.at(-1)?.message.askedBy, ids.rafael);
+  await rooms.turnDone(ids.ledger, roomId, true);
+  assert.deepEqual([hub.delivered.at(-1)?.agentId, hub.delivered.at(-1)?.message.askedBy], [ids.ledger, ids.tiago]);
 });

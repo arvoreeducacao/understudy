@@ -92,7 +92,17 @@ export function cleanRoomName(value: unknown) {
     .slice(0, ROOM_LIMITS.nameMax);
 }
 
-export function roomPrompt(input: { room: string; owner: string; self: RoomMember; members: RoomMember[]; lines: RoomLine[]; addressedBy: string }): string {
+function oneLine(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function flatNames<T extends { room: string; self: RoomMember; members: RoomMember[]; lines: RoomLine[]; addressedBy: string }>(input: T): T {
+  const member = (value: RoomMember) => ({ ...value, name: oneLine(value.name), ...(value.role ? { role: oneLine(value.role) } : {}) });
+  return { ...input, room: oneLine(input.room), self: member(input.self), members: input.members.map(member), lines: input.lines.map((line) => ({ ...line, name: oneLine(line.name) })), addressedBy: oneLine(input.addressedBy) };
+}
+
+export function roomPrompt(raw: { room: string; owner: string; self: RoomMember; members: RoomMember[]; lines: RoomLine[]; addressedBy: string }): string {
+  const input = { ...flatNames(raw), owner: oneLine(raw.owner) };
   const others = input.members.filter((member) => member.id !== input.self.id);
   const who = others.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ""}`).join("\n");
   const transcript = input.lines.map((line) => `[${line.at}] ${line.author === "owner" ? `${line.name} (owner)` : line.author === "system" ? "room" : line.name}: ${JSON.stringify(line.text.slice(0, ROOM_LIMITS.textMax))}`).join("\n");
@@ -112,7 +122,8 @@ export function roomPrompt(input: { room: string; owner: string; self: RoomMembe
   ].join("\n\n");
 }
 
-export function teamRoomPrompt(input: { room: string; team: string; self: RoomMember; members: RoomMember[]; people: string[]; lines: RoomLine[]; addressedBy: string; askedBy: string }): string {
+export function teamRoomPrompt(raw: { room: string; team: string; self: RoomMember; members: RoomMember[]; people: string[]; lines: RoomLine[]; addressedBy: string; askedBy: string }): string {
+  const input = { ...flatNames(raw), team: oneLine(raw.team), people: raw.people.map(oneLine), askedBy: oneLine(raw.askedBy) };
   const others = input.members.filter((member) => member.id !== input.self.id);
   const who = others.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ""}`).join("\n");
   const transcript = input.lines.map((line) => `[${line.at}] ${line.author === "system" ? "room" : line.author === "agent" ? `${line.name} (understudy)` : line.name}: ${JSON.stringify(line.text.slice(0, ROOM_LIMITS.textMax))}`).join("\n");

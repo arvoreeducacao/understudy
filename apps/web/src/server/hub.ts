@@ -16,6 +16,8 @@ import { Recordings } from "./hub/recordings";
 import { Rooms } from "./hub/rooms";
 import { Runs } from "./hub/runs";
 import { log, send, type Frame, type HostConn, type Viewer } from "./hub/shared";
+import { TurnLedger } from "./hub/turn-ledger";
+import { ownerAudience } from "./teams-store";
 import { handleViewerMessage } from "./hub/viewer-handlers";
 import type { ChatEntry, ServerToViewer, ViewerToServer } from "./hub-types";
 import { computerLimit, RateLimiter } from "./rate-limit";
@@ -55,7 +57,8 @@ export class Hub {
   private viewers = new Map<string, Set<Viewer>>();
   private lastFrames = new Map<string, Frame>();
   private lastJobs = new Map<string, JobInfo[]>();
-  private audiences = new Map<string, string>();
+  private turns = new TurnLedger();
+  private owners = new Map<string, string>();
   private fileRequests = new Map<string, { agentId: string; resolve: (value: FileAnswer) => void }>();
   private asks = new Map<string, { agentId: string; resolve: (value: ComputerReply) => void }>();
   private limiter = new RateLimiter();
@@ -103,6 +106,7 @@ export class Hub {
     if (!ws || this.fallingAsleep.has(agentId)) return false;
     if (message.type !== "ping") this.idle.touch(agentId);
     send(ws, message);
+    this.turns.delivered(agentId, message);
     return true;
   }
 
@@ -114,12 +118,36 @@ export class Hub {
   }
 
   setTurnAudience(agentId: string, userId: string | null | undefined) {
-    if (userId) this.audiences.set(agentId, userId);
-    else this.audiences.delete(agentId);
+    this.turns.set(agentId, { audience: userId ?? null, roomId: null });
+  }
+
+  async beginTurn(agentId: string, turn: { askedBy?: string; roomId?: string; runId?: string }) {
+    const started = this.turns.started(agentId, turn);
+    if (started.matched || !turn.askedBy) return;
+    log("turn_audience_unmatched", { agentId });
+    const owner = await ownerAudience(agentId);
+    if (owner) this.turns.set(agentId, { audience: owner, roomId: null });
+  }
+
+  async ownerOf(agentId: string) {
+    const known = this.owners.get(agentId);
+    if (known) return known;
+    const [agent] = await getDb().select({ ownerId: schema.agents.ownerId }).from(schema.agents).where(eq(schema.agents.id, agentId));
+    if (agent) this.owners.set(agentId, agent.ownerId);
+    return agent?.ownerId ?? null;
+  }
+
+  async relaysToChannels(agentId: string) {
+    const audience = this.turnAudience(agentId);
+    return !audience || audience === (await this.ownerOf(agentId));
   }
 
   turnAudience(agentId: string) {
-    return this.audiences.get(agentId) ?? null;
+    return this.turns.audience(agentId);
+  }
+
+  turnRoom(agentId: string) {
+    return this.turns.room(agentId);
   }
 
   seesScreen(agentId: string, viewer: Viewer) {
@@ -132,6 +160,13 @@ export class Hub {
     if (!set) return;
     const payload = JSON.stringify(message);
     for (const v of set) if (v.ws.readyState === v.ws.OPEN && this.seesScreen(agentId, v)) v.ws.send(payload);
+  }
+
+  broadcastCard(agentId: string, message: ServerToViewer, audienceId: string | null) {
+    const set = this.viewers.get(agentId);
+    if (!set) return;
+    const payload = JSON.stringify(message);
+    for (const v of set) if (v.ws.readyState === v.ws.OPEN && (!audienceId || v.owner || v.userId === audienceId)) v.ws.send(payload);
   }
 
   sendToOwners(agentId: string, message: ServerToViewer) {
@@ -297,7 +332,7 @@ export class Hub {
       this.fallingAsleep.delete(agentId);
       this.lastFrames.delete(agentId);
       this.lastJobs.delete(agentId);
-      this.audiences.delete(agentId);
+      this.turns.forget(agentId);
       for (const [requestId, pending] of this.asks) {
         if (pending.agentId !== agentId) continue;
         this.asks.delete(requestId);
@@ -425,8 +460,8 @@ export class Hub {
     return this.approvals.answer(id, approved, note, userId, always);
   }
 
-  cancelApprovals(agentId: string, userId: string | null) {
-    return this.approvals.cancelPending(agentId, userId);
+  cancelApprovals(agentId: string, userId: string | null, scope?: { askedBy: string } | { exceptAskedBy: string }) {
+    return this.approvals.cancelPending(agentId, userId, scope);
   }
 
   approvalStatus(id: string) {

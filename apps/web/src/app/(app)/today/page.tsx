@@ -44,7 +44,7 @@ export default async function TodayPage() {
     .map((r) => ({ recipe: r, at: r.cron ? nextRunAt(r.cron, r.timezone) : null }))
     .filter((x): x is { recipe: typeof x.recipe; at: Date } => x.at !== null && x.at.getTime() - Date.now() < 24 * 60 * 60 * 1000)
     .sort((a, b) => a.at.getTime() - b.at.getTime());
-  const followups = toSummaries(await pendingFollowups(ids, 20), {
+  const followups = toSummaries(await pendingFollowups(ids, 20, user.id), {
     format: formatWhen,
     canCancel: (agentId) => byId.get(agentId)?.ownerId === user.id,
     agentName: (agentId) => byId.get(agentId)?.name,

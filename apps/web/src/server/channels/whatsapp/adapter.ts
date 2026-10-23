@@ -50,8 +50,12 @@ export function whatsappAdapter(): ChannelAdapter {
     async sendApproval(hub, notice) {
       const me = hub.whatsapp.identity(notice.channel.id);
       if (!me) return false;
-      const code = approvalCode();
-      await appendChannelList(notice.channel.id, "approvals", { code, id: notice.approval.id }, MAX_PENDING_APPROVALS);
+      let code = "";
+      for (let attempt = 0; attempt < 20 && !code; attempt++) {
+        const candidate = approvalCode();
+        if (await appendChannelList(notice.channel.id, "approvals", { code: candidate, id: notice.approval.id }, MAX_PENDING_APPROVALS, "code")) code = candidate;
+      }
+      if (!code) return false;
       const text = [approvalText({ agentName: notice.agentName, approval: notice.approval }), "", copy.channels.whatsappApprovalHow(code)].join("\n");
       for (const part of splitWhatsApp(text)) await hub.whatsapp.send(notice.channel.id, me.jid, { text: part });
       return true;

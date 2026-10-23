@@ -396,7 +396,7 @@ export function AgentInside({
           {rows.map((row) => {
             if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
             if (row.kind === "steps") return <StepsGroup key={row.key} entries={row.entries} active={working && row === lastRow && drafts.length === 0} />;
-            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} onOpenArtifact={workspace.show} canAnswerProposal={owner} />;
+            return <MessageRow key={row.key} entry={row.entry} continued={row.continued} agentName={agent.name} look={agent.look} agentId={agent.id} onOpenArtifact={workspace.show} canAnswerProposal={owner} proposalHint={team ? messages.proposals.teamAdminSaves : undefined} />;
           })}
           {drafts.map((d) => (
             <StreamingRow key={d.streamId} text={d.text} agentName={agent.name} look={agent.look} />

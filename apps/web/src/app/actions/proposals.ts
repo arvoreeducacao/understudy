@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { agentAccess, canManage } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
@@ -13,10 +14,9 @@ export async function answerProposal(proposalId: string, choice: ProposalChoice)
   const [row] = await getDb()
     .select({ agentId: schema.taskProposals.agentId })
     .from(schema.taskProposals)
-    .innerJoin(schema.agents, eq(schema.agents.id, schema.taskProposals.agentId))
-    .where(and(eq(schema.taskProposals.id, String(proposalId)), eq(schema.agents.ownerId, user.id)));
+    .where(eq(schema.taskProposals.id, String(proposalId)));
   const hub = getHub();
-  if (!row || !hub) return { ok: false as const };
+  if (!row || !hub || !canManage(await agentAccess(user.id, row.agentId))) return { ok: false as const };
   const answered = await hub.proposals.answer(String(proposalId), choice !== "dismiss", user.id, { keepPaused: choice === "edit" });
   if (!answered) return { ok: false as const };
   revalidatePath(`/agents/${row.agentId}`, "layout");

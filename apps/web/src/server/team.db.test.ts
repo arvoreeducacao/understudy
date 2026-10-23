@@ -55,6 +55,7 @@ function fakeHub() {
       return { status: "sent" };
     },
     addMessage: async () => {},
+    turnAudience: () => null,
     startRun: async () => ({ ok: true, runId: "run_x" }),
   };
 }

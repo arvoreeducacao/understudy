@@ -44,7 +44,7 @@ export function followupTools(
       schema: z.object({}),
       run: (async () => {
         if (context.outsider()) return reply("not listed: you are answering someone who is not your owner", true);
-        const rows = await pendingFollowups([agent.id], FOLLOWUP_MAX_PENDING);
+        const rows = await pendingFollowups([agent.id], FOLLOWUP_MAX_PENDING, hub.turnAudience(agent.id));
         if (rows.length === 0) return reply("no follow-ups waiting");
         return reply(
           JSON.stringify(
@@ -64,7 +64,7 @@ export function followupTools(
       schema: z.object({ id: z.string().trim().min(1).max(200) }),
       run: (async (args: { id: string }) => {
         if (context.outsider()) return reply("not cancelled: you are answering someone who is not your owner", true);
-        const cancelled = await cancelFollowup(agent.id, args.id, "agent");
+        const cancelled = await cancelFollowup(agent.id, args.id, "agent", new Date(), hub.turnAudience(agent.id));
         if (!cancelled) return reply(`not cancelled: no waiting follow-up has the id ${JSON.stringify(args.id)}; call list_followups to see them`, true);
         return reply(`cancelled the follow-up for ${localTime(cancelled.dueAt, timeZone)}`);
       }) as FollowupTool["run"],

@@ -225,7 +225,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       note: z.string().max(1000).optional(),
     }),
     run: (async (args: { path: string; title: string; artifact_id?: string; note?: string }) => {
-      const result = await publishArtifact(hub, agent.id, { path: args.path, title: args.title, artifactId: args.artifact_id?.trim() || undefined, note: args.note });
+      const result = await publishArtifact(hub, agent.id, { path: args.path, title: args.title, artifactId: args.artifact_id?.trim() || undefined, note: args.note, audienceId: hub.turnAudience(agent.id) });
       if (!result.ok) return text(`not published: ${result.error}`, true);
       await hub.addMessage(agent.id, "agent", "", null, undefined, undefined, undefined, undefined, result.card, undefined, hub.turnAudience(agent.id));
       return text(

@@ -5,7 +5,7 @@ import { credentialSendAs, credentialSite, credentialTokenPath } from "@/lib/cre
 import { clearRoute } from "../channels/store";
 import { relayPanelMessage } from "../channels/relay";
 import { messages as copy } from "@/lib/messages";
-import { prepareEdit } from "../artifacts/service";
+import { artifactVisible, prepareEdit } from "../artifacts/service";
 import type { Hub } from "../hub";
 import type { ViewerToServer } from "../hub-types";
 import { log } from "./shared";
@@ -39,21 +39,21 @@ export const viewerHandlers: Handlers = {
     const text = String(message.text ?? "").trim().slice(0, 4000);
     const edit = message.artifactEdit === undefined ? null : ArtifactEditSchema.safeParse(message.artifactEdit);
     if (edit && (!edit.success || !text)) return refuse(copy.artifacts.editRefused);
-    const prepared = edit?.success ? await prepareEdit(hub, agentId, edit.data) : null;
+    const prepared = edit?.success && (await artifactVisible(agentId, edit.data.artifactId, userId)) ? await prepareEdit(hub, agentId, edit.data) : null;
     if (edit && !prepared) return refuse(copy.artifacts.editRefused);
     const attachments = hub.uploads.claim(agentId, userId, message.attachments);
     if (!text && !attachments.length) return;
     const db = getDb();
     const [[user], [agent]] = await Promise.all([
       db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId)),
-      db.select({ teamId: schema.agents.teamId }).from(schema.agents).where(eq(schema.agents.id, agentId)),
+      db.select({ teamId: schema.agents.teamId, ownerId: schema.agents.ownerId }).from(schema.agents).where(eq(schema.agents.id, agentId)),
     ]);
     const askedBy = agent?.teamId ? userId : undefined;
     const messageId = await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments, prepared?.card, undefined, askedBy);
-    await clearRoute(agentId);
+    if (agent?.ownerId === userId) await clearRoute(agentId);
     const lead = prepared ? copy.artifacts.editMirror(prepared.title, prepared.card.version) : "";
     const mirrored = [lead, text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n");
-    if (!askedBy) relayPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("channel_mirror_error", { agentId, error: String(error) }));
+    if (!askedBy || agent?.ownerId === userId) relayPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("channel_mirror_error", { agentId, error: String(error) }));
     const artifactEdit = prepared
       ? { artifactId: prepared.card.artifactId, version: prepared.card.version, title: prepared.title, path: prepared.path, ...prepared.card.edit }
       : undefined;

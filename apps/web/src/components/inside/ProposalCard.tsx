@@ -11,7 +11,7 @@ import type { ProposalView } from "@/server/hub-types";
 
 const VISIBLE_STEPS = 6;
 
-export function ProposalCard({ proposal, canAnswer }: { proposal: ProposalView; canAnswer: boolean }) {
+export function ProposalCard({ proposal, canAnswer, hint }: { proposal: ProposalView; canAnswer: boolean; hint?: string }) {
   const t = messages.proposals;
   const router = useRouter();
   const [busy, setBusy] = useState<ProposalChoice | null>(null);
@@ -81,7 +81,7 @@ export function ProposalCard({ proposal, canAnswer }: { proposal: ProposalView; 
           )}
         </dl>
       </div>
-      {pending && <p className="cx-proposal-note">{t.firstRuns(recipe.askFirstRuns)}</p>}
+      {pending && <p className="cx-proposal-note">{!canAnswer && hint ? hint : t.firstRuns(recipe.askFirstRuns)}</p>}
       {pending && canAnswer && (
         <div className="cx-approval-actions cx-proposal-actions">
           <button className="btn sm sec" disabled={busy !== null} onClick={() => choose("dismiss")}>

@@ -100,6 +100,7 @@ export function MessageRow({
   agentId,
   onOpenArtifact,
   canAnswerProposal = false,
+  proposalHint,
 }: {
   entry: ChatEntry;
   continued: boolean;
@@ -108,6 +109,7 @@ export function MessageRow({
   agentId?: string;
   onOpenArtifact?: () => void;
   canAnswerProposal?: boolean;
+  proposalHint?: string;
 }) {
   const files = agentId && entry.attachments?.length ? <AttachmentList agentId={agentId} attachments={entry.attachments} /> : null;
   if (entry.role === "system") return <SystemRow text={entry.text} at={entry.at} />;
@@ -140,7 +142,7 @@ export function MessageRow({
         )}
         {entry.text && <Markdown text={entry.text} />}
         {entry.artifact && <ArtifactCard artifact={entry.artifact} onOpen={onOpenArtifact} />}
-        {entry.proposal && <ProposalCard proposal={entry.proposal} canAnswer={canAnswerProposal} />}
+        {entry.proposal && <ProposalCard proposal={entry.proposal} canAnswer={canAnswerProposal} hint={proposalHint} />}
         {files}
       </div>
     </div>

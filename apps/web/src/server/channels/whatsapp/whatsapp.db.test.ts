@@ -344,3 +344,21 @@ test("requests raised at the same moment are all kept waiting for an answer", { 
   await dropFromChannelList(channel.id, "approvals", (await read())[0].id);
   assert.equal((await read()).length, 2);
 });
+
+test("two waiting requests never share a code, and one answered elsewhere leaves the list", { skip }, async () => {
+  const { hub } = await linked();
+  const { getDb, schema } = await import("@/lib/db");
+  const { appendChannelList, mergeChannelSettings } = await import("../store");
+  const { pendingApprovals } = await import("./inbound");
+  const [channel] = await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.agentId, ids.agent));
+  await mergeChannelSettings(channel.id, { approvals: [] });
+  const read = async () => pendingApprovals((await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.id, channel.id)))[0].settings);
+  const results = await Promise.all(["x", "y"].map((id) => appendChannelList(channel.id, "approvals", { code: "SAME", id }, 10, "code")));
+  assert.deepEqual(results.sort(), [false, true]);
+  assert.equal((await read()).length, 1);
+  const approvalId = await hub.createApproval(ids.agent, { summary: "Pay invoice 9" }, "mcp", 3600);
+  await appendChannelList(channel.id, "approvals", { code: "PAY", id: approvalId }, 10, "code");
+  assert.ok((await read()).some((item) => item.id === approvalId));
+  assert.equal(await hub.answerApproval(approvalId, true, undefined, ids.owner), true);
+  assert.ok(!(await read()).some((item) => item.id === approvalId));
+});

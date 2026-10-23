@@ -376,7 +376,7 @@ export function createAgent(options: {
     if (job.external) return outsider({ ...job, external: job.external });
     const day = today();
     const brain = persisted.brain;
-    const person = job.askedBy && !job.fromAgent && !job.followup ? `${brain}:${job.askedBy}`.slice(0, 300) : null;
+    const person = job.askedBy && !job.fromAgent ? `${brain}:${job.askedBy}`.slice(0, 300) : null;
     const people = (persisted.people ??= {});
     const keep = (value: ChatSession | null) => {
       if (person) {
@@ -534,11 +534,11 @@ export function createAgent(options: {
 
   const turnContext = (job: Job) => {
     if (job.kind === "run") return { runId: job.runId };
-    if (job.kind === "room") return { untrusted: true as const, ...(job.askedBy ? { askedBy: job.askedBy } : {}) };
+    if (job.kind === "room") return { untrusted: true as const, roomId: job.roomId, ...(job.askedBy ? { askedBy: job.askedBy } : {}) };
     if (job.kind !== "chat") return {};
     return {
       ...(job.origin ? { origin: job.origin } : {}),
-      ...(job.askedBy && !job.fromAgent && !job.external ? { askedBy: job.askedBy } : {}),
+      ...(job.askedBy && !job.fromAgent ? { askedBy: job.askedBy } : {}),
       ...(job.followup ? { followup: job.followup.id } : {}),
       ...(job.fromAgent || job.external ? { untrusted: true as const } : {}),
     };

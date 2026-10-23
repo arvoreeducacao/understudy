@@ -30,6 +30,11 @@ function leaveTeamRooms(tx: Tx, teamId: string, who: { userId?: string; agentIds
   return Promise.resolve();
 }
 
+export async function ownerAudience(agentId: string) {
+  const [agent] = await getDb().select({ ownerId: schema.agents.ownerId, teamId: schema.agents.teamId }).from(schema.agents).where(eq(schema.agents.id, agentId));
+  return agent?.teamId ? agent.ownerId : null;
+}
+
 export async function teamRole(teamId: string, userId: string): Promise<TeamRole | null> {
   const [row] = await getDb()
     .select({ role: schema.teamMembers.role })

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
   ARTIFACT_MAX_PAGES,
   ARTIFACT_NOTE_MAX,
@@ -24,7 +24,7 @@ export const PUBLIC_TOKEN_SECONDS = 10 * 60;
 
 type Ask = Pick<Hub, "askComputer">;
 
-export type PublishInput = { path: string; title: string; artifactId?: string; note?: string };
+export type PublishInput = { path: string; title: string; artifactId?: string; note?: string; audienceId?: string | null };
 
 export type PublishResult = { ok: true; artifactId: string; version: number; card: MessageArtifact } | { ok: false; error: string };
 
@@ -81,6 +81,7 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
   let existing: typeof schema.artifacts.$inferSelect | undefined;
   if (input.artifactId) {
     [existing] = await db.select().from(schema.artifacts).where(and(eq(schema.artifacts.id, input.artifactId), eq(schema.artifacts.agentId, agentId)));
+    if (existing && existing.audienceId !== (input.audienceId ?? null)) existing = undefined;
     if (!existing) return { ok: false, error: `there is no artifact ${input.artifactId}; leave artifact_id out to start a new one` };
   }
   const shared = await hub.askComputer<Extract<ComputerReply, { type: "file_shared" }>>(agentId, { type: "file_share", requestId: newId("share"), path: input.path }, 10 * 60 * 1000);
@@ -114,7 +115,7 @@ export async function publishArtifact(hub: Ask, agentId: string, input: PublishI
       if (existing) {
         await tx.update(schema.artifacts).set({ title, kind, latestVersion: version, updatedAt: now }).where(and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.latestVersion, existing.latestVersion)));
       } else {
-        await tx.insert(schema.artifacts).values({ id: artifactId, agentId, title, kind, latestVersion: 1, createdAt: now, updatedAt: now });
+        await tx.insert(schema.artifacts).values({ id: artifactId, agentId, title, kind, latestVersion: 1, audienceId: input.audienceId ?? null, createdAt: now, updatedAt: now });
       }
       await tx.insert(schema.artifactVersions).values({
         id: versionId,
@@ -179,13 +180,25 @@ function versionView(row: typeof schema.artifactVersions.$inferSelect): Artifact
   return { id: row.id, version: row.version, note: row.note, name: row.name, size: row.size, pages: row.pages, createdAt: row.createdAt.toISOString() };
 }
 
-export async function listArtifacts(agentId: string, limit = 200): Promise<ArtifactSummary[]> {
+function visibleTo(viewerId: string) {
+  return or(isNull(schema.artifacts.audienceId), eq(schema.artifacts.audienceId, viewerId));
+}
+
+export async function artifactVisible(agentId: string, artifactId: string, viewerId: string) {
+  const [row] = await getDb()
+    .select({ id: schema.artifacts.id })
+    .from(schema.artifacts)
+    .where(and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.agentId, agentId), visibleTo(viewerId)));
+  return Boolean(row);
+}
+
+export async function listArtifacts(agentId: string, limit = 200, viewerId?: string): Promise<ArtifactSummary[]> {
   const db = getDb();
   const rows = await db
     .select({ artifact: schema.artifacts, version: schema.artifactVersions })
     .from(schema.artifacts)
     .innerJoin(schema.artifactVersions, and(eq(schema.artifactVersions.artifactId, schema.artifacts.id), eq(schema.artifactVersions.version, schema.artifacts.latestVersion)))
-    .where(eq(schema.artifacts.agentId, agentId))
+    .where(viewerId ? and(eq(schema.artifacts.agentId, agentId), visibleTo(viewerId)) : eq(schema.artifacts.agentId, agentId))
     .orderBy(desc(schema.artifacts.updatedAt))
     .limit(limit);
   return rows.map(({ artifact, version }) => {

@@ -106,8 +106,8 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         const delivered = (await hub.deliver(to.id, { type: "chat", text: args.text, from: agent.name, fromAgent: { id: agent.id, name: agent.name } }, { source: "team" })).status === "sent";
         await getDb()
           .insert(schema.agentMessages)
-          .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered });
-        await hub.addMessage(to.id, "system", `${agent.name}: ${args.text}`);
+          .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered, audienceId: hub.turnAudience(agent.id) });
+        await hub.addMessage(to.id, "system", `${agent.name}: ${args.text}`, null, undefined, undefined, undefined, undefined, undefined, undefined, hub.turnAudience(agent.id));
         return reply(delivered ? `delivered to ${to.name}` : `${to.name}'s computer is reconnecting; the message is queued and reaches them as soon as it is back (up to 30 minutes)`);
       }) as TeamTool["run"],
     },
@@ -127,7 +127,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         const runId = "runId" in started ? (started.runId as string | undefined) : undefined;
         await getDb()
           .insert(schema.agentMessages)
-          .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "handoff", text: args.input, task: task.title, runId: runId ?? null, depth, delivered: started.ok });
+          .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "handoff", text: args.input, task: task.title, runId: runId ?? null, depth, delivered: started.ok, audienceId: hub.turnAudience(agent.id) });
         return reply(started.ok ? `${to.name} started "${task.title}"` : `could not start "${task.title}" for ${to.name}: ${"reason" in started ? started.reason : "unknown"}`, !started.ok);
       }) as TeamTool["run"],
     },

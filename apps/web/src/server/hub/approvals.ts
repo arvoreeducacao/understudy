@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
@@ -7,6 +7,7 @@ import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { sendPush } from "../push";
 import { notifyApprovalOnChannel } from "../channels/approval-notify";
+import { dropFromAgentChannelLists } from "../channels/store";
 import { slackApprovalMessage } from "../channels/slack/adapter";
 import type { ApprovalView } from "../hub-types";
 import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
@@ -32,6 +33,7 @@ export class Approvals {
     const requestId = source === "computer" && request.id ? request.id : null;
     const expiresAt = timeoutSeconds ? new Date(Date.now() + timeoutSeconds * 1000) : null;
     const askedBy = request.runId ? null : this.hub.turnAudience(agentId);
+    const roomId = askedBy ? this.hub.turnRoom(agentId) : null;
     const row = {
       id,
       agentId,
@@ -68,7 +70,7 @@ export class Approvals {
     this.hub.broadcast(agentId, { type: "approval", approval: view }, askedBy);
     this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note });
     log("approval_created", { agentId, approvalId: id, source, ...(askedBy ? { askedBy } : {}) });
-    if (askedBy) this.hub.rooms.approvalRaised(agentId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
+    if (askedBy && roomId) this.hub.rooms.approvalRaised(agentId, roomId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
     this.notify(agentId, view, askedBy).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
   }
@@ -147,6 +149,7 @@ export class Approvals {
     for (const row of expired) {
       log("approval_expired", { approvalId: row.id, agentId: row.agentId });
       this.settle(row.id, { approved: false, status: "expired", note: brainText.expiredNote });
+      await this.leaveChannelLists(row.agentId, row.id);
       if (row.source === "computer") {
         this.hub.sendToComputer(row.agentId, {
           type: "approval_answer",
@@ -160,15 +163,17 @@ export class Approvals {
     }
   }
 
-  async cancelPending(agentId: string, userId: string | null) {
+  async cancelPending(agentId: string, userId: string | null, scope?: { askedBy: string } | { exceptAskedBy: string }) {
+    const asked = !scope ? undefined : "askedBy" in scope ? eq(schema.approvals.askedBy, scope.askedBy) : and(isNotNull(schema.approvals.askedBy), ne(schema.approvals.askedBy, scope.exceptAskedBy));
     const cancelled = await getDb()
       .update(schema.approvals)
       .set({ status: "cancelled", answeredBy: userId, answeredAt: new Date() })
-      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending")))
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending"), asked))
       .returning();
     for (const row of cancelled) {
       log("approval_cancelled", { approvalId: row.id, agentId });
       this.settle(row.id, { approved: false, status: "cancelled", note: brainText.stoppedNote });
+      await this.leaveChannelLists(agentId, row.id);
       if (row.source === "computer") {
         this.hub.sendToComputer(agentId, { type: "approval_answer", requestId: row.requestId ?? row.id, approved: false, note: brainText.stoppedNote });
       }
@@ -176,6 +181,10 @@ export class Approvals {
       if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "cancelled");
     }
     return cancelled.length;
+  }
+
+  private async leaveChannelLists(agentId: string, approvalId: string) {
+    await dropFromAgentChannelLists(agentId, "approvals", approvalId).catch((error) => log("approval_channel_list_error", { approvalId, error: String(error) }));
   }
 
   async status(id: string) {
@@ -198,6 +207,7 @@ export class Approvals {
       log("approval_grant", { approvalId: id, agentId: row.agentId, granted });
     }
     this.settle(id, { approved, note, status });
+    await this.leaveChannelLists(row.agentId, id);
     if (row.source === "computer") {
       this.hub.sendToComputer(row.agentId, { type: "approval_answer", requestId: row.requestId ?? id, approved, note });
     }
@@ -228,14 +238,14 @@ export class Approvals {
 
   private async notify(agentId: string, approval: ApprovalView, askedBy: string | null) {
     const db = getDb();
-    if (askedBy) return this.notifyAsker(agentId, approval, askedBy);
     const [owner] = await db
       .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
       .from(schema.agents)
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
       .where(eq(schema.agents.id, agentId));
+    if (askedBy && askedBy !== owner?.id) return this.notifyAsker(agentId, approval, askedBy);
     if (!owner) return;
-    const approvers = await db
+    const approvers = askedBy ? [] : await db
       .select({ id: schema.user.id, email: schema.user.email })
       .from(schema.agentMembers)
       .innerJoin(schema.user, eq(schema.user.id, schema.agentMembers.userId))

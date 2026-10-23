@@ -64,19 +64,15 @@ export const computerHandlers: Handlers = {
     const text = String(message.text ?? "").slice(0, 8000);
     const streamId = message.runId ? undefined : message.streamId;
     const origin = message.runId ? null : currentTurn(agentId);
+    const audience = message.runId ? null : hub.turnAudience(agentId);
     if (origin) {
-      await hub.addMessage(agentId, "agent", text, null, undefined, origin.kind, streamId);
+      await hub.addMessage(agentId, "agent", text, null, undefined, origin.kind, streamId, undefined, undefined, undefined, audience);
       await appendPending(origin.threadId, { text }).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
       return;
     }
-    const audience = message.runId ? null : hub.turnAudience(agentId);
-    if (audience) {
-      await hub.addMessage(agentId, "agent", text, null, undefined, undefined, streamId, undefined, undefined, undefined, audience);
-      return;
-    }
-    const found = message.runId ? null : await currentConversation(agentId);
+    const found = message.runId || !(await hub.relaysToChannels(agentId)) ? null : await currentConversation(agentId);
     const conversation = found && !found.route ? found : null;
-    await hub.addMessage(agentId, "agent", text, message.runId, undefined, conversation?.kind, streamId);
+    await hub.addMessage(agentId, "agent", text, message.runId, undefined, conversation?.kind, streamId, undefined, undefined, undefined, audience);
     if (!conversation) return;
     const relayed = relayReply(conversation, agentId, text, streamId).catch((error) => log("channel_relay_error", { agentId, kind: conversation.kind, error: String(error) }));
     if (conversation.route) await relayed;
@@ -87,7 +83,7 @@ export const computerHandlers: Handlers = {
     const text = String(message.text ?? "").slice(0, 8000);
     const audience = hub.turnAudience(agentId);
     hub.broadcast(agentId, { type: "chat_delta", streamId: message.streamId, text }, audience);
-    if (audience) return;
+    if (!(await hub.relaysToChannels(agentId))) return;
     if (!currentTurn(agentId)) relayDelta(agentId, message.streamId, text).catch((error) => log("channel_stream_error", { agentId, error: String(error) }));
   },
 
@@ -125,7 +121,7 @@ export const computerHandlers: Handlers = {
     if (message.roomId) return hub.rooms.activity(agentId, message.roomId, text);
     const audience = message.runId ? null : hub.turnAudience(agentId);
     await hub.addMessage(agentId, "activity", text, message.runId, undefined, undefined, undefined, undefined, undefined, undefined, audience);
-    if (audience) return;
+    if (audience && !(await hub.relaysToChannels(agentId))) return;
     if (!currentTurn(agentId)) relayActivityText(agentId, text).catch((error) => log("channel_status_error", { agentId, error: String(error) }));
   },
 
@@ -186,7 +182,7 @@ export const computerHandlers: Handlers = {
   },
 
   login_prompt(hub, agentId, message) {
-    hub.broadcast(agentId, { type: "login_prompt", brain: message.brain, url: message.url, code: message.code, message: message.message });
+    hub.sendToOwners(agentId, { type: "login_prompt", brain: message.brain, url: message.url, code: message.code, message: message.message });
   },
 
   async login_done(hub, agentId, message) {
@@ -197,12 +193,12 @@ export const computerHandlers: Handlers = {
       await db.update(schema.agents).set({ brains, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
       hub.broadcast(agentId, { type: "brains", brains });
     }
-    hub.broadcast(agentId, { type: "login_done", brain: message.brain, ok: message.ok, account: message.account, message: message.message });
+    hub.sendToOwners(agentId, { type: "login_done", brain: message.brain, ok: message.ok, account: message.account, message: message.message });
   },
 
   async files(hub, agentId, message) {
     await syncFiles(agentId, message.files);
-    hub.broadcast(agentId, { type: "files", files: message.files });
+    hub.sendToOwners(agentId, { type: "files", files: message.files });
   },
 
   upload_state(hub, agentId, message) {
@@ -237,7 +233,7 @@ export const computerHandlers: Handlers = {
       ...(c.kind === "api_key" ? { kind: c.kind, sendAs: c.sendAs, ...(c.field ? { field: c.field } : {}), ...(c.tokenPath ? { tokenPath: c.tokenPath } : {}) } : {}),
     }));
     await getDb().update(schema.agents).set({ credentials, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
-    hub.broadcast(agentId, { type: "credentials", credentials });
+    hub.sendToOwners(agentId, { type: "credentials", credentials });
   },
 
   async memory(hub, agentId, message) {
@@ -250,7 +246,7 @@ export const computerHandlers: Handlers = {
   },
 
   async turn(hub, agentId, message) {
-    hub.setTurnAudience(agentId, message.runId ? null : message.askedBy);
+    await hub.beginTurn(agentId, message);
     noteTurn(agentId, { followup: message.followup, runId: message.runId, untrusted: message.untrusted });
     await startTurn(agentId, message.origin);
   },

@@ -179,6 +179,7 @@ test("what reaches a team agent outside a member's turn is not kept private to t
   await hub.attachViewer(rafaelWs as never, ids.penny, ids.rafael, "member");
   await hub.attachViewer(marinaWs as never, ids.penny, ids.marina, "member");
 
+  (hub as unknown as { turns: { delivered: (agentId: string, message: unknown) => void } }).turns.delivered(ids.penny, { type: "chat", text: "refund?", from: "Rafael Lima", askedBy: ids.rafael });
   await computerHandlers.turn(hub, ids.penny, { type: "turn", askedBy: ids.rafael });
   await computerHandlers.chat(hub, ids.penny, { type: "chat", role: "understudy", text: "the Aurora refund is 3 days late" } as never);
   computerHandlers.frame(hub, ids.penny, { type: "frame", jpegBase64: "AAAA", width: 10, height: 10, url: "https://bank.example.test/refunds" });

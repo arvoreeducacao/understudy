@@ -1056,6 +1056,7 @@ export const ptBR: Messages = {
     when: "Quando",
     askFirst: "pergunta antes",
     firstRuns: (runs: number) => `Nada é salvo até você escolher. As primeiras ${runs} execuções pedem sua aprovação antes de cada passo.`,
+    teamAdminSaves: "Um admin do time pode transformar isso em tarefa.",
     saved: "Salva como tarefa",
     dismissed: "Não salva",
     openTask: "Abrir tarefa",

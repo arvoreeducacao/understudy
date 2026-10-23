@@ -10,6 +10,7 @@ import { pickAgent, stripMentions, verifySlackSignature } from "./slack-app";
 import { agentIdentity, escapeSlack, slackConfig, slackUserEmail } from "./slack";
 import { linkedPanelUser, slackLinkUrl } from "./slack-link";
 import { agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
+import { ownerAudience } from "./teams-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const limiter = new RateLimiter();
@@ -134,13 +135,14 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   }
   const assistant = isDm && Boolean(event.thread_ts);
   if (assistant && threadTs && !threadAgentId) await setThreadTitle(event.channel, threadTs, text).catch((error) => log("slack_title_error", { error: String(error) }));
-  const messageId = await hub.addMessage(agent.id, "user", text, null, user.id, "slack");
+  const audience = await ownerAudience(agent.id);
+  const messageId = await hub.addMessage(agent.id, "user", text, null, user.id, "slack", undefined, undefined, undefined, undefined, audience);
   await setThread(agent.id, { channel: event.channel, threadTs, assistant, slackUser: event.user, slackTeam: teamId });
   log("slack_message_routed", { agentId: agent.id, dm: isDm, assistant });
   const repeated = await hub.proposals.repeatOf(agent.id, user.id, text, messageId).catch((error) => (log("repeat_check_error", { error: String(error) }), null));
   const result = await hub.deliver(
     agent.id,
-    { type: "chat", text, from: user.name, ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}) },
+    { type: "chat", text, from: user.name, ...(audience ? { askedBy: audience } : {}), ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}) },
     { source: "slack", slack: { channel: event.channel, threadTs } },
   );
   if (result.status === "queued" && result.starting) await answer(copy.slackApp.starting, agent);
