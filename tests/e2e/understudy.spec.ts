@@ -240,6 +240,8 @@ test("an owner teaches a task, runs it, approves the irreversible step and sees 
 
     await page.goto("/team");
     await page.waitForURL(/\/rooms$/);
+    await page.getByRole("link", { name: "Between understudies" }).click();
+    await page.waitForURL(/\/rooms\?tab=between$/);
     const pair = page.getByRole("link", { name: /E2E (Clerk|Courier) and E2E (Clerk|Courier)/ });
     await expect(pair).toBeVisible();
     await pair.click();
