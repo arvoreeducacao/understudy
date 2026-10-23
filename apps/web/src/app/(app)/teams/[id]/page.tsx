@@ -52,9 +52,9 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
                     <span className="min-w-0 flex flex-col gap-1">
                       <b className="text-white font-semibold text-[14.5px] truncate">{agent.name}</b>
                       <span className="text-smoke text-[12px] truncate">{agent.role}</span>
-                      <span className={`pill ${STATE_PILL[agent.state]} self-start`}>
-                        <span className="dot" />
-                        {agent.note ? agent.note.slice(0, 40) : messages.states[agent.state]}
+                      <span className={`pill ${STATE_PILL[agent.state]} self-start max-w-full`} title={agent.note || undefined}>
+                        <span className="dot flex-none" />
+                        <span className="truncate">{agent.note || messages.states[agent.state]}</span>
                       </span>
                       <span className="text-smoke text-[11.5px] truncate">
                         {agent.teamOwned ? t.runsOn(agent.ownerName.split(" ")[0]) : t.lentShort(agent.ownerName.split(" ")[0])}
