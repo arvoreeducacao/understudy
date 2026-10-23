@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { ArtifactEditSchema, MEMORY_FILE_MAX_BYTES } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
-import { credentialSite } from "@/lib/credential-site";
+import { credentialSendAs, credentialSite } from "@/lib/credential-site";
 import { clearRoute } from "../channels/store";
 import { relayPanelMessage } from "../channels/relay";
 import { messages as copy } from "@/lib/messages";
@@ -118,10 +118,17 @@ export const viewerHandlers: Handlers = {
     const name = String(message.name ?? "").trim();
     const secret = String(message.secret ?? "");
     if (!/^[A-Za-z0-9 .@_-]{1,64}$/.test(name) || !secret) return;
+    const apiKey = message.kind === "api_key";
     const site = credentialSite(message.site);
     if (!site) {
-      refuse(copy.vault.siteRequired);
+      refuse(apiKey ? copy.vault.apiSiteRequired : copy.vault.siteRequired);
       log("credential_refused", { agentId, reason: "no_site" });
+      return;
+    }
+    const send = apiKey ? credentialSendAs(message.sendAs, message.field) : null;
+    if (apiKey && !send) {
+      refuse(copy.vault.sendAsInvalid);
+      log("credential_refused", { agentId, reason: "bad_send_as" });
       return;
     }
     const sent = hub.sendToComputer(agentId, {
@@ -130,9 +137,10 @@ export const viewerHandlers: Handlers = {
       username: String(message.username ?? "").slice(0, 300),
       secret: secret.slice(0, 4000),
       site,
+      ...(send ? { kind: "api_key" as const, ...send } : {}),
     });
     if (!sent) offline();
-    log("credential_set", { agentId, name });
+    log("credential_set", { agentId, name, kind: apiKey ? "api_key" : "login" });
   },
 
   terminal_open({ hub, agentId, offline }, message) {

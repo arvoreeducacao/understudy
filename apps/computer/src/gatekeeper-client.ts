@@ -56,3 +56,12 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
   };
 }
 
+
+export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string };
+
+export async function requestOwnerApproval(session: McpSession, request: ApprovalRequest): Promise<{ approved: boolean; text: string; requestId?: string }> {
+  let answer = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}) });
+  const requestId = answer.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1];
+  while (/status\W{1,8}pending/i.test(answer) && requestId) answer = await session.call("wait_for_approval", { requestId });
+  return { approved: /^\s*approved/i.test(answer), text: answer, requestId };
+}

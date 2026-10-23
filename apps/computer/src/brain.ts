@@ -94,18 +94,22 @@ export function guardEnv(config: BrainConfig): Record<string, string> {
   };
 }
 
+export function vaultEnv(config: BrainConfig): Record<string, string> {
+  return {
+    HOME: config.home,
+    AGENT_TOKEN: config.token,
+    UNDERSTUDY_SERVER_URL: config.serverUrl,
+    ...(process.env.UNDERSTUDY_VAULT_KEY ? { UNDERSTUDY_VAULT_KEY: process.env.UNDERSTUDY_VAULT_KEY } : {}),
+  };
+}
+
 export function claudeMcpConfig(config: BrainConfig) {
   return {
     mcpServers: {
       browser: { type: "stdio", command: process.execPath, args: GUARD_ARGS, env: guardEnv(config) },
       shell: { type: "stdio", command: process.execPath, args: SHELL_MCP_ARGS, env: { HOME: config.home } },
       desktop: { type: "stdio", command: process.execPath, args: DESKTOP_MCP_ARGS, env: desktopMcpEnv(config.home) },
-      vault: {
-        type: "stdio",
-        command: process.execPath,
-        args: VAULT_MCP_ARGS,
-        env: { HOME: config.home, ...(process.env.UNDERSTUDY_VAULT_KEY ? { UNDERSTUDY_VAULT_KEY: process.env.UNDERSTUDY_VAULT_KEY } : {}) },
-      },
+      vault: { type: "stdio", command: process.execPath, args: VAULT_MCP_ARGS, env: vaultEnv(config) },
       gatekeeper: {
         type: "http",
         url: gatekeeperUrl(config.serverUrl),

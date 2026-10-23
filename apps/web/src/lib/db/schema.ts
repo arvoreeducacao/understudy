@@ -94,7 +94,7 @@ export const agents = pgTable(
     computerStatus: text("computer_status").notNull().default("pending"),
     computerMessage: text("computer_message"),
     brains: jsonb("brains").$type<BrainStatus[]>().notNull().default([]),
-    credentials: jsonb("credentials").$type<{ name: string; username: string; site?: string }[]>().notNull().default([]),
+    credentials: jsonb("credentials").$type<CredentialInfo[]>().notNull().default([]),
     tools: jsonb("tools").$type<AgentTools>().notNull(),
     hostId: text("host_id"),
     model: text("model"),
@@ -414,7 +414,7 @@ export const agentFiles = pgTable(
   (t) => [primaryKey({ columns: [t.agentId, t.path] })],
 );
 
-export type CredentialInfo = { name: string; username: string; site?: string };
+export type CredentialInfo = { name: string; username: string; site?: string; kind?: "api_key"; sendAs?: "bearer" | "header" | "basic" | "query"; field?: string };
 
 export type MemberRole = "approver" | "viewer";
 

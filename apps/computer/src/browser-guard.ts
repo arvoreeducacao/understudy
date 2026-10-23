@@ -3,7 +3,7 @@ import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { AMOUNT_LABEL, argsSubject, describeRule, findViolation, looksIrreversible, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { CDP_ENDPOINT } from "./browser.ts";
-import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
+import { openGatekeeper, requestOwnerApproval, type McpSession } from "./gatekeeper-client.ts";
 import { openRequestGate, type GatedRequest, type RequestGate } from "./request-gate.ts";
 import { readTurnState, turnStateFile, type TurnState } from "./turn-state.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
@@ -273,10 +273,7 @@ async function serve() {
     const session = await gatekeeper;
     await notifyMain({ event: "waiting", summary: verdict.summary });
     try {
-      let answer = await session.call("request_approval", { summary: verdict.summary, fields: verdict.fields, ...(state.runId ? { runId: state.runId } : {}), ...(verdict.stepId ? { stepId: verdict.stepId } : {}) });
-      const requestId = answer.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1];
-      while (/status\W{1,8}pending/i.test(answer) && requestId) answer = await session.call("wait_for_approval", { requestId });
-      return { approved: /^\s*approved/i.test(answer), text: answer, requestId };
+      return await requestOwnerApproval(session, { summary: verdict.summary, fields: verdict.fields, runId: state.runId, stepId: verdict.stepId });
     } finally {
       await notifyMain({ event: "resumed" });
     }
