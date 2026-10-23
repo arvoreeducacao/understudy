@@ -1,5 +1,5 @@
 {
-  "id": "db3e72a0-fb61-4c69-9f02-6049a7dbfc27",
+  "id": "c78aa628-e35c-4fa1-bf24-0ddb32cf449e",
   "prevId": "d22ed1d8-47b0-433c-9e18-cddf4a9a3faa",
   "version": "7",
   "dialect": "postgresql",
@@ -3322,6 +3322,12 @@
         "run_id": {
           "name": "run_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "relay": {
+          "name": "relay",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

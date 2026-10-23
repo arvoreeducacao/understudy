@@ -1,3 +1,4 @@
+import type { RoomRelay } from "@/lib/rooms";
 import type {
   ApprovalRequest,
   CredentialInfo,
@@ -118,6 +119,7 @@ export type RoomEntry = {
   userId?: string | null;
   approvalId?: string | null;
   runId?: string | null;
+  relay?: RoomRelay | null;
   text: string;
   at: string;
 };

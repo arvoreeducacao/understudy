@@ -1,4 +1,27 @@
 import { pastCeiling } from "./agent-talk";
+import type { Messages } from "./messages";
+
+export type RoomRelay =
+  | { kind: "handoff"; to: string; task: string; line: string }
+  | { kind: "message"; to: string; line: string }
+  | { kind: "done" | "failed"; task: string; line: string };
+
+export function relayText(words: Messages, relay: RoomRelay) {
+  switch (relay.kind) {
+    case "handoff":
+      return words.rooms.relayHandoff(relay.to, relay.task, relay.line);
+    case "message":
+      return words.rooms.relayMessage(relay.to, relay.line);
+    case "done":
+      return words.rooms.relayDone(relay.task, relay.line);
+    case "failed":
+      return words.rooms.relayFailed(relay.task, relay.line);
+  }
+}
+
+export function shownText(words: Messages, entry: { text: string; relay?: RoomRelay | null }) {
+  return entry.relay ? relayText(words, entry.relay) : entry.text;
+}
 
 export const ROOM_LIMITS = {
   minParticipants: 2,

@@ -358,10 +358,13 @@ test("speaking in a group, the line stays in that group: another one is refused"
   assert.equal((await said(launch)).length, 0);
 });
 
-test("in a team whose language is Portuguese, the fixed words follow it and the teammate is asked for a summary in it", { skip }, async () => {
+test("the lines keep their parts, not a sentence, so they read in the team's language and follow it when it changes", { skip }, async () => {
   const { getDb, schema } = await import("@/lib/db");
   const { Runs } = await import("./hub/runs");
   const { brainText } = await import("@/lib/brain-text");
+  const { messagesFor } = await import("@/lib/messages");
+  const { shownText } = await import("@/lib/rooms");
+  const { loadRoomMessages } = await import("./room-store");
   await getDb().update(schema.teams).set({ language: "pt-BR" }).where(eq(schema.teams.id, teamId));
   try {
     const radar = await openGroup("radar", [ids.scout, ids.analyst]);
@@ -371,12 +374,18 @@ test("in a team whose language is Portuguese, the fixed words follow it and the 
     const mates = JSON.parse((await list({})).content[0].text) as { name: string; groups: { language: string }[] }[];
     assert.equal(mates.find((mate) => mate.name === "Analyst")?.groups[0].language, "pt-BR");
     await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", note: "varredura da semana pronta" });
-    assert.equal((await said(radar))[0].text, "@Analyst, “Weekly analysis” é com você: varredura da semana pronta");
     assert.deepEqual(hub.started, [{ recipeId: ids.sweep, group: { name: "radar", locale: "pt-BR" } }]);
     assert.match(brainText.groupSummary("radar", "pt-BR"), /team group "radar" .*Brazilian Portuguese/);
     const [handoff] = await getDb().select().from(schema.agentMessages).where(eq(schema.agentMessages.fromAgentId, ids.scout));
     await new Runs(hub as never).finish(ids.analyst, handoff.runId!, true, "Duas mudanças reais nesta semana.");
-    assert.equal((await said(radar)).at(-1)?.text, "Terminei “Weekly analysis”: Duas mudanças reais nesta semana.");
+    const rows = await loadRoomMessages(radar);
+    assert.deepEqual(rows.map((row) => row.relay), [
+      { kind: "handoff", to: "Analyst", task: "Weekly analysis", line: "varredura da semana pronta" },
+      { kind: "done", task: "Weekly analysis", line: "Duas mudanças reais nesta semana." },
+    ]);
+    assert.deepEqual(rows.map((row) => shownText(messagesFor("pt-BR"), row)), ["@Analyst, “Weekly analysis” é com você: varredura da semana pronta", "Terminei “Weekly analysis”: Duas mudanças reais nesta semana."]);
+    assert.deepEqual(rows.map((row) => shownText(messagesFor("en"), row)), ["@Analyst, “Weekly analysis” is yours: varredura da semana pronta", "Done with “Weekly analysis”: Duas mudanças reais nesta semana."]);
+    assert.equal(rows[0].text, "@Analyst, “Weekly analysis” is yours: varredura da semana pronta");
   } finally {
     await getDb().update(schema.teams).set({ language: null }).where(eq(schema.teams.id, teamId));
   }

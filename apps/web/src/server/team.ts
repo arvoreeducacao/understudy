@@ -5,8 +5,7 @@ import { getDb, schema } from "@/lib/db";
 import type { AgentMessageKind } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
-import type { Messages } from "@/lib/messages";
-import { relayGist } from "@/lib/rooms";
+import { relayGist, type RoomRelay } from "@/lib/rooms";
 import type { Hub } from "./hub";
 import { turnRunId } from "./followups";
 import { pairStopped } from "./pair-threads";
@@ -138,11 +137,11 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
   };
 
   type RelayRoom = Awaited<ReturnType<typeof relayRoom>>;
-  const relay = async (to: Teammate, room: RelayRoom, text: (words: Messages, line: string) => string, raw: { note?: string; body: string }, runId: string | null) => {
+  const relay = async (to: Teammate, room: RelayRoom, relayOf: (line: string) => RoomRelay, raw: { note?: string; body: string }, runId: string | null) => {
     if (!room) return;
     const line = relayGist(raw.note?.trim() || raw.body);
     if (!line) return;
-    await hub.rooms.relayTeamwork(agent.id, to.id, room, (words) => text(words, line), runId ?? room.ownRun).catch((error) => console.log(JSON.stringify({ event: "room_relay_error", agentId: agent.id, error: String(error) })));
+    await hub.rooms.relayTeamwork(agent.id, to.id, room.id, relayOf(line), runId ?? room.ownRun).catch((error) => console.log(JSON.stringify({ event: "room_relay_error", agentId: agent.id, error: String(error) })));
   };
   const note = z.string().max(300).optional().describe("One short line for the team group you share with them, if any, written for the people reading it, in that group's language from list_teammates (for example: sweep for the week is ready, 2 changes and 8 with no news). Leave it out and the first words of your text are used.");
   const group = z
@@ -181,7 +180,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered, audienceId: hub.turnAudience(agent.id) });
         await hub.addMessage(to.id, "system", `${agent.name}: ${args.text}`, null, undefined, undefined, undefined, undefined, undefined, undefined, hub.turnAudience(agent.id));
-        await relay(to, await relayRoom(to, where), (words, line) => words.rooms.relayMessage(to.name, line), { note: args.note, body: args.text }, null);
+        await relay(to, await relayRoom(to, where), (line) => ({ kind: "message", to: to.name, line }), { note: args.note, body: args.text }, null);
         return reply(delivered ? `delivered to ${to.name}` : `${to.name}'s computer is reconnecting; the message is queued and reaches them as soon as it is back (up to 30 minutes)`);
       }) as TeamTool["run"],
     },
@@ -205,7 +204,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         await getDb()
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "handoff", text: args.input, task: task.title, runId: runId ?? null, depth, delivered: started.ok, audienceId: hub.turnAudience(agent.id) });
-        if (started.ok && runId) await relay(to, room, (words, line) => words.rooms.relayHandoff(to.name, task.title, line), { note: args.note, body: args.input }, runId);
+        if (started.ok && runId) await relay(to, room, (line) => ({ kind: "handoff", to: to.name, task: task.title, line }), { note: args.note, body: args.input }, runId);
         return reply(started.ok ? `${to.name} started "${task.title}"` : `could not start "${task.title}" for ${to.name}: ${"reason" in started ? started.reason : "unknown"}`, !started.ok);
       }) as TeamTool["run"],
     },

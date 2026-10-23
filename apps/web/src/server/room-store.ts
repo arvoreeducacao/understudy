@@ -89,7 +89,7 @@ export async function listRooms(userId: string) {
   const visible = await roomIdsFor(userId);
   if (!visible.length) return [];
   const rooms = await db
-    .select({ id: schema.rooms.id, ownerId: schema.rooms.ownerId, teamId: schema.rooms.teamId, name: schema.rooms.name, createdAt: schema.rooms.createdAt, updatedAt: schema.rooms.updatedAt, teamName: schema.teams.name })
+    .select({ id: schema.rooms.id, ownerId: schema.rooms.ownerId, teamId: schema.rooms.teamId, name: schema.rooms.name, createdAt: schema.rooms.createdAt, updatedAt: schema.rooms.updatedAt, teamName: schema.teams.name, teamLanguage: schema.teams.language })
     .from(schema.rooms)
     .leftJoin(schema.teams, eq(schema.teams.id, schema.rooms.teamId))
     .where(inArray(schema.rooms.id, visible))
@@ -101,7 +101,7 @@ export async function listRooms(userId: string) {
     .innerJoin(schema.agents, eq(schema.agents.id, schema.roomParticipants.agentId))
     .where(inArray(schema.roomParticipants.roomId, ids));
   const latest = await db
-    .selectDistinctOn([schema.roomMessages.roomId], { roomId: schema.roomMessages.roomId, text: schema.roomMessages.text, author: schema.roomMessages.author, agentId: schema.roomMessages.agentId, userId: schema.roomMessages.userId, createdAt: schema.roomMessages.createdAt })
+    .selectDistinctOn([schema.roomMessages.roomId], { roomId: schema.roomMessages.roomId, text: schema.roomMessages.text, author: schema.roomMessages.author, agentId: schema.roomMessages.agentId, userId: schema.roomMessages.userId, relay: schema.roomMessages.relay, createdAt: schema.roomMessages.createdAt })
     .from(schema.roomMessages)
     .where(inArray(schema.roomMessages.roomId, ids))
     .orderBy(schema.roomMessages.roomId, desc(schema.roomMessages.createdAt));

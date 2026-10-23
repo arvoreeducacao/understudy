@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentTargets, cleanRoomName, findMentions, isPass, mentionHandles, mentionParts, mightBePass, ownerTargets, relayGist, ROOM_LIMITS, roomPrompt, roomRows, teamRoomPrompt, turnActive, wakeRefusal } from "./rooms";
+import { agentTargets, cleanRoomName, findMentions, isPass, mentionHandles, mentionParts, mightBePass, ownerTargets, relayGist, shownText, ROOM_LIMITS, roomPrompt, roomRows, teamRoomPrompt, turnActive, wakeRefusal } from "./rooms";
 
 const members = [
   { id: "a", name: "Ada" },
@@ -123,4 +123,12 @@ test("mentions of people and understudies in the group are found for highlightin
   ]);
   assert.deepEqual(mentionParts("@Rafael and mail@Analyst and @Analysts", handles), [{ text: "@Rafael and mail@Analyst and @Analysts" }]);
   assert.deepEqual(mentionParts("no handles here", []), [{ text: "no handles here" }]);
+});
+
+test("a team group line is shown from its parts in the language asked for, and any other message as written", async () => {
+  const { messagesFor } = await import("./messages");
+  const relay = { kind: "failed" as const, task: "Monday digest", line: "The page asked for a login." };
+  assert.equal(shownText(messagesFor("pt-BR"), { text: "stored", relay }), "“Monday digest” não terminou: The page asked for a login.");
+  assert.equal(shownText(messagesFor("en"), { text: "stored", relay }), "“Monday digest” did not finish: The page asked for a login.");
+  assert.equal(shownText(messagesFor("pt-BR"), { text: "@Scout can you check?", relay: null }), "@Scout can you check?");
 });

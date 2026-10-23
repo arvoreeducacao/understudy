@@ -12,9 +12,9 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { Composer, DayDivider, MessageRow, StreamingRow, WorkingRow } from "@/components/inside/ChatParts";
 import { useSpeech } from "@/components/live/useSpeech";
 import type { Look } from "@/lib/look";
-import { messages } from "@/lib/messages";
+import { messages, messagesFor, type Messages } from "@/lib/messages";
 import { MentionHandles, MentionText } from "@/components/inside/Markdown";
-import { findMentions, mentionHandles, mentionsEveryone, mightBePass, roomRows } from "@/lib/rooms";
+import { findMentions, mentionHandles, mentionsEveryone, mightBePass, roomRows, shownText } from "@/lib/rooms";
 import { Select } from "@/components/ui/Select";
 import type { ChatEntry, RoomEntry, RoomPresence } from "@/server/hub-types";
 import { useRoomSocket } from "./useRoomSocket";
@@ -25,8 +25,8 @@ type Draft = { agentId: string; streamId: string; text: string };
 
 type Person = { id: string; name: string };
 
-function asChat(entry: RoomEntry): ChatEntry {
-  return { id: entry.id, role: entry.author === "owner" || entry.author === "person" ? "user" : entry.author === "agent" ? "agent" : "system", text: entry.text, at: entry.at };
+function asChat(entry: RoomEntry, words: Messages): ChatEntry {
+  return { id: entry.id, role: entry.author === "owner" || entry.author === "person" ? "user" : entry.author === "agent" ? "agent" : "system", text: shownText(words, entry), at: entry.at };
 }
 
 function initials(name: string) {
@@ -123,7 +123,7 @@ export function RoomInside({
   initial: RoomEntry[];
   ceiling: number | null;
   me?: string;
-  team?: { id: string; name: string } | null;
+  team?: { id: string; name: string; language?: string } | null;
   people?: Person[];
   approvals?: Record<string, string>;
   addable?: { agents: Person[]; people: Person[] };
@@ -135,6 +135,7 @@ export function RoomInside({
   const [statuses, setStatuses] = useState(approvals);
   const [adding, setAdding] = useState("");
   const personName = useMemo(() => new Map(people.map((person) => [person.id, person.name])), [people]);
+  const words = useMemo(() => messagesFor(team?.language), [team?.language]);
   const handles = useMemo(() => mentionHandles([...members, ...people].map((who) => who.name)), [members, people]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [presence, setPresence] = useState<Record<string, RoomPresence>>(() =>
@@ -270,7 +271,7 @@ export function RoomInside({
               return (
                 <MessageRow
                   key={row.key}
-                  entry={asChat(row.entry)}
+                  entry={asChat(row.entry, words)}
                   continued={row.continued}
                   agentName={member?.name ?? t.someoneWhoLeft}
                   look={member?.look ?? ({} as Look)}

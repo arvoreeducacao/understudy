@@ -1,5 +1,6 @@
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { Look } from "../look";
+import type { RoomRelay } from "../rooms";
 import type { SeenHints, ToolPolicy, ToolVerdict } from "../tool-policy";
 import type { ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
 
@@ -744,6 +745,7 @@ export const roomMessages = pgTable(
     text: text("text").notNull(),
     approvalId: text("approval_id"),
     runId: text("run_id"),
+    relay: jsonb("relay").$type<RoomRelay>(),
     depth: integer("depth").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
