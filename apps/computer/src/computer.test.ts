@@ -384,6 +384,134 @@ test("fill_credential refuses other sites and never returns the value", async ()
   assert.doesNotThrow(() => new Function(locateFieldScript("label=Senha", "secret")));
 });
 
+test("the vault keeps API keys apart from site logins", async () => {
+  const { openVault, apiKeyOptions } = await import("./vault.ts");
+  const { describeCredential, fillCredential } = await import("./vault-mcp.ts");
+  const home = mkdtempSync(join(tmpdir(), "understudy-vault-"));
+  const vault = openVault(home, {});
+  vault.set("bank", "ana", "s3cr3t-value", "bank.example.com");
+  vault.set("crm", "", "key-abc-123456", "api.crm.example.com", { sendAs: "header", field: "X-Api-Key" });
+  assert.ok(!readFileSync(join(home, ".understudy", "vault.json"), "utf8").includes("key-abc-123456"));
+  assert.deepEqual(vault.list(), [
+    { name: "bank", username: "ana", site: "bank.example.com" },
+    { name: "crm", username: "", site: "api.crm.example.com", kind: "api_key", sendAs: "header", field: "X-Api-Key" },
+  ]);
+  assert.equal(vault.reveal("crm")?.secret, "key-abc-123456");
+  assert.equal(describeCredential(vault.list()[1]), "crm: API key for api.crm.example.com (use call_api)");
+  assert.throws(() => vault.set("bad", "", "k", "api.example.com", { sendAs: "header", field: "Cookie" }));
+  assert.equal(apiKeyOptions("query", "api_key")?.field, "api_key");
+  assert.equal(apiKeyOptions("bearer", "ignored")?.field, undefined);
+  assert.equal(apiKeyOptions("header", "bad header"), null);
+  assert.equal(apiKeyOptions("smoke", "x"), null);
+  assert.match(await fillCredential(vault, { name: "crm" }), /is an API key/);
+});
+
+function apiHarness(secret = "key-abc-123456", sendAs: "bearer" | "header" | "basic" | "query" = "bearer", field?: string) {
+  return (async () => {
+    const { openVault } = await import("./vault.ts");
+    const home = mkdtempSync(join(tmpdir(), "understudy-api-"));
+    const vault = openVault(home, {});
+    vault.set("crm", "ana", secret, "crm.example.com", { sendAs, field });
+    vault.set("bank", "ana", "bank-pass-999", "bank.example.com");
+    const calls: { url: string; init: RequestInit }[] = [];
+    const asked: { summary: string; fields: { label: string; value: string }[] }[] = [];
+    let reply = (): Response => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    let approved = true;
+    const deps = {
+      filesDir: join(home, "files"),
+      state: () => ({ mode: "chat" as const }),
+      rules: () => [],
+      approve: async (request: { summary: string; fields: { label: string; value: string }[] }) => (asked.push(request), { approved, text: approved ? "approved" : "denied: not now" }),
+      fetch: (async (url: URL | string, init: RequestInit) => (calls.push({ url: String(url), init }), reply())) as typeof fetch,
+    };
+    return { vault, home, calls, asked, deps, respond: (make: () => Response) => (reply = make), approve: (value: boolean) => (approved = value) };
+  })();
+}
+
+test("call_api sends the key only over https to its own site, and never shows it", async () => {
+  const { callApi } = await import("./api-call.ts");
+  const h = await apiHarness();
+  const text = await callApi(h.vault, { name: "crm", url: "/v1/contacts?limit=2", headers: { Authorization: "Bearer stolen", Accept: "application/json" } }, h.deps);
+  assert.match(text, /^HTTP 200/);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].url, "https://crm.example.com/v1/contacts?limit=2");
+  const headers = h.calls[0].init.headers as Record<string, string>;
+  assert.equal(headers.Authorization, "Bearer key-abc-123456");
+  assert.equal(headers.Accept, "application/json");
+  assert.equal(h.calls[0].init.redirect, "manual");
+  assert.equal(h.asked.length, 0);
+  assert.match(await callApi(h.vault, { name: "crm", url: "http://crm.example.com/v1" }, h.deps), /only sent over https/);
+  assert.match(await callApi(h.vault, { name: "crm", url: "https://crm.example.com.evil.io/v1" }, h.deps), /only for crm\.example\.com/);
+  assert.match(await callApi(h.vault, { name: "crm", url: "https://user:pw@crm.example.com/v1" }, h.deps), /cannot carry a login/);
+  assert.match(await callApi(h.vault, { name: "bank", url: "https://bank.example.com/" }, h.deps), /site login, not an API key/);
+  assert.match(await callApi(h.vault, { name: "nope", url: "/x" }, h.deps), /No saved API key/);
+  assert.match(await callApi(h.vault, { name: "crm", method: "TRACE", url: "/x" }, h.deps), /method must be one of/);
+  assert.match(await callApi(h.vault, { name: "crm", url: "/x", body: { a: 1 } }, h.deps), /carry no body/);
+  assert.equal(h.calls.length, 1);
+});
+
+test("call_api hides the key when the API echoes it and does not follow redirects", async () => {
+  const { callApi } = await import("./api-call.ts");
+  const h = await apiHarness();
+  h.respond(() => new Response(JSON.stringify({ echo: "Bearer key-abc-123456", other: "bank-pass-999" }), { status: 200, headers: { "content-type": "application/json" } }));
+  const echoed = await callApi(h.vault, { name: "crm", url: "/echo" }, h.deps);
+  assert.ok(!echoed.includes("key-abc-123456"));
+  assert.ok(!echoed.includes("bank-pass-999"));
+  assert.match(echoed, /••••••/);
+  h.respond(() => new Response(null, { status: 302, headers: { location: "https://elsewhere.io/?k=key-abc-123456" } }));
+  const moved = await callApi(h.vault, { name: "crm", url: "/old" }, h.deps);
+  assert.match(moved, /^HTTP 302/);
+  assert.match(moved, /Redirects are not followed/);
+  assert.ok(!moved.includes("key-abc-123456"));
+  assert.equal(h.calls.length, 2);
+});
+
+test("call_api asks the owner before a call that changes something", async () => {
+  const { callApi } = await import("./api-call.ts");
+  const h = await apiHarness();
+  h.approve(false);
+  const denied = await callApi(h.vault, { name: "crm", method: "post", url: "/v1/contacts", body: { name: "Ana" } }, h.deps);
+  assert.match(denied, /^Not sent/);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.asked.length, 1);
+  assert.match(h.asked[0].summary, /Call the crm API: POST crm\.example\.com\/v1\/contacts/);
+  assert.ok(h.asked[0].fields.some((field) => field.label === "Body" && field.value === '{"name":"Ana"}'));
+  assert.ok(!JSON.stringify(h.asked).includes("key-abc-123456"));
+  h.approve(true);
+  assert.match(await callApi(h.vault, { name: "crm", method: "DELETE", url: "/v1/contacts/7" }, h.deps), /^HTTP 200/);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].init.method, "DELETE");
+  const learning = { ...h.deps, state: () => ({ mode: "recipe" as const }) };
+  assert.match(await callApi(h.vault, { name: "crm", method: "PUT", url: "/v1/x", body: "a" }, learning), /^blocked/);
+  const unattended = { ...h.deps, state: () => ({ mode: "run" as const, runId: "r1", approvalsRequired: false }) };
+  const before = h.asked.length;
+  assert.match(await callApi(h.vault, { name: "crm", method: "PATCH", url: "/v1/x", body: "a" }, unattended), /^HTTP 200/);
+  assert.equal(h.asked.length, before);
+});
+
+test("call_api puts the key where the owner said, and saves big bodies to a file", async () => {
+  const { callApi, INLINE_LIMIT } = await import("./api-call.ts");
+  const query = await apiHarness("key-abc-123456", "query", "api_key");
+  await callApi(query.vault, { name: "crm", url: "/v1/x?api_key=guess&page=2" }, query.deps);
+  assert.equal(query.calls[0].url, "https://crm.example.com/v1/x?page=2&api_key=key-abc-123456");
+  const basic = await apiHarness("key-abc-123456", "basic");
+  await callApi(basic.vault, { name: "crm", url: "/v1/x" }, basic.deps);
+  assert.equal((basic.calls[0].init.headers as Record<string, string>).Authorization, `Basic ${Buffer.from("ana:key-abc-123456").toString("base64")}`);
+  const header = await apiHarness("key-abc-123456", "header", "X-Api-Key");
+  await callApi(header.vault, { name: "crm", url: "/v1/x", headers: { "x-api-key": "guess" } }, header.deps);
+  assert.deepEqual(header.calls[0].init.headers, { "X-Api-Key": "key-abc-123456" });
+  const big = "x".repeat(INLINE_LIMIT + 10);
+  header.respond(() => new Response(JSON.stringify({ big, key: "key-abc-123456" }), { status: 200, headers: { "content-type": "application/json" } }));
+  const saved = await callApi(header.vault, { name: "crm", url: "/v1/big" }, header.deps);
+  const path = saved.match(/saved to (\S+)\. Read/)?.[1] ?? "";
+  assert.ok(path.startsWith(join(header.home, "files", "api")));
+  const file = readFileSync(path, "utf8");
+  assert.ok(file.includes(big));
+  assert.ok(!file.includes("key-abc-123456"));
+  const named = await callApi(header.vault, { name: "crm", url: "/v1/x", saveAs: "../../escape.json" }, header.deps);
+  assert.match(named, new RegExp(`saved to ${join(header.home, "files", "api", "escape.json").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}`));
+});
+
 test("files: uploads land in the inbox only, outbox is listed and readable, 20 MB cap", async () => {
   const { startFileExchange } = await import("./files.ts");
   const home = mkdtempSync(join(tmpdir(), "understudy-files-"));

@@ -18,7 +18,7 @@ import { startLocalWorkbench } from "./workbench.ts";
 import { readRules, rulesFile, writeRules } from "./rules-store.ts";
 import { checkPage } from "./watch.ts";
 import { turnStateFile } from "./turn-state.ts";
-import { openVault, validCredentialName } from "./vault.ts";
+import { apiKeyOptions, openVault, validCredentialName } from "./vault.ts";
 import { createRecorder } from "./recorder.ts";
 import { startScreencastControl } from "./screencast.ts";
 import { startHome } from "./home.ts";
@@ -297,7 +297,12 @@ async function main() {
           log("main", "refused a credential without a site");
           return;
         }
-        vault.set(message.name, message.username, message.secret, message.site);
+        const apiKey = message.kind === "api_key" ? apiKeyOptions(message.sendAs, message.field) : undefined;
+        if (apiKey === null) {
+          log("main", "refused an API key without a valid way to send it");
+          return;
+        }
+        vault.set(message.name, message.username, message.secret, message.site, apiKey);
         sendCredentials();
         return;
       case "credential_delete":

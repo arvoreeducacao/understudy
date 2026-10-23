@@ -63,7 +63,8 @@ export const OwnerRuleSchema = z.discriminatedUnion("kind", [
 ]);
 export const FileEntrySchema = z.object({ path: text, size: z.number(), updatedAt: time });
 export const BrainStatusSchema = z.object({ brain: BrainSchema, loggedIn: z.boolean(), account: optionalText });
-export const CredentialInfoSchema = z.object({ name: text, username: text, site: optionalText });
+export const SendAsSchema = z.enum(["bearer", "header", "basic", "query"]);
+export const CredentialInfoSchema = z.object({ name: text, username: text, site: optionalText, kind: z.literal("api_key").optional(), sendAs: SendAsSchema.optional(), field: optionalText });
 
 export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("hello"), agentId: text, version: text, build: optionalText, brains: z.array(BrainStatusSchema), model: optionalText }),
@@ -156,7 +157,7 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("artifact_page"), requestId: id, key: z.string().regex(/^[a-f0-9]{32}$/), page: z.number().int().min(1).max(1000) }),
   z.object({ type: z.literal("teach_text"), recordingId: id, text }),
   z.object({ type: z.literal("teach_recording"), recordingId: id, events: z.array(RecordedEventSchema).max(5000), ownerBrowser: z.boolean().optional() }),
-  z.object({ type: z.literal("credential_set"), name: text, username: text, secret: text, site: optionalText }),
+  z.object({ type: z.literal("credential_set"), name: text, username: text, secret: text, site: optionalText, kind: z.literal("api_key").optional(), sendAs: SendAsSchema.optional(), field: optionalText }),
   z.object({ type: z.literal("credential_delete"), name: text }),
   z.object({ type: z.literal("stop") }),
   z.object({ type: z.literal("ping"), at: time }),

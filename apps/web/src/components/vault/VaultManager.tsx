@@ -7,10 +7,39 @@ import { Input } from "@/components/ui/controls";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { Look } from "@/lib/look";
 
+type Kind = "login" | "api_key";
+
+type SendAs = NonNullable<CredentialInfo["sendAs"]>;
+
+const SEND_AS: SendAs[] = ["bearer", "header", "basic", "query"];
+
+function sentAs(c: CredentialInfo): string {
+  if (c.sendAs === "header") return `${c.field}:`;
+  if (c.sendAs === "basic") return `Basic ${c.username}:`;
+  if (c.sendAs === "query") return `?${c.field}=`;
+  return "Authorization: Bearer";
+}
+
+function Choices<T extends string>({ label, options, value, names, onChange }: { label: string; options: T[]; value: T; names: Record<T, string>; onChange: (value: T) => void }) {
+  return (
+    <div className="choices" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button key={option} type="button" className={`choice ${value === option ? "is-on" : ""}`} aria-pressed={value === option} onClick={() => onChange(option)}>
+          {names[option]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink, "live" | "send">; credentials: CredentialInfo[]; look?: Look }) {
   const t = messages.vault;
   const { live, send } = link;
   const [notice, setNotice] = useState<string | null>(null);
+  const [kind, setKind] = useState<Kind>("login");
+  const [sendAs, setSendAs] = useState<SendAs>("bearer");
+  const apiKey = kind === "api_key";
+  const named = apiKey && (sendAs === "header" || sendAs === "query");
 
   return (
     <div className="ws-panel">
@@ -21,10 +50,12 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
           {credentials.map((c) => (
             <div key={c.name} className="flex items-center gap-3 border-t border-graphite py-2.5 first:border-0 text-[13px]">
               <div className="min-w-0 flex-1">
-                <div className="font-mono truncate">{c.name}</div>
+                <div className="font-mono truncate">
+                  {c.name}
+                  {c.kind === "api_key" && <span className="ml-2 font-sans text-[11px] text-smoke">{t.kindApiKey}</span>}
+                </div>
                 <div className="text-smoke text-[12px] truncate">
-                  {c.username}
-                  {c.site ? ` · ${c.site}` : ""} · ••••••••
+                  {c.kind === "api_key" ? `${c.site} · ${sentAs(c)} ••••••••` : `${c.username}${c.site ? ` · ${c.site}` : ""} · ••••••••`}
                 </div>
               </div>
               <ConfirmButton
@@ -52,6 +83,7 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
               username: String(data.get("username") ?? "").trim(),
               secret,
               site: String(data.get("site") ?? "").trim() || undefined,
+              ...(apiKey ? { kind: "api_key" as const, sendAs, field: named ? String(data.get("field") ?? "").trim() : undefined } : {}),
             });
             if (ok) {
               form.reset();
@@ -59,13 +91,35 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
             }
           }}
         >
-          <Input name="name" className="font-mono" placeholder={t.namePlaceholder} aria-label={t.name} required pattern="[A-Za-z0-9 .@_\-]{1,64}" maxLength={64} />
-          <Input name="username" placeholder={t.username} aria-label={t.username} autoComplete="off" />
-          <Input name="secret" type="password" placeholder={t.secret} aria-label={t.secret} autoComplete="new-password" required />
-          <Input name="site" placeholder={t.site} aria-label={t.site} required />
-          <div className="text-[11.5px] text-smoke">{t.replaceHint}</div>
+          <Choices label={t.kindLabel} options={["login", "api_key"] as Kind[]} value={kind} names={{ login: t.kindLogin, api_key: t.kindApiKey }} onChange={setKind} />
+          <Input name="name" className="font-mono" placeholder={apiKey ? t.keyNamePlaceholder : t.namePlaceholder} aria-label={t.name} required pattern="[A-Za-z0-9 .@_\-]{1,64}" maxLength={64} />
+          {(!apiKey || sendAs === "basic") && <Input name="username" placeholder={t.username} aria-label={t.username} autoComplete="off" required={apiKey} />}
+          <Input name="secret" type="password" placeholder={apiKey ? t.apiKey : t.secret} aria-label={apiKey ? t.apiKey : t.secret} autoComplete="new-password" required />
+          <Input name="site" placeholder={apiKey ? t.apiSite : t.site} aria-label={apiKey ? t.apiSite : t.site} required />
+          {apiKey && (
+            <>
+              <div className="text-[11.5px] text-smoke">{t.sendAsLabel}</div>
+              <Choices label={t.sendAsLabel} options={SEND_AS} value={sendAs} names={t.sendAs} onChange={setSendAs} />
+              {named && (
+                <Input
+                  key={sendAs}
+                  name="field"
+                  className="font-mono"
+                  placeholder={sendAs === "header" ? t.headerName : t.queryName}
+                  aria-label={sendAs === "header" ? t.headerName : t.queryName}
+                  required
+                  pattern={sendAs === "header" ? "[A-Za-z0-9][A-Za-z0-9\\-]{0,63}" : "[A-Za-z0-9_.\\-\\[\\]]{1,64}"}
+                  maxLength={64}
+                />
+              )}
+            </>
+          )}
+          <div className="text-[11.5px] text-smoke">
+            {t.replaceHint}
+            {apiKey && ` ${t.apiHint}`}
+          </div>
           <button type="submit" className="btn pri self-start" disabled={!live.online}>
-            {t.add}
+            {apiKey ? t.addKey : t.add}
           </button>
           {!live.online && <div className="text-smoke text-[12px]">{t.offline}</div>}
           {notice && <div className="text-green text-[12.5px]">{notice}</div>}

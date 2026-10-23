@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Brain, AgentState, FileEntry, JobInfo, MemoryFile, RecordedEvent, Recipe } from "@understudy/protocol";
-import type { BrainStatus } from "@/lib/db/schema";
+import type { BrainStatus, CredentialInfo } from "@/lib/db/schema";
 import type { ApprovalView, ChatEntry, ProposalView, ServerToViewer, ViewerToServer } from "@/server/hub-types";
 
 export type Frame = { jpegBase64: string; width: number; height: number; url: string; desktop?: boolean };
@@ -43,7 +43,7 @@ export type Handlers = {
   onRunFinished?: (runId: string, ok: boolean, summary: string) => void;
   onMemory?: (files: MemoryFile[]) => void;
   onFiles?: (files: FileEntry[]) => void;
-  onCredentials?: (credentials: { name: string; username: string; site?: string }[]) => void;
+  onCredentials?: (credentials: CredentialInfo[]) => void;
   onRecipeFailed?: (recordingId: string, error: string) => void;
   onJobs?: (jobs: JobInfo[]) => void;
   onChatDelta?: (streamId: string, text: string) => void;

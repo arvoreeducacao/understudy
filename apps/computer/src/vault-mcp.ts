@@ -1,15 +1,38 @@
+import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { API_METHODS, callApi, type ApiCallDeps } from "./api-call.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
+import { notifyGuardSocket } from "./browser-guard.ts";
 import { cdpCall, cdpConnect, pageTargets } from "./cdp.ts";
-import { hostMatches, openVault, type Vault } from "./vault.ts";
+import { openGatekeeper, requestOwnerApproval, type McpSession } from "./gatekeeper-client.ts";
+import { readRules, rulesFile } from "./rules-store.ts";
+import { readTurnState, turnStateFile } from "./turn-state.ts";
+import { hostMatches, openVault, type CredentialInfo, type Vault } from "./vault.ts";
 
 type Part = "username" | "secret";
 
 export const VAULT_TOOLS = [
   {
     name: "list_credentials",
-    description: "List the saved logins this agent may use (names, usernames and sites only; never secrets).",
+    description: "List the saved logins and API keys this agent may use (names, usernames and sites only; never secrets).",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "call_api",
+    description:
+      "Call an HTTP API with a saved API key, without the key ever reaching you: the vault adds it to the request. url is a full https address on the key's site, or a path starting with / on that site. GET, HEAD and OPTIONS go straight through; calls that change something (POST, PUT, PATCH, DELETE) wait for your owner's approval first. Redirects are not followed. A body longer than 20 KB, binary content, or any call with saveAs is saved under ~/files/api and you get the path and the first part.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "the saved API key's name, from list_credentials" },
+        method: { type: "string", enum: API_METHODS },
+        url: { type: "string" },
+        headers: { type: "object", additionalProperties: { type: "string" } },
+        body: { description: "a string, or a JSON value sent as application/json" },
+        saveAs: { type: "string", description: "file name to save the response body under ~/files/api" },
+      },
+      required: ["name", "url"],
+    },
   },
   {
     name: "fill_credential",
@@ -71,6 +94,7 @@ export async function fillCredential(vault: Vault, args: { name?: string; fieldS
   const part: Part = args.part === "username" ? "username" : "secret";
   const credential = vault.reveal(name);
   if (!credential) return `No saved login named "${name}". Ask the owner to add it in the panel.`;
+  if (credential.kind === "api_key") return `Refused: "${name}" is an API key, not a site login. Use call_api instead; an API key is never typed into a page.`;
   if (!credential.site) return `Refused: "${name}" has no site, and a saved login is only filled on its own site. Ask the owner to set one.`;
   const value = part === "username" ? credential.username : credential.secret;
   const targets = await pageTargets(endpoint);
@@ -107,8 +131,45 @@ function replyError(id: unknown, message: string) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message } })}\n`);
 }
 
+export function describeCredential(entry: CredentialInfo): string {
+  if (entry.kind === "api_key") return `${entry.name}: API key for ${entry.site} (use call_api)`;
+  return `${entry.name}: ${entry.username}${entry.site ? ` (${entry.site})` : ""}`;
+}
+
+function ownerApproval(home: string): Pick<ApiCallDeps, "approve" | "notify"> {
+  const serverUrl = process.env.UNDERSTUDY_SERVER_URL || "";
+  const token = process.env.AGENT_TOKEN || "";
+  const notify = (event: Record<string, unknown>) => notifyGuardSocket(process.env.UNDERSTUDY_GUARD_SOCKET || `${home}/.understudy/guard.sock`, event);
+  let gatekeeper: Promise<McpSession> | null = null;
+  return {
+    notify,
+    async approve(request) {
+      if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
+      gatekeeper ??= openGatekeeper(serverUrl, token).catch((error) => {
+        gatekeeper = null;
+        throw error;
+      });
+      const session = await gatekeeper;
+      await notify({ event: "waiting", summary: request.summary });
+      try {
+        return await requestOwnerApproval(session, request);
+      } finally {
+        await notify({ event: "resumed" });
+      }
+    },
+  };
+}
+
 async function serve() {
-  const vault = openVault(process.env.HOME || "/home/agent");
+  const home = process.env.HOME || "/home/agent";
+  const vault = openVault(home);
+  const stateFile = process.env.UNDERSTUDY_TURN_FILE || turnStateFile(home);
+  const apiDeps: ApiCallDeps = {
+    filesDir: join(home, "files"),
+    state: () => readTurnState(stateFile),
+    rules: () => readRules(rulesFile(home)),
+    ...ownerApproval(home),
+  };
   const lines = createInterface({ input: process.stdin });
   for await (const line of lines) {
     if (!line.trim()) continue;
@@ -127,10 +188,13 @@ async function serve() {
       } else if (message.method === "ping") {
         reply(message.id, {});
       } else if (message.method === "tools/call" && message.params?.name === "list_credentials") {
-        const list = vault.list().map((entry) => `${entry.name}: ${entry.username}${entry.site ? ` (${entry.site})` : ""}`);
-        reply(message.id, { content: [{ type: "text", text: list.length ? list.join("\n") : "No saved logins." }] });
+        const list = vault.list().map(describeCredential);
+        reply(message.id, { content: [{ type: "text", text: list.length ? list.join("\n") : "No saved logins or API keys." }] });
       } else if (message.method === "tools/call" && message.params?.name === "fill_credential") {
         const text = await fillCredential(vault, message.params.arguments ?? {});
+        reply(message.id, { content: [{ type: "text", text }] });
+      } else if (message.method === "tools/call" && message.params?.name === "call_api") {
+        const text = await callApi(vault, message.params.arguments ?? {}, apiDeps);
         reply(message.id, { content: [{ type: "text", text }] });
       } else {
         replyError(message.id, `unknown method ${message.method}`);

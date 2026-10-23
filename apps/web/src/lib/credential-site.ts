@@ -7,3 +7,13 @@ export function credentialSite(raw: unknown) {
   if (host.split(".").some((label) => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) return null;
   return host;
 }
+
+export type ApiKeySend = { sendAs: "bearer" | "header" | "basic" | "query"; field?: string };
+
+export function credentialSendAs(sendAs: unknown, field: unknown): ApiKeySend | null {
+  if (sendAs === "bearer" || sendAs === "basic") return { sendAs };
+  const name = typeof field === "string" ? field.trim() : "";
+  if (sendAs === "header" && /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(name) && !/^(host|cookie|content-length|transfer-encoding|connection)$/i.test(name)) return { sendAs, field: name };
+  if (sendAs === "query" && /^[A-Za-z0-9_.\-\[\]]{1,64}$/.test(name)) return { sendAs, field: name };
+  return null;
+}
