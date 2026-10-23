@@ -5,9 +5,15 @@ import { AgentFigure } from "@/components/AgentFigure";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
 
-export type RailAgent = { id: string; name: string; look: Look; state: AgentState; note: string | null; waiting: number };
+export type RailAgent = { id: string; name: string; look: Look; state: AgentState; note: string | null; waiting: number; group?: "mine" | "shared" | "other" };
 
 export type RailData = { agents: RailAgent[]; waiting: number; userName: string; productName: string };
+
+const GROUP_LABEL = {
+  mine: () => messages.nav.agents,
+  shared: () => messages.home.sectionShared,
+  other: () => messages.home.sectionOthers,
+};
 
 function initials(name: string) {
   return name
@@ -39,11 +45,13 @@ export function AgentRail({ data, currentId, current, slim }: { data: RailData; 
       </Link>
       <div className="ar-label ar-text">{messages.nav.agents}</div>
       <ul className="ar-agents scroll-thin">
-        {data.agents.map((agent) => {
+        {data.agents.map((agent, index) => {
           const on = agent.id === currentId;
           const live = on ? { ...agent, ...current } : agent;
+          const heading = index > 0 && agent.group !== data.agents[index - 1]?.group ? GROUP_LABEL[agent.group ?? "mine"]() : null;
           return (
             <li key={agent.id}>
+              {heading && <div className="ar-label ar-text">{heading}</div>}
               <Link href={`/agents/${agent.id}`} className={`ar-agent ${on ? "is-on" : ""}`} aria-current={on ? "page" : undefined} title={agent.name}>
                 <span className="ar-fig">
                   <AgentFigure size={30} look={agent.look} state={live.state} live={on} />

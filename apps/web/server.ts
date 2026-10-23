@@ -13,7 +13,7 @@ import { getDb, getPool, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { authenticateComputer, handleGatekeeper } from "@/server/gatekeeper";
 import { createHub } from "@/server/hub";
-import { ownedRoom } from "@/server/hub/rooms";
+import { roomFor } from "@/server/hub/rooms";
 import { ROOM_SOCKET } from "@/lib/rooms";
 import { handleWebhook } from "@/server/webhook";
 import { handleInboundEmail } from "@/server/inbound-email/handler";
@@ -247,7 +247,7 @@ async function main() {
         const user = await sessionFromHeaders(headersOf(req));
         const roomId = url.searchParams.get("room");
         if (!user || user.status !== "approved" || user.mustChangePassword || !roomId) return refuse(socket, 401, "Unauthorized");
-        if (!(await ownedRoom(roomId, user.id))) return refuse(socket, 403, "Forbidden");
+        if (!(await roomFor(roomId, user.id))) return refuse(socket, 403, "Forbidden");
         return accept(req, socket, head, (ws) => hub.attachRoomViewer(ws, roomId, user.id));
       }
       return nextUpgrade(req, socket, head);

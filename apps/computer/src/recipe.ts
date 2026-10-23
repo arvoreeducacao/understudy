@@ -159,7 +159,7 @@ export type RunResult = { ok: boolean; summary: string; anomalies: string[] };
 
 export function withAnomalies(result: RunResult): string {
   if (!result.anomalies.length) return result.summary;
-  return `${result.summary} Unusual: ${result.anomalies.join("; ")}`;
+  return `${result.summary} ⚠ ${result.anomalies.join("; ")}`;
 }
 
 export function parseRunResult(text: string): RunResult | null {

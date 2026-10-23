@@ -171,6 +171,7 @@ async function main() {
           kind: "chat",
           text: message.text,
           from: message.from,
+          ...(message.askedBy ? { askedBy: message.askedBy } : {}),
           ...(message.fromAgent ? { fromAgent: message.fromAgent } : {}),
           ...(message.repeated ? { repeated: message.repeated } : {}),
           ...(message.external ? { external: message.external } : {}),
@@ -182,7 +183,7 @@ async function main() {
         });
         return;
       case "room_turn":
-        agent.enqueue({ kind: "room", roomId: message.roomId, prompt: message.prompt, ...(message.model ? { model: message.model } : {}) });
+        agent.enqueue({ kind: "room", roomId: message.roomId, prompt: message.prompt, ...(message.model ? { model: message.model } : {}), ...(message.askedBy ? { askedBy: message.askedBy } : {}) });
         return;
       case "record_start":
         await recorder.start(message.recordingId);

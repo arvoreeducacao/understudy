@@ -94,6 +94,32 @@ export const hosts = pgTable("hosts", {
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export type TeamRole = "admin" | "member";
+
+export const teams = pgTable("teams", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text("role").$type<TeamRole>().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index("team_members_user_idx").on(t.userId)],
+);
+
 export const agents = pgTable(
   "agents",
   {
@@ -116,11 +142,13 @@ export const agents = pgTable(
     hostId: text("host_id"),
     model: text("model"),
     rules: jsonb("rules").$type<OwnerRule[]>().notNull().default([]),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    teamOwned: boolean("team_owned").notNull().default(false),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("agents_owner_idx").on(t.ownerId), uniqueIndex("agents_token_hash_idx").on(t.tokenHash)],
+  (t) => [index("agents_owner_idx").on(t.ownerId), index("agents_team_idx").on(t.teamId), uniqueIndex("agents_token_hash_idx").on(t.tokenHash)],
 );
 
 export type MessageRole = "agent" | "user" | "activity" | "system";
@@ -151,6 +179,7 @@ export const messages = pgTable(
     attachments: jsonb("attachments").$type<Attachment[]>(),
     artifact: jsonb("artifact").$type<MessageArtifact>(),
     proposalId: text("proposal_id"),
+    audienceId: text("audience_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("messages_agent_idx").on(t.agentId, t.createdAt)],
@@ -321,6 +350,7 @@ export const approvals = pgTable(
     status: text("status").$type<ApprovalStatus>().notNull().default("pending"),
     note: text("note"),
     answeredBy: text("answered_by"),
+    askedBy: text("asked_by"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
@@ -648,11 +678,26 @@ export const rooms = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("rooms_owner_idx").on(t.ownerId, t.updatedAt)],
+  (t) => [index("rooms_owner_idx").on(t.ownerId, t.updatedAt), index("rooms_team_idx").on(t.teamId)],
+);
+
+export const roomPeople = pgTable(
+  "room_people",
+  {
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index("room_people_user_idx").on(t.userId)],
 );
 
 export const roomParticipants = pgTable(
@@ -667,12 +712,13 @@ export const roomParticipants = pgTable(
     turnDepth: integer("turn_depth"),
     turnStartedAt: timestamp("turn_started_at", { withTimezone: true }),
     followUp: boolean("follow_up").notNull().default(false),
+    askedBy: text("asked_by"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.agentId] }), index("room_participants_agent_idx").on(t.agentId)],
 );
 
-export type RoomAuthor = "owner" | "agent" | "system";
+export type RoomAuthor = "owner" | "person" | "agent" | "system";
 
 export const roomMessages = pgTable(
   "room_messages",
@@ -685,6 +731,7 @@ export const roomMessages = pgTable(
     agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     text: text("text").notNull(),
+    approvalId: text("approval_id"),
     depth: integer("depth").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -51,6 +51,7 @@ export type ApprovalView = {
   status: string;
   createdAt: string;
   alwaysAllow?: { tool: string };
+  forYou?: true;
 };
 
 export type ServerToViewer =
@@ -112,8 +113,10 @@ export type ViewerToServer =
 
 export type RoomEntry = {
   id: string;
-  author: "owner" | "agent" | "system";
+  author: "owner" | "person" | "agent" | "system";
   agentId: string | null;
+  userId?: string | null;
+  approvalId?: string | null;
   text: string;
   at: string;
 };
@@ -125,6 +128,7 @@ export type ServerToRoom =
   | { type: "message"; entry: RoomEntry }
   | { type: "delta"; agentId: string; streamId: string; text: string }
   | { type: "presence"; participant: RoomPresence }
+  | { type: "approval"; approvalId: string; status: string }
   | { type: "error"; message: string };
 
 export type RoomToServer = { type: "chat"; text: string } | { type: "stop" };

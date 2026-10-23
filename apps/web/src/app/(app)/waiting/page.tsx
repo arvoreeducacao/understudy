@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { AlertTriangle, Ban, Check, Clock, X } from "lucide-react";
 import Link from "next/link";
-import { accessibleAgentIds } from "@/lib/access";
+import { accessibleAgentIds, approvalScope } from "@/lib/access";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalItem } from "@/components/approvals/ApprovalItem";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -27,8 +27,7 @@ function dayOf(date: Date) {
 export default async function WaitingPage() {
   const user = await requireUser();
   const db = getDb();
-  const ids = await accessibleAgentIds(user.id, ["owner", "approver"]);
-  const scope = ids.length ? inArray(schema.agents.id, ids) : eq(schema.agents.id, "");
+  const scope = await approvalScope(user.id);
   const pending = await db
     .select({ approval: schema.approvals, agent: schema.agents })
     .from(schema.approvals)

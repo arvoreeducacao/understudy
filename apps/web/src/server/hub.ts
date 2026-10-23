@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws";
 import { eq } from "drizzle-orm";
 import { parseComputerToServer, type ApprovalRequest, type Attachment, type ComputerToServer, type JobInfo, type ServerToComputer } from "@understudy/protocol";
+import { canChat, canManage, type Access } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import type { ApprovalGrant, MessageArtifact, RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
@@ -54,6 +55,7 @@ export class Hub {
   private viewers = new Map<string, Set<Viewer>>();
   private lastFrames = new Map<string, Frame>();
   private lastJobs = new Map<string, JobInfo[]>();
+  private audiences = new Map<string, string>();
   private fileRequests = new Map<string, { agentId: string; resolve: (value: FileAnswer) => void }>();
   private asks = new Map<string, { agentId: string; resolve: (value: ComputerReply) => void }>();
   private limiter = new RateLimiter();
@@ -104,11 +106,20 @@ export class Hub {
     return true;
   }
 
-  broadcast(agentId: string, message: ServerToViewer) {
+  broadcast(agentId: string, message: ServerToViewer, audienceId?: string | null) {
     const set = this.viewers.get(agentId);
     if (!set) return;
     const payload = JSON.stringify(message);
-    for (const v of set) if (v.ws.readyState === v.ws.OPEN) v.ws.send(payload);
+    for (const v of set) if (v.ws.readyState === v.ws.OPEN && (!audienceId || v.userId === audienceId)) v.ws.send(payload);
+  }
+
+  setTurnAudience(agentId: string, userId: string | null | undefined) {
+    if (userId) this.audiences.set(agentId, userId);
+    else this.audiences.delete(agentId);
+  }
+
+  turnAudience(agentId: string) {
+    return this.audiences.get(agentId) ?? null;
   }
 
   sendToOwners(agentId: string, message: ServerToViewer) {
@@ -209,15 +220,17 @@ export class Hub {
     attachments?: Attachment[],
     artifact?: MessageArtifact,
     sender?: string,
+    audienceId?: string | null,
   ) {
     const id = newId("msg");
     const createdAt = new Date();
     const files = attachments?.length ? attachments : null;
-    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, sender: sender ?? null, attachments: files, artifact: artifact ?? null, createdAt });
+    const audience = audienceId === undefined ? (runId ? null : this.turnAudience(agentId)) : audienceId;
+    await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, sender: sender ?? null, attachments: files, artifact: artifact ?? null, audienceId: audience, createdAt });
     this.broadcast(agentId, {
       type: "chat",
       entry: { id, role, text, runId: runId ?? null, via: via ?? null, ...(sender ? { sender } : {}), streamId: streamId ?? null, at: createdAt.toISOString(), ...(files ? { attachments: files } : {}), ...(artifact ? { artifact } : {}) },
-    });
+    }, audience);
     return id;
   }
 
@@ -272,6 +285,7 @@ export class Hub {
       this.fallingAsleep.delete(agentId);
       this.lastFrames.delete(agentId);
       this.lastJobs.delete(agentId);
+      this.audiences.delete(agentId);
       for (const [requestId, pending] of this.asks) {
         if (pending.agentId !== agentId) continue;
         this.asks.delete(requestId);
@@ -290,8 +304,8 @@ export class Hub {
     this.rooms.presenceChanged(agentId).catch((error) => log("room_presence_error", { agentId, error: String(error) }));
   }
 
-  async attachViewer(ws: WebSocket, agentId: string, userId: string, access: "owner" | "approver" | "viewer" = "owner") {
-    const viewer: Viewer = { ws, userId, owner: access === "owner" };
+  async attachViewer(ws: WebSocket, agentId: string, userId: string, access: Access = "owner") {
+    const viewer: Viewer = { ws, userId, owner: canManage(access), chat: canChat(access) };
     const set = this.viewers.get(agentId) ?? new Set<Viewer>();
     set.add(viewer);
     this.viewers.set(agentId, set);
@@ -306,7 +320,7 @@ export class Hub {
       } catch {
         return;
       }
-      if (access !== "owner" || typeof message?.type !== "string") return;
+      if (typeof message?.type !== "string" || !(viewer.owner || (viewer.chat && message.type === "chat"))) return;
       Promise.resolve(handleViewerMessage({ hub: this, agentId, userId, offline, refuse }, message)).catch((error) =>
         log("viewer_message_error", { agentId, type: message.type, error: String(error) }),
       );

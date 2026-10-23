@@ -232,6 +232,20 @@
       "when": 1792694493838,
       "tag": "0032_two_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792784978149,
+      "tag": "0033_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792785938521,
+      "tag": "0034_team_rooms",
+      "breakpoints": true
     }
   ]
 }

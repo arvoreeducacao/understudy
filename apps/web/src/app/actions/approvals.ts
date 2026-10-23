@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { agentAccess, canApprove } from "@/lib/access";
+import { agentAccess, canAnswer } from "@/lib/access";
 import { requireUser } from "@/lib/session";
 import { getHub } from "@/server/hub-access";
 
@@ -11,10 +11,10 @@ export async function answerApproval(approvalId: string, approved: boolean, note
   const user = await requireUser();
   const db = getDb();
   const [row] = await db
-    .select({ agentId: schema.approvals.agentId })
+    .select({ agentId: schema.approvals.agentId, askedBy: schema.approvals.askedBy })
     .from(schema.approvals)
     .where(eq(schema.approvals.id, approvalId));
-  if (!row || !canApprove(await agentAccess(user.id, row.agentId))) return { ok: false };
+  if (!row || !canAnswer(await agentAccess(user.id, row.agentId), row.askedBy, user.id)) return { ok: false };
   const hub = getHub();
   let ok = false;
   if (hub) {

@@ -11,6 +11,7 @@ import { useAgentSocket } from "@/components/live/useAgentSocket";
 import { useSpeech } from "@/components/live/useSpeech";
 import type { BrainStatus } from "@/lib/db/schema";
 import { WORKSPACE_HIDDEN_COOKIE, chatRows } from "@/lib/chat-layout";
+import { canApprove, canChat, canManage, type Access } from "@/lib/access-rules";
 import { messages } from "@/lib/messages";
 import { STATE_PILL } from "@/lib/state-pill";
 import type { ApprovalView, ChatEntry } from "@/server/hub-types";
@@ -113,6 +114,7 @@ export function AgentInside({
   ownerData,
   rail,
   access = "owner",
+  team = null,
   initialChatWidth = null,
   initialWorkspaceHidden = false,
 }: {
@@ -125,11 +127,13 @@ export function AgentInside({
   recipes: TaskSummary[];
   followups?: FollowupSummary[];
   ownerData: OwnerData | null;
-  access?: "owner" | "approver" | "viewer";
+  access?: Access;
+  team?: { id: string; name: string } | null;
   initialChatWidth?: number | null;
   initialWorkspaceHidden?: boolean;
 }) {
-  const owner = access === "owner";
+  const owner = canManage(access);
+  const chatter = canChat(access);
   const [chat, setChat] = useState(initialChat);
   const [drafts, setDrafts] = useState<{ streamId: string; text: string }[]>([]);
   const [approvals, setApprovals] = useState(initialApprovals);
@@ -239,6 +243,7 @@ export function AgentInside({
   }, []);
 
   const state: AgentState = approvals.length > 0 ? "waiting_you" : live.state;
+  const toAnswer = approvals.filter((approval) => approval.forYou || canApprove(access)).length;
   const brainName = messages.brains[agent.brain].name;
 
   function submit() {
@@ -269,7 +274,7 @@ export function AgentInside({
           link={{ live }}
           state={state}
           owner={owner}
-          approvals={approvals.length}
+          approvals={toAnswer}
           runs={runs}
           followups={followups}
           files={ownerData ? feeds.files : null}
@@ -299,7 +304,7 @@ export function AgentInside({
         agent={agentRef}
         link={{ live, send, listen }}
         owner={owner}
-        approvals={approvals.length}
+        approvals={toAnswer}
         recipes={recipes}
         runs={runs}
         followups={followups}
@@ -338,7 +343,7 @@ export function AgentInside({
           <Link href="/" aria-label={messages.common.back} className="cx-back">
             <ArrowLeft size={17} aria-hidden />
           </Link>
-          <AgentFigure state={state} size={34} look={agent.look} count={approvals.length} />
+          <AgentFigure state={state} size={34} look={agent.look} count={toAnswer} />
           <div className="min-w-0 flex-1">
             <h1 className="cx-title">
               <button type="button" className="cx-switch" aria-haspopup="dialog" aria-label={`${agent.name}, ${messages.agentPage.switchAgent}`} onClick={() => setSwitching(true)}>
@@ -348,7 +353,7 @@ export function AgentInside({
             </h1>
             <div className="cx-subtitle">
               <span className={`cx-state ${live.online ? STATE_PILL[state] : ""}`} aria-hidden />
-              <span className="truncate">{t.ownerLine(ownerName.split(" ")[0], brainName)}</span>
+              <span className="truncate">{team ? messages.teams.agentLine(team.name, ownerName.split(" ")[0], brainName) : t.ownerLine(ownerName.split(" ")[0], brainName)}</span>
             </div>
           </div>
           <button
@@ -384,6 +389,7 @@ export function AgentInside({
             setScrolled(el.scrollTop > 4);
           }}
         >
+          {team && chatter && <p className="cx-team-note">{messages.teams.privateChat(agent.name, team.name)}</p>}
           {chat.length === 0 && approvals.length === 0 && drafts.length === 0 && (
             <EmptyState look={agent.look} mood="happy" title={messages.empty.chatTitle(agent.name)} body={messages.empty.chatBody} />
           )}
@@ -397,11 +403,11 @@ export function AgentInside({
           ))}
           {working && drafts.length === 0 && approvals.length === 0 && <WorkingRow agentName={agent.name} look={agent.look} note={live.note} />}
           {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} approval={approval} canAnswer={access !== "viewer"} canGrant={owner} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
+            <ApprovalCard key={approval.id} approval={approval} canAnswer={Boolean(approval.forYou) || canApprove(access)} canGrant={access === "owner"} answeredBy={ownerName.split(" ")[0]} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
           ))}
         </div>
-        {owner ? (
-          <Composer agentName={agent.name} draft={draft} setDraft={setDraft} onSubmit={submit} speech={speech} attachments={attachments} />
+        {chatter ? (
+          <Composer agentName={agent.name} draft={draft} setDraft={setDraft} onSubmit={submit} speech={speech} attachments={owner ? attachments : undefined} />
         ) : (
           <p className="cx-readonly">{messages.agentPage.readOnly(ownerName.split(" ")[0], agent.name)}</p>
         )}

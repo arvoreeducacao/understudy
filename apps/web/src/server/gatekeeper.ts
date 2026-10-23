@@ -12,7 +12,7 @@ import { canAlwaysAllow, effectivePermission, hintsRecordedFor, isDestructive, o
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
-import { approvalFields, MAX_APPROVAL_FIELDS, payloadHash, serverAllowedFor } from "./approval-payload";
+import { approvalFields, MAX_APPROVAL_FIELDS, payloadHash, serverAllowedFor, teamConnector } from "./approval-payload";
 import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
@@ -270,7 +270,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     );
   }
 
-  const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail));
+  const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail) && (!agent.teamId || teamConnector(server)));
   const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
   const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingOf(upstream, limits.get(upstream.id))]));
   const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>

@@ -95,12 +95,12 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       </div>
 
       <div className="flex flex-col gap-4 py-5">
-        <nav className="flex gap-2 flex-wrap" aria-label={t.title(agent.name)}>
+        <nav className="seg self-start" aria-label={t.title(agent.name)}>
           {[null, ...STATUSES].map((value) => (
             <Link
               key={value ?? "all"}
               href={filterHref(value)}
-              className={`pill ${filter === value ? "s" : ""}`}
+              className={`seg-opt ${filter === value ? "is-on" : ""}`}
               aria-current={filter === value ? "page" : undefined}
             >
               {t.filters[value ?? "all"]}

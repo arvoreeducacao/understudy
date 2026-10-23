@@ -51,7 +51,7 @@ export async function updateAgentTools(agentId: string, form: FormData) {
       ...(name ? { name } : {}),
       role,
       look,
-      tools: await toolsFrom(form, user.email, agent.tools),
+      tools: await toolsFrom(form, user.email, agent.tools, Boolean(agent.teamId)),
       updatedAt: new Date(),
     })
     .where(eq(schema.agents.id, agentId));
