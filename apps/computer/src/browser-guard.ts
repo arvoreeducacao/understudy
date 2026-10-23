@@ -24,7 +24,65 @@ export type ElementInfo = {
   fields: { label: string; value: string }[];
 };
 
-export type Verdict = { kind: "pass" } | { kind: "block"; reason: string } | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[] };
+export type StepApproval = { runId: string; stepId: string; summary: string; until: number };
+
+export type Verdict = { kind: "pass"; coveredBy?: StepApproval } | { kind: "block"; reason: string } | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[] };
+
+export const ASK_FIRST_TOOL = "browser_ask_first";
+
+export const STEP_APPROVAL_MS = 5 * 60 * 1000;
+
+export const DIALOG_FOLLOW_UP_MS = 60 * 1000;
+
+export const ASK_FIRST_TOOL_SPEC = {
+  name: ASK_FIRST_TOOL,
+  title: "Ask the owner before an ask-first step",
+  description:
+    'Before an [ASK FIRST] step of a task run, ask your owner to approve exactly what you are about to do, and wait for the answer. stepId: the id of the step in the run\'s step list. summary: one sentence naming the action and the exact item, like: Remove "Dom Casmurro" (ISBN 9788535910663) from the collection. fields: optional details the owner should see, such as values you will type, amounts or rows. Returns approved or denied. Once approved, do exactly that now; the browser does not ask again while you do it. Ask again for every item: an approval never covers the next one. If denied, skip that item and report it.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      stepId: { type: "string", maxLength: 100 },
+      summary: { type: "string", maxLength: 480 },
+      fields: { type: "array", maxItems: 10, items: { type: "object", properties: { label: { type: "string", maxLength: 200 }, value: { type: "string", maxLength: 2000 } }, required: ["label", "value"] } },
+    },
+    required: ["stepId", "summary"],
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+};
+
+export type AskFirstPlan = { kind: "answer"; text: string; isError: boolean } | { kind: "ask"; summary: string; stepId: string; fields: { label: string; value: string }[] };
+
+export function askFirstPlan(state: TurnState, args: Record<string, unknown>): AskFirstPlan {
+  if (state.mode !== "run") return { kind: "answer", isError: true, text: `not asked: ${ASK_FIRST_TOOL} is only for [ASK FIRST] steps of a task run. Outside a run, the browser asks your owner by itself when you submit or send something; for anything else use request_approval.` };
+  if (state.approvalsRequired === false) return { kind: "answer", isError: false, text: "approved: this run goes without approvals, so just do the step." };
+  const stepId = String(args.stepId ?? "").trim();
+  const step = (state.askSteps ?? []).find((candidate) => candidate.id === stepId);
+  if (!step) return { kind: "answer", isError: true, text: `not asked: "${stepId.slice(0, 100)}" is not an [ASK FIRST] step of this run. Its ask-first steps are: ${(state.askSteps ?? []).map((candidate) => candidate.id).join(", ") || "none"}.` };
+  const summary = String(args.summary ?? "").trim().replace(/\s+/g, " ").slice(0, 480);
+  if (!summary) return { kind: "answer", isError: true, text: "not asked: summary must say exactly what you will do and to which item." };
+  const extra = Array.isArray(args.fields) ? (args.fields as { label?: unknown; value?: unknown }[]).slice(0, 10).map((field) => ({ label: String(field?.label ?? "").slice(0, 200), value: String(field?.value ?? "").slice(0, 2000) })).filter((field) => field.label) : [];
+  return { kind: "ask", summary, stepId: step.id, fields: [{ label: "Step", value: step.text }, ...extra] };
+}
+
+export function coveringApproval(approval: StepApproval | null | undefined, state: TurnState, now = Date.now()): StepApproval | null {
+  if (!approval || state.mode !== "run" || !state.runId || state.runId !== approval.runId || now > approval.until) return null;
+  return approval;
+}
+
+export type PageDialog = { type: string; message: string };
+
+export function pendingDialog(text: string): PageDialog | null {
+  const found = [...text.matchAll(/\["(alert|confirm|prompt|beforeunload)" dialog with message "([\s\S]*?)"\]: can be handled/g)].pop();
+  return found ? { type: found[1], message: found[2].slice(0, 300) } : null;
+}
+
+export function dialogReason(args: Record<string, unknown>, dialog: PageDialog | null): string | null {
+  if (args.accept !== true) return null;
+  if (dialog?.type === "alert" || dialog?.type === "beforeunload") return null;
+  const what = dialog ? `confirm the page's question "${dialog.message}"` : "confirm a question the page asked";
+  return typeof args.promptText === "string" && args.promptText ? `${what} with "${args.promptText.slice(0, 120)}"` : what;
+}
 
 export const ELEMENT_INFO = `(el) => {
   const element = el || document.activeElement || document.body;
@@ -98,10 +156,12 @@ export function matchStep(name: string, steps: { id: string; text: string }[]): 
   return best;
 }
 
-export function decide(state: TurnState, reason: string | null, info: ElementInfo | null): Verdict {
+export function decide(state: TurnState, reason: string | null, info: ElementInfo | null, approval: StepApproval | null = null): Verdict {
   if (!reason || !info) return { kind: "pass" };
   if (state.mode === "recipe") return { kind: "block", reason: "blocked: while learning a task nothing is submitted or sent" };
   if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
+  const cover = coveringApproval(approval, state);
+  if (cover) return { kind: "pass", coveredBy: cover };
   let host = info.url;
   try {
     host = new URL(info.url).host;
@@ -109,7 +169,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   const step = matchStep(info.name, state.askSteps ?? []);
   return {
     kind: "ask",
-    summary: `${reason.charAt(0).toUpperCase()}${reason.slice(1)} on ${host}`.slice(0, 480),
+    summary: `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${host ? ` on ${host}` : ""}`.slice(0, 480),
     stepId: step?.id,
     fields: [
       { label: "Step", value: step ? step.text : state.mode === "run" ? "Not a step of the recipe" : "Asked in chat" },
@@ -119,7 +179,9 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   };
 }
 
-export const SCRIPT_TOOLS = new Set(["browser_evaluate", "browser_run_code"]);
+export const SCRIPT_TOOLS = new Set(["browser_evaluate", "browser_run_code", "browser_run_code_unsafe"]);
+
+export const COMMIT_TOOLS = new Set(["browser_click", "browser_press_key", "browser_type", "browser_handle_dialog"]);
 
 export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -141,13 +203,15 @@ export function scriptRequestSubject(request: Pick<GatedRequest, "url" | "body" 
   return { urls: [...urls, ...(inner.urls ?? [])], texts: [body, ...(inner.texts ?? [])], amounts: inner.amounts ?? [] };
 }
 
-export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = ""): ScriptVerdict {
+export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return { kind: "pass" };
   const violation = rules.length ? findViolation(rules, scriptRequestSubject(request)) : null;
   if (violation) return { kind: "rule", violation };
   if (state.mode === "recipe") return { kind: "block", reason: "blocked: while learning a task nothing is submitted or sent, and a script just tried to send a request" };
   if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
+  const cover = coveringApproval(approval, state);
+  if (cover) return { kind: "pass", coveredBy: cover };
   let host = request.url;
   try {
     host = new URL(request.url).host;
@@ -249,6 +313,9 @@ async function serve() {
   const pendingResults = new Map<string | number, (message: Rpc) => Rpc | Promise<Rpc>>();
   let next = 0;
   let gatekeeper: Promise<McpSession> | null = null;
+  let stepApproval: StepApproval | null = null;
+  let lastApprovedAt = 0;
+  let dialog: PageDialog | null = null;
 
   const notifyMain = (event: Record<string, unknown>) => notifyGuardSocket(process.env.UNDERSTUDY_GUARD_SOCKET || `${home}/.understudy/guard.sock`, event);
 
@@ -267,16 +334,31 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: Extract<Verdict, { kind: "ask" }>, state: TurnState): Promise<{ approved: boolean; text: string; requestId?: string }> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[] }, state: TurnState): Promise<{ approved: boolean; text: string; requestId?: string }> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
     gatekeeper ??= openGatekeeper(serverUrl, token);
     const session = await gatekeeper;
     await notifyMain({ event: "waiting", summary: verdict.summary });
     try {
-      return await requestOwnerApproval(session, { summary: verdict.summary, fields: verdict.fields, runId: state.runId, stepId: verdict.stepId });
+      const answer = await requestOwnerApproval(session, { summary: verdict.summary, fields: verdict.fields, runId: state.runId, stepId: verdict.stepId });
+      if (answer.approved) lastApprovedAt = Date.now();
+      return answer;
     } finally {
       await notifyMain({ event: "resumed" });
     }
+  };
+
+  const coveredSuffix = (cover: StepApproval) => ` (covered by the owner's approval of step ${cover.stepId}: "${cover.summary}")`;
+
+  const askFirst = async (message: Rpc, args: Record<string, unknown>) => {
+    const state = readTurnState(stateFile);
+    const plan = askFirstPlan(state, args);
+    if (plan.kind === "answer") return toBrain(textResult(message.id, plan.text, plan.isError));
+    stepApproval = null;
+    const answer = await askOwner(plan, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
+    if (!answer.approved) return toBrain(textResult(message.id, `denied: the owner did not approve "${plan.summary}" (${answer.text}). Do not do it and do not try another way; skip this item and report it.`, false));
+    stepApproval = { runId: state.runId!, stepId: plan.stepId, summary: plan.summary, until: Date.now() + STEP_APPROVAL_MS };
+    return toBrain(textResult(message.id, `approved: do exactly this now: "${plan.summary}". The browser does not ask again while you do it. For the next item, call ${ASK_FIRST_TOOL} again.${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""}`, false));
   };
 
   const gatedScript = async (message: Rpc, args: Record<string, unknown>, rules: OwnerRule[]) => {
@@ -290,8 +372,11 @@ async function serve() {
     const stepHint = String(args.element ?? "");
     const judge = async (request: GatedRequest): Promise<boolean> => {
       const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
-      const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint);
-      if (verdict.kind === "pass") return true;
+      const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint, stepApproval);
+      if (verdict.kind === "pass") {
+        if (verdict.coveredBy) notes.push(`${request.method.toUpperCase()} ${cleaned.url.slice(0, 200)}${coveredSuffix(verdict.coveredBy)}`);
+        return true;
+      }
       if (verdict.kind === "rule") {
         blocked = true;
         await notifyMain({ event: "rule_blocked", ruleId: verdict.violation.rule.id, rule: describeRule(verdict.violation.rule), detail: verdict.violation.reason });
@@ -360,8 +445,9 @@ async function serve() {
       await notifyMain({ event: "rule_blocked", ruleId: violation.rule.id, rule: describeRule(violation.rule), detail: violation.reason });
       return toBrain(textResult(message.id, ruleBlockText(violation)));
     };
+    if (tool === ASK_FIRST_TOOL) return askFirst(message, args);
     if (SCRIPT_TOOLS.has(tool)) return gatedScript(message, args, rules);
-    if (tool !== "browser_click" && tool !== "browser_press_key" && tool !== "browser_type") {
+    if (!COMMIT_TOOLS.has(tool)) {
       if (rules.length && RULE_CHECKED_TOOLS.has(tool)) {
         const pageInfo = tool === "browser_navigate" || tool === "browser_tabs" ? null : await elementInfo(args.target ?? undefined);
         const violation = ruleCheck(rules, tool, args, pageInfo, false);
@@ -369,24 +455,34 @@ async function serve() {
       }
       return toChild(message);
     }
-    const info = await elementInfo(tool === "browser_press_key" ? undefined : args.target);
-    const reason = commitReason(tool, args, info);
-    const violation = ruleCheck(rules, tool, args, info, Boolean(reason));
+    const passWith = (suffix: string) => {
+      if (suffix)
+        pendingResults.set(message.id!, (reply) => {
+          if (reply.result?.content?.[0]?.type === "text") reply.result.content[0].text += suffix;
+          return reply;
+        });
+      toChild(message);
+    };
+    const asDialog = tool === "browser_handle_dialog";
+    const shown = dialog;
+    if (asDialog) dialog = null;
+    const info = asDialog ? { ...UNKNOWN_ELEMENT, name: shown?.message ?? "" } : await elementInfo(tool === "browser_press_key" ? undefined : args.target);
+    const reason = asDialog ? dialogReason(args, shown) : commitReason(tool, args, info);
+    const violation = asDialog ? null : ruleCheck(rules, tool, args, info, Boolean(reason));
     if (violation) return blockForRule(violation);
     const state = readTurnState(stateFile);
-    const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") });
-    if (verdict.kind === "pass") return toChild(message);
+    if (asDialog && reason && Date.now() - lastApprovedAt < DIALOG_FOLLOW_UP_MS) {
+      lastApprovedAt = 0;
+      return passWith(" (part of the action the owner just approved)");
+    }
+    const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, stepApproval);
+    if (verdict.kind === "pass") return passWith(verdict.coveredBy ? coveredSuffix(verdict.coveredBy) : "");
     if (verdict.kind === "block") return toBrain(textResult(message.id, verdict.reason));
     const answer = await askOwner(verdict, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
     if (!answer.approved) {
       return toBrain(textResult(message.id, `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}). Do not try another way; stop and report.`));
     }
-    const suffix = ` (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`;
-    pendingResults.set(message.id!, (reply) => {
-      if (reply.result?.content?.[0]?.type === "text") reply.result.content[0].text += suffix;
-      return reply;
-    });
-    toChild(message);
+    passWith(` (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
   };
 
   createInterface({ input: child.stdout }).on("line", (line) => {
@@ -401,7 +497,9 @@ async function serve() {
       own.delete(message.id);
       return;
     }
-    if (message.result?.tools) message.result.tools = message.result.tools.filter((tool: { name: string }) => !HIDDEN_TOOLS.has(tool.name));
+    if (message.result?.tools) message.result.tools = [...message.result.tools.filter((tool: { name: string }) => !HIDDEN_TOOLS.has(tool.name) && tool.name !== ASK_FIRST_TOOL), ASK_FIRST_TOOL_SPEC];
+    const shownDialog = Array.isArray(message.result?.content) ? pendingDialog(message.result.content.map((part: { text?: string }) => part.text ?? "").join("\n")) : null;
+    if (shownDialog) dialog = shownDialog;
     const hook = message.id !== undefined ? pendingResults.get(message.id) : undefined;
     if (!hook) return deliver(message);
     pendingResults.delete(message.id!);
