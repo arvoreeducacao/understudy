@@ -773,6 +773,7 @@ export const ptBR: Messages = {
     history: "Últimas vezes",
     noHistory: "Nenhuma rodada ainda",
     allRuns: "Todas as rodadas",
+    approvalElsewhere: (owner: string) => (owner ? `Esperando ${owner} responder` : "Esperando resposta"),
     approvalTitle: "Posso seguir?",
     approve: "Pode seguir",
     deny: "Não",

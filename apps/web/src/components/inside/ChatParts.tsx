@@ -209,7 +209,7 @@ export function StepsGroup({ entries, active }: { entries: ChatEntry[]; active: 
   );
 }
 
-export function ApprovalCard({ approval, onDone, canAnswer = true, canGrant = false }: { approval: ApprovalView; onDone: (id: string) => void; canAnswer?: boolean; canGrant?: boolean }) {
+export function ApprovalCard({ approval, onDone, canAnswer = true, canGrant = false, answeredBy }: { approval: ApprovalView; onDone: (id: string) => void; canAnswer?: boolean; canGrant?: boolean; answeredBy?: string }) {
   const [busy, setBusy] = useState<"yes" | "no" | "always" | null>(null);
   async function answer(approved: boolean, always = false) {
     setBusy(always ? "always" : approved ? "yes" : "no");
@@ -227,7 +227,7 @@ export function ApprovalCard({ approval, onDone, canAnswer = true, canGrant = fa
           <ShieldAlert size={15} aria-hidden />
         </span>
         <div className="min-w-0">
-          <div className="cx-approval-title">{messages.live.approvalTitle}</div>
+          <div className="cx-approval-title">{canAnswer ? messages.live.approvalTitle : messages.live.approvalElsewhere(answeredBy ?? "")}</div>
           <div className="cx-approval-summary">{approval.summary}</div>
         </div>
       </header>

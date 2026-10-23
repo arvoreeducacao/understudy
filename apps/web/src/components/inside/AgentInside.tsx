@@ -243,6 +243,7 @@ export function AgentInside({
   }, []);
 
   const state: AgentState = approvals.length > 0 ? "waiting_you" : live.state;
+  const toAnswer = approvals.filter((approval) => approval.forYou || canApprove(access)).length;
   const brainName = messages.brains[agent.brain].name;
 
   function submit() {
@@ -273,7 +274,7 @@ export function AgentInside({
           link={{ live }}
           state={state}
           owner={owner}
-          approvals={approvals.length}
+          approvals={toAnswer}
           runs={runs}
           followups={followups}
           files={ownerData ? feeds.files : null}
@@ -303,7 +304,7 @@ export function AgentInside({
         agent={agentRef}
         link={{ live, send, listen }}
         owner={owner}
-        approvals={approvals.length}
+        approvals={toAnswer}
         recipes={recipes}
         runs={runs}
         followups={followups}
@@ -342,7 +343,7 @@ export function AgentInside({
           <Link href="/" aria-label={messages.common.back} className="cx-back">
             <ArrowLeft size={17} aria-hidden />
           </Link>
-          <AgentFigure state={state} size={34} look={agent.look} count={approvals.length} />
+          <AgentFigure state={state} size={34} look={agent.look} count={toAnswer} />
           <div className="min-w-0 flex-1">
             <h1 className="cx-title">
               <button type="button" className="cx-switch" aria-haspopup="dialog" aria-label={`${agent.name}, ${messages.agentPage.switchAgent}`} onClick={() => setSwitching(true)}>
@@ -402,7 +403,7 @@ export function AgentInside({
           ))}
           {working && drafts.length === 0 && approvals.length === 0 && <WorkingRow agentName={agent.name} look={agent.look} note={live.note} />}
           {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} approval={approval} canAnswer={Boolean(approval.forYou) || canApprove(access)} canGrant={access === "owner"} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
+            <ApprovalCard key={approval.id} approval={approval} canAnswer={Boolean(approval.forYou) || canApprove(access)} canGrant={access === "owner"} answeredBy={ownerName.split(" ")[0]} onDone={(id) => setApprovals((a) => a.filter((x) => x.id !== id))} />
           ))}
         </div>
         {chatter ? (

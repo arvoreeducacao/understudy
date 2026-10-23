@@ -774,6 +774,7 @@ export const en = {
     noHistory: "No runs yet",
     allRuns: "All runs",
     approvalTitle: "May I go on?",
+    approvalElsewhere: (owner: string) => (owner ? `Waiting for ${owner} to answer` : "Waiting for an answer"),
     approve: "Go ahead",
     deny: "No",
     goTo: "Go to",
