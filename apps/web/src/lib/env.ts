@@ -93,8 +93,13 @@ export function isAdminEmail(email: string) {
   return env.adminEmails.includes(email.trim().toLowerCase());
 }
 
-export function isAdmin(email: string, flaggedAdmin: boolean, source?: string | null) {
-  return env.adminEmails.length > 0 ? isAdminEmail(email) && trustedForAdminList(source) : flaggedAdmin;
+export function isAdmin(email: string, flaggedAdmin: boolean, source?: string | null, grantedAt?: Date | string | null) {
+  if (env.adminEmails.length === 0) return flaggedAdmin;
+  return (isAdminEmail(email) && trustedForAdminList(source)) || (flaggedAdmin && Boolean(grantedAt));
+}
+
+export function adminFromServerList(email: string, source?: string | null) {
+  return env.adminEmails.length > 0 && isAdminEmail(email) && trustedForAdminList(source);
 }
 
 export function isGoogleOnlyEmail(email: string) {

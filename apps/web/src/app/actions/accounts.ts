@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { env, isGoogleOnlyEmail } from "@/lib/env";
+import { adminFromServerList, env, isGoogleOnlyEmail } from "@/lib/env";
 import { messages } from "@/lib/messages";
 import { getAuth } from "@/lib/auth";
 import { currentUser, requireAdmin } from "@/lib/session";
@@ -106,6 +106,21 @@ export async function createResetLink(userId: string) {
   const url = await issueResetLink(target.id);
   console.log(JSON.stringify({ event: "reset_link_issued", userId: target.id, by: admin.id }));
   return { url };
+}
+
+export async function setAdmin(userId: string, on: boolean) {
+  const admin = await requireAdmin();
+  const db = getDb();
+  const [target] = await db.select().from(schema.user).where(eq(schema.user.id, userId));
+  if (!target || target.id === admin.id || target.status !== "approved") return { error: messages.admin.adminChangeFailed };
+  if (!on && adminFromServerList(target.email, target.source)) return { error: messages.admin.adminFromServer };
+  await db
+    .update(schema.user)
+    .set({ admin: on, adminGrantedAt: on ? new Date() : null, updatedAt: new Date() })
+    .where(eq(schema.user.id, userId));
+  console.log(JSON.stringify({ event: on ? "admin_granted" : "admin_removed", userId, by: admin.id }));
+  revalidatePath("/admin");
+  return {};
 }
 
 export async function resetTwoFactor(userId: string) {

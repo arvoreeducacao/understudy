@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { env, isAllowedEmail, isGoogleOnlyEmail } from "./env";
+import { adminFromServerList, env, isAdmin, isAllowedEmail, isGoogleOnlyEmail } from "./env";
 
 const saved = process.env.UNDERSTUDY_ALLOWED_EMAIL_DOMAIN;
 
@@ -44,5 +44,23 @@ test("Google-only domains apply only when Google sign-in is configured", () => {
   for (const [key, value] of [["GOOGLE_CLIENT_ID", before.id], ["GOOGLE_CLIENT_SECRET", before.secret], ["UNDERSTUDY_GOOGLE_ONLY_DOMAINS", before.only]] as const) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
+  }
+});
+
+test("with a server admin list, a stored admin flag only counts when it was granted in the panel", () => {
+  const before = process.env.UNDERSTUDY_ADMIN_EMAILS;
+  process.env.UNDERSTUDY_ADMIN_EMAILS = "owner@example.com";
+  try {
+    assert.equal(isAdmin("owner@example.com", false, null, null), true);
+    assert.equal(adminFromServerList("owner@example.com", null), true);
+    assert.equal(isAdmin("ana@example.com", true, null, null), false);
+    assert.equal(isAdmin("ana@example.com", true, null, new Date()), true);
+    assert.equal(isAdmin("ana@example.com", false, null, new Date()), false);
+    assert.equal(adminFromServerList("ana@example.com", null), false);
+    process.env.UNDERSTUDY_ADMIN_EMAILS = "";
+    assert.equal(isAdmin("ana@example.com", true, null, null), true);
+    assert.equal(adminFromServerList("ana@example.com", null), false);
+  } finally {
+    process.env.UNDERSTUDY_ADMIN_EMAILS = before;
   }
 });

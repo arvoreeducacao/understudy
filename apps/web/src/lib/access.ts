@@ -7,10 +7,10 @@ export { canAnswer, canApprove, canChat, canManage, teamAccess, type Access } fr
 
 async function readsEveryAgent(userId: string) {
   const [row] = await getDb()
-    .select({ email: schema.user.email, admin: schema.user.admin, source: schema.user.source, status: schema.user.status })
+    .select({ email: schema.user.email, admin: schema.user.admin, adminGrantedAt: schema.user.adminGrantedAt, source: schema.user.source, status: schema.user.status })
     .from(schema.user)
     .where(eq(schema.user.id, userId));
-  return Boolean(row && row.status === "approved" && isAdmin(row.email, row.admin, row.source));
+  return Boolean(row && row.status === "approved" && isAdmin(row.email, row.admin, row.source, row.adminGrantedAt));
 }
 
 export async function agentAccess(userId: string, agentId: string): Promise<Access | null> {
