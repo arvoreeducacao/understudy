@@ -213,7 +213,7 @@ export class Terminal {
       if (line.startsWith("%end") || line.startsWith("%error")) {
         const captured = this.block;
         this.block = null;
-        if (this.awaitingCapture && captured.some((row) => row.trim())) {
+        if (this.awaitingCapture && line.startsWith("%end") && captured.some((row) => row.trim())) {
           this.awaitingCapture = false;
           this.emit({ op: "term_output", id: this.id, data: `\x1b[2J\x1b[H${captured.join("\r\n")}` });
         }

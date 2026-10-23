@@ -3,7 +3,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { open } from "@/lib/secret-box";
-import { SignInNeededError, StoredOAuthProvider, usesOAuth } from "./connector-oauth";
+import { renewSignIn, SignInNeededError, StoredOAuthProvider, usesOAuth } from "./connector-oauth";
+import { answersGmailItself, GMAIL_ALWAYS_ASK, GMAIL_TOOLS, gmailApi, runGmailTool } from "./gmail-direct";
 import { safeFetch } from "./safe-fetch";
 import type { ToolHints } from "@/lib/tool-policy";
 
@@ -60,8 +61,16 @@ export async function loadToolLimits(ids: string[]) {
   return limits;
 }
 
-export function ceilingOf(server: Pick<UpstreamServer, "askAll" | "askTools">, limits: { ask: string[]; never: string[] } | undefined) {
-  return { askAll: server.askAll, askTools: [...(server.askTools ?? []), ...(limits?.ask ?? [])], neverTools: limits?.never ?? [] };
+export function ceilingOf(server: Pick<UpstreamServer, "askAll" | "askTools" | "url">, limits: { ask: string[]; never: string[] } | undefined) {
+  const alwaysAsk = answersGmailItself(server) ? GMAIL_ALWAYS_ASK : [];
+  return { askAll: server.askAll, askTools: [...(server.askTools ?? []), ...(limits?.ask ?? []), ...alwaysAsk], neverTools: limits?.never ?? [] };
+}
+
+async function gmailFor(server: UpstreamServer, userId?: string) {
+  if (!userId) throw new SignInNeededError();
+  const provider = await StoredOAuthProvider.for(server, userId);
+  if (!provider.tokens()) throw new SignInNeededError();
+  return gmailApi({ token: () => provider.tokens()?.access_token, renew: () => renewSignIn(server, provider), fetch: safeFetch });
 }
 
 function cacheKey(server: UpstreamServer, userId?: string) {
@@ -69,6 +78,10 @@ function cacheKey(server: UpstreamServer, userId?: string) {
 }
 
 export async function listUpstreamTools(server: UpstreamServer, userId?: string): Promise<UpstreamTool[]> {
+  if (answersGmailItself(server)) {
+    await gmailFor(server, userId);
+    return GMAIL_TOOLS;
+  }
   const key = cacheKey(server, userId);
   const cached = toolCache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.tools;
@@ -89,6 +102,7 @@ export async function listUpstreamTools(server: UpstreamServer, userId?: string)
 }
 
 export async function callUpstreamTool(server: UpstreamServer, name: string, args: Record<string, unknown>, userId?: string) {
+  if (answersGmailItself(server)) return runGmailTool(await gmailFor(server, userId), name, args);
   const client = await connect(server, userId);
   try {
     return await client.callTool({ name, arguments: args });

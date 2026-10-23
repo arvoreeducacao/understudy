@@ -440,7 +440,7 @@ export const en = {
       apify: "Runs ready-made robots that collect data from websites.",
       exa: "Searches the web and reads pages to answer research questions.",
       huggingface: "Finds AI models, datasets and demos on Hugging Face.",
-      gmail: "Searches and reads your mail and writes drafts for you to send. It cannot send on its own.",
+      gmail: "Searches and reads your mail, writes drafts, and sends only after you approve each message.",
       hubspot: "Reads and updates contacts, companies and deals in your CRM.",
       mslearn: "Searches Microsoft's official documentation.",
       "cloudflare-docs": "Searches Cloudflare's official documentation.",

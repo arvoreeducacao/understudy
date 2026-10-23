@@ -71,16 +71,16 @@ Owners connect a bot of their own per understudy under Settings › Channels: cr
 
 ## Reading the owner's email
 
-An understudy reads, searches and drafts in its owner's mailbox through a connector, under the owner's own account. Nothing is configured on the server.
+An understudy reads, searches, drafts and sends in its owner's mailbox through a connector, under the owner's own account. Nothing is configured on the server.
 
-**Gmail.** Uses Google's remote Gmail MCP server (`https://gmailmcp.googleapis.com/mcp/v1`, in preview at the time of writing).
+**Gmail.** The connector's address is Google's remote Gmail MCP server (`https://gmailmcp.googleapis.com/mcp/v1`), which the panel uses to sign people in. The panel does not send the Gmail actions to that server, which is in Developer Preview and refuses projects that are not enrolled in it: it answers them itself through the Gmail API (`https://gmail.googleapis.com/gmail/v1`), with the owner's token, and renews the token with the same sign-in when it expires.
 
 1. In a Google Cloud project, enable the Gmail API and the Gmail MCP API, and create an OAuth client of type Web application. Its authorized redirect URI is the return address the panel shows.
 2. In the panel, an admin opens People › Connectors, picks Gmail, and pastes the client ID and secret.
 3. Each owner signs in with their own Google account from the understudy's settings.
 4. The panel asks Google only for `gmail.readonly` and `gmail.compose`, and asks for offline access so the sign-in keeps working.
 
-The server has no send tool: the understudy writes drafts, and the owner sends them from Gmail. The server marks its search, read and list tools read-only and its draft, label, trash and spam tools as changes; the label, trash and spam tools also need a wider Google permission than the panel asks for, so they fail instead of acting. Because only the read tools are marked read-only, every draft, label, trash and spam tool starts as Ask for each understudy, and the owner approves each call unless they change it.
+The actions are `search_threads`, `get_thread`, `get_message`, `list_drafts`, `get_draft` and `list_labels`, marked read-only, and `create_draft` and `send_email`, marked as changes. `send_email` is always on Always ask for everyone: no owner can switch it to Allow, and its approval has no "always allow". The approval shows the exact recipients, subject and text, and covers only those. Label, trash and spam actions are not offered, because they need a wider Google permission than the panel asks for.
 
 **Outlook.** Add a Microsoft 365 MCP server as a custom connector:
 
