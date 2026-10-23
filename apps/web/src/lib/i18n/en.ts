@@ -1092,7 +1092,7 @@ export const en = {
     questionsTitle: (n: number) => (n === 1 ? "One question before I start" : `${n} questions before I start`),
     questionsDone: "Thanks, that is all I needed",
     questionUse: "Use this",
-    questionChange: "Change",
+    questionChange: "Edit",
     whenHint: "Pick what starts it. You can always run it yourself with Run now.",
     triggers: {
       schedule: "On a schedule",
