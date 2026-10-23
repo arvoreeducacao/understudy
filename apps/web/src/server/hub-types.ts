@@ -106,7 +106,7 @@ export type ViewerToServer =
   | { type: "memory_write"; path: string; text: string }
   | { type: "memory_delete"; path: string }
   | { type: "teach_text"; text: string }
-  | { type: "credential_set"; name: string; username: string; secret: string; site?: string; kind?: "api_key"; sendAs?: CredentialInfo["sendAs"]; field?: string }
+  | { type: "credential_set"; name: string; username: string; secret: string; site?: string; kind?: "api_key"; sendAs?: CredentialInfo["sendAs"]; field?: string; tokenPath?: string }
   | { type: "credential_delete"; name: string }
   | { type: "stop" };
 

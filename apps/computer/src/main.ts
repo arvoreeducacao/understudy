@@ -297,7 +297,7 @@ async function main() {
           log("main", "refused a credential without a site");
           return;
         }
-        const apiKey = message.kind === "api_key" ? apiKeyOptions(message.sendAs, message.field) : undefined;
+        const apiKey = message.kind === "api_key" ? apiKeyOptions(message.sendAs, message.field, message.tokenPath) : undefined;
         if (apiKey === null) {
           log("main", "refused an API key without a valid way to send it");
           return;

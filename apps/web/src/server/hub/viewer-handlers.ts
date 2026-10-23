@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { ArtifactEditSchema, MEMORY_FILE_MAX_BYTES } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
-import { credentialSendAs, credentialSite } from "@/lib/credential-site";
+import { credentialSendAs, credentialSite, credentialTokenPath } from "@/lib/credential-site";
 import { clearRoute } from "../channels/store";
 import { relayPanelMessage } from "../channels/relay";
 import { messages as copy } from "@/lib/messages";
@@ -126,7 +126,8 @@ export const viewerHandlers: Handlers = {
       return;
     }
     const send = apiKey ? credentialSendAs(message.sendAs, message.field) : null;
-    if (apiKey && !send) {
+    const tokenPath = apiKey ? credentialTokenPath(message.tokenPath) : undefined;
+    if (apiKey && (!send || tokenPath === null)) {
       refuse(copy.vault.sendAsInvalid);
       log("credential_refused", { agentId, reason: "bad_send_as" });
       return;
@@ -137,7 +138,7 @@ export const viewerHandlers: Handlers = {
       username: String(message.username ?? "").slice(0, 300),
       secret: secret.slice(0, 4000),
       site,
-      ...(send ? { kind: "api_key" as const, ...send } : {}),
+      ...(send ? { kind: "api_key" as const, ...send, ...(tokenPath ? { tokenPath } : {}) } : {}),
     });
     if (!sent) offline();
     log("credential_set", { agentId, name, kind: apiKey ? "api_key" : "login" });

@@ -431,7 +431,7 @@ export const agentFiles = pgTable(
   (t) => [primaryKey({ columns: [t.agentId, t.path] })],
 );
 
-export type CredentialInfo = { name: string; username: string; site?: string; kind?: "api_key"; sendAs?: "bearer" | "header" | "basic" | "query"; field?: string };
+export type CredentialInfo = { name: string; username: string; site?: string; kind?: "api_key"; sendAs?: "bearer" | "scheme" | "header" | "basic" | "query"; field?: string; tokenPath?: string };
 
 export type MemberRole = "approver" | "viewer";
 

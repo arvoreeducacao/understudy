@@ -11,9 +11,17 @@ type Kind = "login" | "api_key";
 
 type SendAs = NonNullable<CredentialInfo["sendAs"]>;
 
-const SEND_AS: SendAs[] = ["bearer", "header", "basic", "query"];
+const SEND_AS: SendAs[] = ["bearer", "scheme", "header", "basic", "query"];
+
+const FIELD_PATTERN: Partial<Record<SendAs, string>> = {
+  scheme: "[A-Za-z][A-Za-z0-9._\\-]{0,31}",
+  header: "[A-Za-z0-9][A-Za-z0-9\\-]{0,63}",
+  query: "[A-Za-z0-9_.\\-\\[\\]]{1,64}",
+};
 
 function sentAs(c: CredentialInfo): string {
+  if (c.tokenPath) return `token ${c.tokenPath} · Bearer`;
+  if (c.sendAs === "scheme") return `Authorization: ${c.field}`;
   if (c.sendAs === "header") return `${c.field}:`;
   if (c.sendAs === "basic") return `Basic ${c.username}:`;
   if (c.sendAs === "query") return `?${c.field}=`;
@@ -39,7 +47,8 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
   const [kind, setKind] = useState<Kind>("login");
   const [sendAs, setSendAs] = useState<SendAs>("bearer");
   const apiKey = kind === "api_key";
-  const named = apiKey && (sendAs === "header" || sendAs === "query");
+  const named = apiKey && (sendAs === "scheme" || sendAs === "header" || sendAs === "query");
+  const fieldLabel = sendAs === "scheme" ? t.schemeName : sendAs === "header" ? t.headerName : t.queryName;
 
   return (
     <div className="ws-panel">
@@ -83,7 +92,9 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
               username: String(data.get("username") ?? "").trim(),
               secret,
               site: String(data.get("site") ?? "").trim() || undefined,
-              ...(apiKey ? { kind: "api_key" as const, sendAs, field: named ? String(data.get("field") ?? "").trim() : undefined } : {}),
+              ...(apiKey
+                ? { kind: "api_key" as const, sendAs, field: named ? String(data.get("field") ?? "").trim() : undefined, tokenPath: String(data.get("tokenPath") ?? "").trim() || undefined }
+                : {}),
             });
             if (ok) {
               form.reset();
@@ -101,17 +112,9 @@ export function VaultManager({ link, credentials, look }: { link: Pick<AgentLink
               <div className="text-[11.5px] text-smoke">{t.sendAsLabel}</div>
               <Choices label={t.sendAsLabel} options={SEND_AS} value={sendAs} names={t.sendAs} onChange={setSendAs} />
               {named && (
-                <Input
-                  key={sendAs}
-                  name="field"
-                  className="font-mono"
-                  placeholder={sendAs === "header" ? t.headerName : t.queryName}
-                  aria-label={sendAs === "header" ? t.headerName : t.queryName}
-                  required
-                  pattern={sendAs === "header" ? "[A-Za-z0-9][A-Za-z0-9\\-]{0,63}" : "[A-Za-z0-9_.\\-\\[\\]]{1,64}"}
-                  maxLength={64}
-                />
+                <Input key={sendAs} name="field" className="font-mono" placeholder={fieldLabel} aria-label={fieldLabel} required pattern={FIELD_PATTERN[sendAs]} maxLength={64} />
               )}
+              <Input name="tokenPath" className="font-mono" placeholder={t.tokenPath} aria-label={t.tokenPath} pattern="/[^\s#]{0,400}" maxLength={401} />
             </>
           )}
           <div className="text-[11.5px] text-smoke">

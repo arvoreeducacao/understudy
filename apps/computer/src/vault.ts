@@ -2,19 +2,19 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type SendAs = "bearer" | "header" | "basic" | "query";
+export type SendAs = "bearer" | "scheme" | "header" | "basic" | "query";
 
-export type ApiKeyOptions = { sendAs: SendAs; field?: string };
+export type ApiKeyOptions = { sendAs: SendAs; field?: string; tokenPath?: string };
 
-export type CredentialInfo = { name: string; username: string; site?: string; kind?: "api_key"; sendAs?: SendAs; field?: string };
+export type CredentialInfo = { name: string; username: string; site?: string; kind?: "api_key"; sendAs?: SendAs; field?: string; tokenPath?: string };
 
 type Sealed = { iv: string; tag: string; data: string };
 
-type Entry = { username: string; site?: string; secret: Sealed; kind?: "api_key"; sendAs?: SendAs; field?: string };
+type Entry = { username: string; site?: string; secret: Sealed; kind?: "api_key"; sendAs?: SendAs; field?: string; tokenPath?: string };
 
 type VaultFile = { version: 1; entries: Record<string, Entry> };
 
-export type Revealed = { username: string; secret: string; site?: string; kind?: "api_key"; sendAs?: SendAs; field?: string };
+export type Revealed = { username: string; secret: string; site?: string; kind?: "api_key"; sendAs?: SendAs; field?: string; tokenPath?: string };
 
 export type Vault = {
   set: (name: string, username: string, secret: string, site?: string, apiKey?: ApiKeyOptions) => void;
@@ -25,24 +25,37 @@ export type Vault = {
 
 const NAME = /^[\w .@-]{1,64}$/;
 
-const SEND_AS: readonly SendAs[] = ["bearer", "header", "basic", "query"];
+const SEND_AS: readonly SendAs[] = ["bearer", "scheme", "header", "basic", "query"];
 
 const HEADER_FIELD = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
 
 const QUERY_FIELD = /^[A-Za-z0-9_.\-\[\]]{1,64}$/;
 
+const SCHEME_FIELD = /^[A-Za-z][A-Za-z0-9._-]{0,31}$/;
+
+const TOKEN_PATH = /^\/[A-Za-z0-9._~!$&'()*+,;=:@%\/?-]{0,400}$/;
+
 export function validCredentialName(name: string): boolean {
   return typeof name === "string" && NAME.test(name);
 }
 
-export function apiKeyOptions(sendAs: unknown, field: unknown): ApiKeyOptions | null {
+function sendOptions(sendAs: unknown, field: unknown): ApiKeyOptions | null {
   if (!SEND_AS.includes(sendAs as SendAs)) return null;
   const how = sendAs as SendAs;
   if (how === "bearer" || how === "basic") return { sendAs: how };
   const name = typeof field === "string" ? field.trim() : "";
+  if (how === "scheme" && SCHEME_FIELD.test(name)) return { sendAs: how, field: name };
   if (how === "header" && HEADER_FIELD.test(name) && !/^(host|cookie|content-length|transfer-encoding|connection)$/i.test(name)) return { sendAs: how, field: name };
   if (how === "query" && QUERY_FIELD.test(name)) return { sendAs: how, field: name };
   return null;
+}
+
+export function apiKeyOptions(sendAs: unknown, field: unknown, tokenPath?: unknown): ApiKeyOptions | null {
+  const send = sendOptions(sendAs, field);
+  if (!send) return null;
+  const path = typeof tokenPath === "string" ? tokenPath.trim() : "";
+  if (!path) return send;
+  return TOKEN_PATH.test(path) ? { ...send, tokenPath: path } : null;
 }
 
 function info(name: string, entry: Entry): CredentialInfo {
@@ -50,7 +63,7 @@ function info(name: string, entry: Entry): CredentialInfo {
     name,
     username: entry.username,
     ...(entry.site ? { site: entry.site } : {}),
-    ...(entry.kind === "api_key" ? { kind: entry.kind, sendAs: entry.sendAs, ...(entry.field ? { field: entry.field } : {}) } : {}),
+    ...(entry.kind === "api_key" ? { kind: entry.kind, sendAs: entry.sendAs, ...(entry.field ? { field: entry.field } : {}), ...(entry.tokenPath ? { tokenPath: entry.tokenPath } : {}) } : {}),
   };
 }
 
@@ -122,14 +135,14 @@ export function openVault(home: string, env: NodeJS.ProcessEnv = process.env): V
     set(name, username, secret, site, apiKey) {
       if (!validCredentialName(name)) throw new Error("invalid credential name");
       if (!site || !site.trim()) throw new Error("a saved login needs a site");
-      const api = apiKey ? apiKeyOptions(apiKey.sendAs, apiKey.field) : null;
+      const api = apiKey ? apiKeyOptions(apiKey.sendAs, apiKey.field, apiKey.tokenPath) : null;
       if (apiKey && !api) throw new Error("an API key needs a valid way to send it");
       const vault = read();
       vault.entries[name] = {
         username: String(username ?? ""),
         ...(site ? { site } : {}),
         secret: seal(key, String(secret ?? "")),
-        ...(api ? { kind: "api_key" as const, sendAs: api.sendAs, ...(api.field ? { field: api.field } : {}) } : {}),
+        ...(api ? { kind: "api_key" as const, sendAs: api.sendAs, ...(api.field ? { field: api.field } : {}), ...(api.tokenPath ? { tokenPath: api.tokenPath } : {}) } : {}),
       };
       write(vault);
     },

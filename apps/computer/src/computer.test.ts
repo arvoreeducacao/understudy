@@ -512,6 +512,63 @@ test("call_api puts the key where the owner said, and saves big bodies to a file
   assert.match(named, new RegExp(`saved to ${join(header.home, "files", "api", "escape.json").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}`));
 });
 
+test("call_api trades the key for an access token and keeps both away from the brain", async () => {
+  const { callApi, forgetTokens, tokenFrom } = await import("./api-call.ts");
+  const { openVault } = await import("./vault.ts");
+  forgetTokens();
+  const vault = openVault(mkdtempSync(join(tmpdir(), "understudy-api-")), {});
+  vault.set("garmin", "", "personal-key-0987654321", "personal.example.com", { sendAs: "scheme", field: "ApiKey", tokenPath: "/token-service/token" });
+  assert.equal(vault.list()[0].tokenPath, "/token-service/token");
+  const calls: { url: string; init: RequestInit }[] = [];
+  let minted = 0;
+  const fakeFetch = (async (url: URL | string, init: RequestInit) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/token-service/token")) return new Response(JSON.stringify({ access_token: `access-token-${++minted}-abcdef`, expires_in: 86400 }), { status: 200, headers: { "content-type": "application/json" } });
+    const auth = (init.headers as Record<string, string>).Authorization;
+    if (String(url).endsWith("/expired")) return new Response("{}", { status: 401, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ sawAuth: auth }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const deps = { filesDir: mkdtempSync(join(tmpdir(), "understudy-files-")), state: () => ({ mode: "chat" as const }), rules: () => [], approve: async () => ({ approved: true, text: "approved" }), fetch: fakeFetch };
+  const first = await callApi(vault, { name: "garmin", url: "/activities", headers: { Authorization: "Bearer guess" } }, deps);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal((calls[0].init.headers as Record<string, string>).Authorization, "ApiKey personal-key-0987654321");
+  assert.equal((calls[1].init.headers as Record<string, string>).Authorization, "Bearer access-token-1-abcdef");
+  assert.ok(!first.includes("access-token-1-abcdef"));
+  assert.ok(!first.includes("personal-key-0987654321"));
+  await callApi(vault, { name: "garmin", url: "/activities" }, deps);
+  assert.equal(minted, 1);
+  assert.match(await callApi(vault, { name: "garmin", url: "/expired" }, deps), /^HTTP 401/);
+  await callApi(vault, { name: "garmin", url: "/activities" }, deps);
+  assert.equal(minted, 2);
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  assert.equal(tokenFrom(`${part({ alg: "none" })}.${part({ exp: 5000 })}.sig`, 1_000_000)?.seconds, 4000);
+  assert.equal(tokenFrom('{"accessToken":"abc-token-0123456789"}')?.token, "abc-token-0123456789");
+  assert.equal(tokenFrom("<html>no</html>"), null);
+  forgetTokens();
+});
+
+test("a key that is traded for a token says why when the trade fails", async () => {
+  const { callApi, forgetTokens } = await import("./api-call.ts");
+  const { openVault, apiKeyOptions } = await import("./vault.ts");
+  forgetTokens();
+  const vault = openVault(mkdtempSync(join(tmpdir(), "understudy-api-")), {});
+  vault.set("svc", "", "svc-key-1234567890", "svc.example.com", { sendAs: "bearer", tokenPath: "/oauth/token" });
+  const deps = {
+    filesDir: mkdtempSync(join(tmpdir(), "understudy-files-")),
+    state: () => ({ mode: "chat" as const }),
+    rules: () => [],
+    approve: async () => ({ approved: true, text: "approved" }),
+    fetch: (async () => new Response("bad key svc-key-1234567890", { status: 403 })) as typeof fetch,
+  };
+  const text = await callApi(vault, { name: "svc", url: "/x" }, deps);
+  assert.match(text, /^Could not get an access token: HTTP 403/);
+  assert.ok(!text.includes("svc-key-1234567890"));
+  assert.equal(apiKeyOptions("scheme", "ApiKey")?.field, "ApiKey");
+  assert.equal(apiKeyOptions("scheme", "Api Key"), null);
+  assert.equal(apiKeyOptions("bearer", "", "no-slash"), null);
+  assert.equal(apiKeyOptions("bearer", "", "/oauth/token?grant=key")?.tokenPath, "/oauth/token?grant=key");
+});
+
 test("files: uploads land in the inbox only, outbox is listed and readable, 20 MB cap", async () => {
   const { startFileExchange } = await import("./files.ts");
   const home = mkdtempSync(join(tmpdir(), "understudy-files-"));
