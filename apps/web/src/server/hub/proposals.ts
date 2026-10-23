@@ -97,8 +97,9 @@ export class Proposals {
     const dismissed = recent.find((row) => row.status === "dismissed" && sameTask(row.recipe, input.recipe));
     if (dismissed) return { ok: false, reason: "dismissed", at: dismissed.answeredAt ?? dismissed.createdAt };
     const recipe = { ...input.recipe, askFirstRuns: DEFAULT_ASK_FIRST_RUNS };
+    const askedBy = this.hub.turnAudience(agentId);
     const pending = recent.filter((row) => row.status === "pending");
-    const twin = pending.find((row) => sameTask(row.recipe, input.recipe));
+    const twin = pending.find((row) => row.askedBy === askedBy && sameTask(row.recipe, input.recipe));
     if (twin) {
       const [row] = await db
         .update(schema.taskProposals)
@@ -106,7 +107,7 @@ export class Proposals {
         .where(and(eq(schema.taskProposals.id, twin.id), eq(schema.taskProposals.status, "pending")))
         .returning();
       if (row) {
-        this.hub.broadcast(agentId, { type: "proposal", proposal: toProposalView(row) });
+        this.hub.broadcastCard(agentId, { type: "proposal", proposal: toProposalView(row) }, row.askedBy);
         await this.updateSlack(row).catch((error) => log("proposal_slack_error", { error: String(error) }));
         log("proposal_updated", { agentId, proposalId: row.id });
         return { ok: true, id: row.id, replaced: true };
@@ -116,20 +117,20 @@ export class Proposals {
     const id = newId("prp");
     const [row] = await db
       .insert(schema.taskProposals)
-      .values({ id, agentId, recipe, cron: input.cron, timezone: input.timezone, reason: input.reason, origin: input.origin })
+      .values({ id, agentId, recipe, cron: input.cron, timezone: input.timezone, reason: input.reason, origin: input.origin, askedBy })
       .returning();
     const view = toProposalView(row);
-    await this.addCard(agentId, view);
+    await this.addCard(agentId, view, askedBy);
     log("proposal_created", { agentId, proposalId: id, origin: input.origin });
     this.notifySlack(agentId, view).catch((error) => log("proposal_slack_error", { error: String(error) }));
     return { ok: true, id, replaced: false };
   }
 
-  private async addCard(agentId: string, view: ProposalView) {
+  private async addCard(agentId: string, view: ProposalView, askedBy: string | null) {
     const id = newId("msg");
     const createdAt = new Date();
-    await getDb().insert(schema.messages).values({ id, agentId, role: "agent", text: "", proposalId: view.id, createdAt });
-    this.hub.broadcast(agentId, { type: "chat", entry: { id, role: "agent", text: "", runId: null, via: null, streamId: null, at: createdAt.toISOString(), proposal: view } });
+    await getDb().insert(schema.messages).values({ id, agentId, role: "agent", text: "", proposalId: view.id, audienceId: askedBy, createdAt });
+    this.hub.broadcastCard(agentId, { type: "chat", entry: { id, role: "agent", text: "", runId: null, via: null, streamId: null, at: createdAt.toISOString(), proposal: view } }, askedBy);
   }
 
   async answer(id: string, save: boolean, userId: string, options: { keepPaused?: boolean } = {}) {
@@ -152,12 +153,12 @@ export class Proposals {
         active: Boolean(row.cron) && !options.keepPaused,
       });
       [saved] = await db.update(schema.taskProposals).set({ recipeId }).where(eq(schema.taskProposals.id, id)).returning();
-      await this.hub.addMessage(row.agentId, "system", copy.proposals.savedMessage(row.recipe.title, taskLink(row.agentId, recipeId)));
+      await this.hub.addMessage(row.agentId, "system", copy.proposals.savedMessage(row.recipe.title, taskLink(row.agentId, recipeId)), null, undefined, undefined, undefined, undefined, undefined, undefined, row.askedBy);
     } else {
-      await this.hub.addMessage(row.agentId, "system", copy.proposals.dismissedMessage(row.recipe.title));
+      await this.hub.addMessage(row.agentId, "system", copy.proposals.dismissedMessage(row.recipe.title), null, undefined, undefined, undefined, undefined, undefined, undefined, row.askedBy);
     }
     log("proposal_answered", { agentId: row.agentId, proposalId: id, saved: save });
-    this.hub.broadcast(row.agentId, { type: "proposal", proposal: toProposalView(saved) });
+    this.hub.broadcastCard(row.agentId, { type: "proposal", proposal: toProposalView(saved) }, row.askedBy);
     await this.updateSlack(saved, userId).catch((error) => log("proposal_slack_error", { error: String(error) }));
     return toProposalView(saved);
   }

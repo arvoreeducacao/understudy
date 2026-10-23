@@ -1045,6 +1045,7 @@ export const en = {
     when: "When",
     askFirst: "asks you first",
     firstRuns: (runs: number) => `Nothing is saved until you choose. The first ${runs} runs ask you before every step.`,
+    teamAdminSaves: "A team admin can turn this into a task.",
     saved: "Saved as a task",
     dismissed: "Not saved",
     openTask: "Open task",

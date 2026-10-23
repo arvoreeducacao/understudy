@@ -1,5 +1,5 @@
 {
-  "id": "5bcdf573-2ddf-45ef-a8d9-61c9a7718354",
+  "id": "8202fa72-9916-4f06-8671-b1af881f7dae",
   "prevId": "392dbb2c-1d64-4eac-b512-5a1583e72b40",
   "version": "7",
   "dialect": "postgresql",
@@ -4175,6 +4175,12 @@
         },
         "slack_ts": {
           "name": "slack_ts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "asked_by": {
+          "name": "asked_by",
           "type": "text",
           "primaryKey": false,
           "notNull": false

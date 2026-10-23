@@ -203,3 +203,23 @@ test("cancelling a person's waiting approvals leaves everyone else's", { skip },
   assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, r.status])), { [rafaels]: "cancelled", [owners]: "pending" });
   await hub.cancelApprovals(ids.ledger, null);
 });
+
+test("a task suggestion from a member's chat reaches that member and whoever can save it, nobody else", { skip }, async () => {
+  const { loadChat } = await import("@/lib/views");
+  const { hub } = await connectedHub();
+  const [marina, rafael, tiago] = [socket(), socket(), socket()];
+  await hub.attachViewer(marina as never, ids.ledger, ids.marina, "owner");
+  await hub.attachViewer(rafael as never, ids.ledger, ids.rafael, "member");
+  await hub.attachViewer(tiago as never, ids.ledger, ids.tiago, "member");
+  hub.setTurnAudience(ids.ledger, ids.rafael);
+  const recipe = { title: "Chase Rafael's late refunds", trigger: "every Friday", steps: [{ id: "s1", text: "Open the refunds sheet", mode: "auto" as const }, { id: "s2", text: "Email each school", mode: "ask" as const }], questions: [], askFirstRuns: 3 };
+  const proposed = await hub.proposals.propose(ids.ledger, { recipe, cron: null, timezone: "UTC", reason: "Third time this month.", origin: "repeated" });
+  hub.setTurnAudience(ids.ledger, null);
+  assert.ok(proposed.ok);
+  const cards = (ws: { received: { type: string }[] }) => ws.received.filter((m) => m.type === "chat").length;
+  assert.deepEqual([cards(marina), cards(rafael), cards(tiago)], [1, 1, 0]);
+  const hasCard = async (userId: string, manages: boolean) => (await loadChat(ids.ledger, 50, userId, manages)).some((m) => m.proposal?.id === (proposed.ok ? proposed.id : ""));
+  assert.equal(await hasCard(ids.rafael, false), true);
+  assert.equal(await hasCard(ids.marina, true), true);
+  assert.equal(await hasCard(ids.tiago, false), false);
+});

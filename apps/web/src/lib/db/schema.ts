@@ -821,6 +821,7 @@ export const taskProposals = pgTable(
     recipeId: text("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
     slackChannel: text("slack_channel"),
     slackTs: text("slack_ts"),
+    askedBy: text("asked_by"),
     answeredBy: text("answered_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     answeredAt: timestamp("answered_at", { withTimezone: true }),

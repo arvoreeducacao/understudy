@@ -71,6 +71,7 @@ async function newHub() {
   const hub = new Hub();
   const broadcasts: { type: string }[] = [];
   hub.broadcast = ((_agentId: string, message: { type: string }) => broadcasts.push(message)) as typeof hub.broadcast;
+  hub.broadcastCard = ((_agentId: string, message: { type: string }) => broadcasts.push(message)) as typeof hub.broadcastCard;
   return { hub, broadcasts };
 }
 

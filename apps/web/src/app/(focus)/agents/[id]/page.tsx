@@ -126,7 +126,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const [[owner], [team], chat, approvals, runs, recipes, ownerData, rail, followups] = await Promise.all([
     db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, agent.ownerId)),
     agent.teamId ? db.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(eq(schema.teams.id, agent.teamId)) : Promise.resolve([]),
-    loadChat(id, 150, user.id),
+    loadChat(id, 150, user.id, canManage(access)),
     loadPendingApprovals(id, user.id),
     loadRuns(id, 20),
     db

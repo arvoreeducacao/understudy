@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import type { ApprovalView, ChatEntry, ProposalView } from "@/server/hub-types";
 
-export async function loadChat(agentId: string, limit = 150, viewerId?: string): Promise<ChatEntry[]> {
-  const visible = viewerId ? or(isNull(schema.messages.audienceId), eq(schema.messages.audienceId, viewerId)) : isNull(schema.messages.audienceId);
+export async function loadChat(agentId: string, limit = 150, viewerId?: string, manages = false): Promise<ChatEntry[]> {
+  const own = viewerId ? or(isNull(schema.messages.audienceId), eq(schema.messages.audienceId, viewerId)) : isNull(schema.messages.audienceId);
+  const visible = manages ? or(own, isNotNull(schema.messages.proposalId)) : own;
   const rows = await getDb()
     .select()
     .from(schema.messages)

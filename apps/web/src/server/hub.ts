@@ -162,6 +162,13 @@ export class Hub {
     for (const v of set) if (v.ws.readyState === v.ws.OPEN && this.seesScreen(agentId, v)) v.ws.send(payload);
   }
 
+  broadcastCard(agentId: string, message: ServerToViewer, audienceId: string | null) {
+    const set = this.viewers.get(agentId);
+    if (!set) return;
+    const payload = JSON.stringify(message);
+    for (const v of set) if (v.ws.readyState === v.ws.OPEN && (!audienceId || v.owner || v.userId === audienceId)) v.ws.send(payload);
+  }
+
   sendToOwners(agentId: string, message: ServerToViewer) {
     const set = this.viewers.get(agentId);
     if (!set) return;
