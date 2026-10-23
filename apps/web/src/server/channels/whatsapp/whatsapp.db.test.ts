@@ -140,7 +140,11 @@ async function linked() {
   socket.user = { id: `${OWN}:7@s.whatsapp.net`, lid: "98765@lid" };
   socket.emit("creds.update");
   socket.emit("connection.update", { connection: "open" });
-  await settle();
+  const { getDb, schema } = await import("@/lib/db");
+  await until(async () => {
+    const [channel] = await getDb().select().from(schema.agentChannels).where(eq(schema.agentChannels.agentId, ids.agent));
+    return channel?.settings?.linked === true;
+  });
   return { ...context, socket };
 }
 
