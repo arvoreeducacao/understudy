@@ -237,6 +237,7 @@ export const ptBR: Messages = {
     invalid: "Confira o valor e tente de novo.",
     blocked: (rule: string, detail: string) => `Bloqueado pela sua regra "${rule}": ${detail}.`,
     pushTitle: (name: string) => `${name} foi parado por uma das suas regras`,
+    backgroundBlocked: (request: string, page: string) => `Bloqueado sem perguntar: ${page} tentou enviar ${request}, que não é um passo da tarefa. Nada foi enviado.`,
   },
   models: {
     title: "Como ele pensa",

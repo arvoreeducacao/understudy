@@ -187,7 +187,7 @@ export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export const SCRIPT_GRACE_MS = 1500;
 
-export type ScriptVerdict = Verdict | { kind: "rule"; violation: RuleViolation };
+export type ScriptVerdict = Verdict | { kind: "rule"; violation: RuleViolation } | { kind: "drop"; request: string; pageUrl: string };
 
 export function scriptRequestSubject(request: Pick<GatedRequest, "url" | "body" | "pageUrl">): { urls: string[]; texts: string[]; amounts: string[] } {
   const urls = [request.url, request.pageUrl].filter(Boolean);
@@ -217,12 +217,13 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
     host = new URL(request.url).host;
   } catch {}
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
+  if (state.mode === "run" && !step) return { kind: "drop", request: `${method} ${request.url}`.slice(0, 300), pageUrl: (request.pageUrl || "unknown").slice(0, 300) };
   return {
     kind: "ask",
     summary: `Script sent a ${method} to ${host}`.slice(0, 480),
     stepId: step?.id,
     fields: [
-      { label: "Step", value: step ? step.text : state.mode === "run" ? "Not a step of the recipe" : "Asked in chat" },
+      { label: "Step", value: step ? step.text : "Asked in chat" },
       { label: "Page", value: (request.pageUrl || "unknown").slice(0, 300) },
       { label: "Request", value: `${method} ${request.url}`.slice(0, 300) },
       ...(request.body ? [{ label: "Body", value: request.body.slice(0, 300) }] : []),
@@ -386,6 +387,11 @@ async function serve() {
       if (verdict.kind === "block") {
         blocked = true;
         notes.push(verdict.reason);
+        return false;
+      }
+      if (verdict.kind === "drop") {
+        await notifyMain({ event: "request_blocked", request: verdict.request, pageUrl: verdict.pageUrl });
+        notes.push(`blocked without asking: ${verdict.request} is not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.`);
         return false;
       }
       const turn = asking.then(async () => {

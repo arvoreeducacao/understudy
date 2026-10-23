@@ -91,6 +91,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("terminal_exit"), terminalId: id, reason: optionalText }),
   z.object({ type: z.literal("jobs"), jobs: z.array(JobInfoSchema).max(100) }),
   z.object({ type: z.literal("rule_blocked"), ruleId: id, rule: text, detail: text, runId: id.optional() }),
+  z.object({ type: z.literal("request_blocked"), runId: id, request: text, pageUrl: text }),
   z.object({ type: z.literal("watch_result"), watchId: id, hash: z.string().max(128).optional(), text: z.string().max(60 * 1024).optional(), error: z.string().max(500).optional() }),
   z.object({ type: z.literal("upload_state"), requestId: id, uploadId: id, received: byteCount, free: byteCount.optional(), error: fileError }),
   z.object({ type: z.literal("upload_done"), requestId: id, uploadId: id, attachment: AttachmentSchema.optional(), error: fileError }),

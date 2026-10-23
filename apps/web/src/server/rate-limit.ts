@@ -44,6 +44,7 @@ const LIMITS: Record<string, [number, number]> = {
   terminal_exit: [2, 20],
   jobs: [2, 20],
   rule_blocked: [1, 10],
+  request_blocked: [2, 20],
   watch_result: [1, 20],
 };
 
