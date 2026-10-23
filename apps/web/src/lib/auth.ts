@@ -110,7 +110,7 @@ export type SessionUser = {
 export async function sessionFromHeaders(headers: Headers): Promise<SessionUser | null> {
   const result = await getAuth().api.getSession({ headers });
   if (!result) return null;
-  const u = result.user as SessionUser;
+  const u = result.user as Omit<SessionUser, "googleOnly">;
   return {
     id: u.id,
     name: u.name,
