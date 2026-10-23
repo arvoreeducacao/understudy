@@ -269,6 +269,15 @@ export function RoomInside({
                 continued={row.continued}
                 agentName={member?.name ?? t.someoneWhoLeft}
                 look={member?.look ?? ({} as Look)}
+                footer={
+                  row.entry.runId && row.entry.author === "agent" ? (
+                    <div className="rm-run-link">
+                      <Link href={`/runs/${row.entry.runId}`} className="text-sky">
+                        {t.openRun}
+                      </Link>
+                    </div>
+                  ) : undefined
+                }
               />
             );
           })}

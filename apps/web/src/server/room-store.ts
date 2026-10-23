@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { messages } from "@/lib/messages";
@@ -116,6 +116,24 @@ export async function listRooms(userId: string) {
     people: people.filter((person) => person.roomId === room.id),
     last: latest.find((row) => row.roomId === room.id) ?? null,
   }));
+}
+
+export async function sharedTeamRoom(agentA: string, agentB: string) {
+  const db = getDb();
+  const seats = await db
+    .select({ roomId: schema.roomParticipants.roomId, agentId: schema.roomParticipants.agentId })
+    .from(schema.roomParticipants)
+    .where(inArray(schema.roomParticipants.agentId, [agentA, agentB]));
+  const ofA = new Set(seats.filter((seat) => seat.agentId === agentA).map((seat) => seat.roomId));
+  const both = [...new Set(seats.filter((seat) => seat.agentId === agentB && ofA.has(seat.roomId)).map((seat) => seat.roomId))];
+  if (!both.length) return null;
+  const [room] = await db
+    .select({ id: schema.rooms.id })
+    .from(schema.rooms)
+    .where(and(inArray(schema.rooms.id, both), isNotNull(schema.rooms.teamId)))
+    .orderBy(desc(schema.rooms.updatedAt), desc(schema.rooms.createdAt))
+    .limit(1);
+  return room?.id ?? null;
 }
 
 export async function loadRoomMessages(roomId: string, limit = 200) {

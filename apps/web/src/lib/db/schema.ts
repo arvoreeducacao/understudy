@@ -741,6 +741,7 @@ export const roomMessages = pgTable(
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     text: text("text").notNull(),
     approvalId: text("approval_id"),
+    runId: text("run_id"),
     depth: integer("depth").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

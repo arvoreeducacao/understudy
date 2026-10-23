@@ -90,6 +90,9 @@ export class Runs {
     if (!ok) notifyRunFailure(agentId, runId, outcome).catch((error) => log("run_notice_error", { error: String(error) }));
     if (run.recipeId) {
       const [recipe] = await db.select({ recipe: schema.recipes.recipe }).from(schema.recipes).where(eq(schema.recipes.id, run.recipeId));
+      if (recipe && run.trigger === "handoff") {
+        await this.hub.rooms.relayRunClosed(agentId, runId, recipe.recipe.title, ok, summary).catch((error) => log("room_relay_error", { runId, error: String(error) }));
+      }
       if (recipe) {
         await relayRunFinished(agentId, runId, recipe.recipe.title, recipe.recipe.steps.map((step) => step.text), ok, summary).catch((error) => log("slack_progress_error", { error: String(error) }));
       }

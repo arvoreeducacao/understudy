@@ -1409,6 +1409,10 @@ export const ptBR: Messages = {
     deleteConfirm: (team: string) => `Apagar ${team}? Os agentes voltam para quem roda cada um.`,
   },
   rooms: {
+    relayHandoff: (to: string, task: string, line: string) => `@${to}, “${task}” é com você: ${line}`,
+    relayMessage: (to: string, line: string) => `@${to}, ${line}`,
+    relayDone: (task: string, summary: string) => (summary ? `Terminei “${task}”: ${summary}` : `Terminei “${task}”.`),
+    relayFailed: (task: string, summary: string) => (summary ? `“${task}” não terminou: ${summary}` : `“${task}” não terminou.`),
     justMe: "Só eu",
     all: "Todos",
     groupsTab: "Grupos",

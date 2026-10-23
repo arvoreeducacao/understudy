@@ -1,12 +1,12 @@
 import type { WebSocket } from "ws";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
-import { agentTargets, isPass, ownerTargets, personTargets, ROOM_LIMITS, roomPrompt, teamRoomPrompt, turnActive, wakeRefusal, type RoomMember } from "@/lib/rooms";
+import { agentTargets, isPass, ownerTargets, personTargets, relayGist, ROOM_LIMITS, roomPrompt, teamRoomPrompt, turnActive, wakeRefusal, type RoomMember } from "@/lib/rooms";
 import type { Hub } from "../hub";
-import { loadRoomMessages } from "../room-store";
+import { loadRoomMessages, sharedTeamRoom } from "../room-store";
 import type { RoomEntry, RoomPresence, RoomToServer, ServerToRoom } from "../hub-types";
 import { log, send } from "./shared";
 
@@ -14,7 +14,7 @@ type Participant = typeof schema.roomParticipants.$inferSelect;
 type MessageRow = typeof schema.roomMessages.$inferSelect;
 
 export function toRoomEntry(row: MessageRow): RoomEntry {
-  return { id: row.id, author: row.author, agentId: row.agentId, ...(row.userId ? { userId: row.userId } : {}), ...(row.approvalId ? { approvalId: row.approvalId } : {}), text: row.text, at: row.createdAt.toISOString() };
+  return { id: row.id, author: row.author, agentId: row.agentId, ...(row.userId ? { userId: row.userId } : {}), ...(row.approvalId ? { approvalId: row.approvalId } : {}), ...(row.runId ? { runId: row.runId } : {}), text: row.text, at: row.createdAt.toISOString() };
 }
 
 export async function roomFor(roomId: string, userId: string) {
@@ -128,11 +128,11 @@ export class Rooms {
     return row ?? null;
   }
 
-  private async post(roomId: string, values: { author: MessageRow["author"]; agentId?: string; userId?: string; approvalId?: string; text: string; depth: number }) {
+  private async post(roomId: string, values: { author: MessageRow["author"]; agentId?: string; userId?: string; approvalId?: string; runId?: string; text: string; depth: number }) {
     const db = getDb();
     const [row] = await db
       .insert(schema.roomMessages)
-      .values({ id: newId("rmsg"), roomId, author: values.author, agentId: values.agentId ?? null, userId: values.userId ?? null, approvalId: values.approvalId ?? null, text: values.text, depth: values.depth })
+      .values({ id: newId("rmsg"), roomId, author: values.author, agentId: values.agentId ?? null, userId: values.userId ?? null, approvalId: values.approvalId ?? null, runId: values.runId ?? null, text: values.text, depth: values.depth })
       .returning();
     await db.update(schema.rooms).set({ updatedAt: row.createdAt }).where(eq(schema.rooms.id, roomId));
     this.broadcast(roomId, { type: "message", entry: toRoomEntry(row) });
@@ -314,6 +314,30 @@ export class Rooms {
     for (const row of rows) {
       if (!turnActive(row.turnStartedAt, now)) await this.turnDone(row.agentId, row.roomId, false, copy.rooms.timedOut);
     }
+  }
+
+  async relayTeamwork(fromId: string, toId: string, text: string, runId: string | null) {
+    const current = this.hub.turnRoom(fromId);
+    const roomId = current ? ((await this.participant(current, toId)) ? current : null) : await sharedTeamRoom(fromId, toId);
+    if (!roomId) return null;
+    const [room] = await getDb().select({ teamId: schema.rooms.teamId }).from(schema.rooms).where(eq(schema.rooms.id, roomId));
+    if (!room?.teamId) return null;
+    await this.post(roomId, { author: "agent", agentId: fromId, text, depth: 0, ...(runId ? { runId } : {}) });
+    log("room_relay", { roomId, fromId, toId, runId });
+    return roomId;
+  }
+
+  async relayRunClosed(agentId: string, runId: string, task: string, ok: boolean, summary: string) {
+    const db = getDb();
+    const [opening] = await db
+      .select({ roomId: schema.roomMessages.roomId })
+      .from(schema.roomMessages)
+      .where(and(eq(schema.roomMessages.runId, runId), ne(schema.roomMessages.agentId, agentId)))
+      .orderBy(asc(schema.roomMessages.createdAt))
+      .limit(1);
+    if (!opening || !(await this.participant(opening.roomId, agentId))) return;
+    const line = relayGist(summary, 280);
+    await this.post(opening.roomId, { author: "agent", agentId, runId, text: ok ? copy.rooms.relayDone(task, line) : copy.rooms.relayFailed(task, line), depth: 0 });
   }
 
   async approvalRaised(agentId: string, roomId: string, approvalId: string, summary: string, askedBy: string) {

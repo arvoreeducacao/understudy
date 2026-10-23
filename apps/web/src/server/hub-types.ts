@@ -117,6 +117,7 @@ export type RoomEntry = {
   agentId: string | null;
   userId?: string | null;
   approvalId?: string | null;
+  runId?: string | null;
   text: string;
   at: string;
 };
