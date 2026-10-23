@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
+import { userBlock } from "./account-gate";
 import { sessionFromHeaders, type SessionUser } from "./auth";
 import { agentAccess } from "./access";
 import { getDb, schema } from "./db";
@@ -12,8 +13,8 @@ export async function currentUser(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
-  if (user.status !== "approved") redirect("/pending");
-  if (user.mustChangePassword) redirect("/change-password");
+  const block = userBlock(user);
+  if (block) redirect(`/${block}`);
   return user;
 }
 

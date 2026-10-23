@@ -6,10 +6,12 @@ import { authClient } from "@/lib/auth-client";
 import { messages } from "@/lib/messages";
 import { Input } from "@/components/ui/controls";
 
-export function AuthForm({ domains, google }: { domains: string[]; google: boolean }) {
+export function AuthForm({ domains, google, googleOnly }: { domains: string[]; google: boolean; googleOnly: string[] }) {
   const t = messages.auth;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [challenge, setChallenge] = useState<"totp" | "backup" | null>(null);
+  const selfSignUp = domains.some((domain) => !googleOnly.includes(domain));
 
   async function submit(form: FormData) {
     setBusy(true);
@@ -20,10 +22,65 @@ export function AuthForm({ domains, google }: { domains: string[]; google: boole
     });
     setBusy(false);
     if (result.error) {
-      setError(t.failed);
+      setError(result.error.status === 403 && googleOnly.length > 0 ? t.googleOnly : t.failed);
+      return;
+    }
+    if (result.data && "twoFactorRedirect" in result.data && result.data.twoFactorRedirect) {
+      setChallenge("totp");
       return;
     }
     window.location.href = "/";
+  }
+
+  async function verify(form: FormData) {
+    setBusy(true);
+    setError(null);
+    const code = String(form.get("code") ?? "").replace(/\s/g, "");
+    const result =
+      challenge === "backup"
+        ? await authClient.twoFactor.verifyBackupCode({ code, trustDevice: true })
+        : await authClient.twoFactor.verifyTotp({ code, trustDevice: true });
+    setBusy(false);
+    if (result.error) {
+      setError(messages.twoFactor.wrongCode);
+      return;
+    }
+    window.location.href = "/";
+  }
+
+  if (challenge) {
+    const tf = messages.twoFactor;
+    return (
+      <form key={challenge} action={verify} className="card w-full p-6 flex flex-col gap-3">
+        <h1 className="m-0 text-[17px] font-semibold">{tf.challengeTitle}</h1>
+        <p className="m-0 text-ash text-[13px]">{challenge === "backup" ? tf.backupPrompt : tf.challengeBody}</p>
+        <div className="fld">
+          <label htmlFor="code">{challenge === "backup" ? tf.backupCode : tf.code}</label>
+          <Input
+            id="code"
+            name="code"
+            autoComplete="one-time-code"
+            inputMode={challenge === "backup" ? "text" : "numeric"}
+            required
+            autoFocus
+          />
+        </div>
+        {error && <div className="err" role="alert">{error}</div>}
+        <button type="submit" className="btn pri w-full" disabled={busy}>
+          {tf.verify}
+        </button>
+        <button
+          type="button"
+          className="text-[12.5px] text-ash hover:text-mist cursor-pointer bg-transparent border-0 p-0"
+          onClick={() => {
+            setError(null);
+            setChallenge(challenge === "backup" ? "totp" : "backup");
+          }}
+        >
+          {challenge === "backup" ? tf.useApp : tf.useBackup}
+        </button>
+      </form>
+    );
   }
 
   return (
@@ -38,6 +95,7 @@ export function AuthForm({ domains, google }: { domains: string[]; google: boole
           >
             {t.google}
           </button>
+          {googleOnly.length > 0 && <div className="text-smoke text-[11.5px] text-center -mt-2">{t.googleOnlyHint(googleOnly)}</div>}
           <div className="flex items-center gap-3 text-smoke text-[12px]">
             <span className="h-px flex-1 bg-graphite" />
             {t.or}
@@ -60,7 +118,7 @@ export function AuthForm({ domains, google }: { domains: string[]; google: boole
           {t.signIn}
         </button>
       </form>
-      {domains.length > 0 ? (
+      {selfSignUp ? (
         <div className="text-[12.5px] text-ash text-center">
           {t.noAccount}{" "}
           <Link href="/sign-up" className="text-mist">

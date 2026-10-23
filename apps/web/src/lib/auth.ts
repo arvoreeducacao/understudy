@@ -1,10 +1,11 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
+import { twoFactor } from "better-auth/plugins";
 import { accountSource, grantsAdmin, shouldAutoApprove, signUpRefusal } from "./approval-policy";
 import { getDb, schema } from "./db";
-import { env, isAdmin, isAdminEmail, isAllowedEmail } from "./env";
+import { env, isAdmin, isAdminEmail, isAllowedEmail, isGoogleOnlyEmail } from "./env";
 import { messages } from "./messages";
 
 function createAuth() {
@@ -18,9 +19,10 @@ function createAuth() {
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
+        twoFactor: schema.twoFactor,
       },
     }),
-    emailAndPassword: { enabled: true, minPasswordLength: 8 },
+    emailAndPassword: { enabled: true, minPasswordLength: 8, revokeSessionsOnPasswordReset: true },
     socialProviders: env.googleEnabled
       ? {
           google: {
@@ -40,6 +42,15 @@ function createAuth() {
     },
     session: {
       cookieCache: { enabled: false },
+    },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email") return;
+        const email = (ctx.body as { email?: unknown } | undefined)?.email;
+        if (typeof email === "string" && isGoogleOnlyEmail(email)) {
+          throw new APIError("FORBIDDEN", { message: messages.auth.googleOnly });
+        }
+      }),
     },
     databaseHooks: {
       user: {
@@ -70,7 +81,7 @@ function createAuth() {
         },
       },
     },
-    plugins: [nextCookies()],
+    plugins: [twoFactor({ issuer: env.productName, allowPasswordless: true }), nextCookies()],
   });
 }
 
@@ -90,6 +101,8 @@ export type SessionUser = {
   image?: string | null;
   status: string;
   mustChangePassword: boolean;
+  twoFactorEnabled: boolean;
+  googleOnly: boolean;
   admin: boolean;
   source?: string | null;
 };
@@ -97,6 +110,16 @@ export type SessionUser = {
 export async function sessionFromHeaders(headers: Headers): Promise<SessionUser | null> {
   const result = await getAuth().api.getSession({ headers });
   if (!result) return null;
-  const u = result.user as SessionUser;
-  return { id: u.id, name: u.name, email: u.email, image: u.image, status: u.status, mustChangePassword: Boolean(u.mustChangePassword), admin: isAdmin(u.email, Boolean(u.admin), u.source) };
+  const u = result.user as Omit<SessionUser, "googleOnly">;
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    image: u.image,
+    status: u.status,
+    mustChangePassword: Boolean(u.mustChangePassword),
+    twoFactorEnabled: Boolean(u.twoFactorEnabled),
+    googleOnly: isGoogleOnlyEmail(u.email),
+    admin: isAdmin(u.email, Boolean(u.admin), u.source),
+  };
 }

@@ -5,10 +5,11 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { env } from "@/lib/env";
+import { env, isGoogleOnlyEmail } from "@/lib/env";
 import { messages } from "@/lib/messages";
 import { getAuth } from "@/lib/auth";
 import { currentUser, requireAdmin } from "@/lib/session";
+import { issueResetLink, resetLinkOwner } from "@/lib/reset-link";
 import { bootstrapAllowed, createUserWithPassword, hasAnyUser } from "@/lib/users";
 import { getHub } from "@/server/hub-access";
 
@@ -41,7 +42,9 @@ export async function createUserAccount(_: { ok?: boolean; message?: string } | 
     const text =
       reason === "domain_not_allowed"
         ? messages.auth.domainNotAllowed(env.allowedEmailDomains)
-        : messages.admin.createFailed;
+        : reason === "google_only"
+          ? messages.admin.createGoogleOnly(env.googleOnlyDomains)
+          : messages.admin.createFailed;
     return { ok: false, message: text };
   }
   revalidatePath("/admin");
@@ -94,4 +97,40 @@ export async function createFirstAdmin(_: { error?: string; email?: string; pass
     };
   }
   return { email, password };
+}
+
+export async function createResetLink(userId: string) {
+  const admin = await requireAdmin();
+  const [target] = await getDb().select().from(schema.user).where(eq(schema.user.id, userId));
+  if (!target || target.id === admin.id || target.status !== "approved" || isGoogleOnlyEmail(target.email)) return { error: messages.admin.resetLinkFailed };
+  const url = await issueResetLink(target.id);
+  console.log(JSON.stringify({ event: "reset_link_issued", userId: target.id, by: admin.id }));
+  return { url };
+}
+
+export async function resetTwoFactor(userId: string) {
+  const admin = await requireAdmin();
+  if (userId === admin.id) return;
+  const db = getDb();
+  await db.delete(schema.twoFactor).where(eq(schema.twoFactor.userId, userId));
+  await db.update(schema.user).set({ twoFactorEnabled: false, updatedAt: new Date() }).where(eq(schema.user.id, userId));
+  await db.delete(schema.session).where(eq(schema.session.userId, userId));
+  console.log(JSON.stringify({ event: "two_factor_reset", userId, by: admin.id }));
+  revalidatePath("/admin");
+}
+
+export async function resetPasswordWithLink(_: { error?: string; done?: boolean } | null, form: FormData) {
+  const token = String(form.get("token") ?? "");
+  const newPassword = String(form.get("newPassword") ?? "");
+  if (newPassword.length < 8) return { error: messages.resetPassword.tooShort };
+  const userId = await resetLinkOwner(token);
+  if (!userId) return { error: messages.resetPassword.expired };
+  try {
+    await getAuth().api.resetPassword({ body: { token, newPassword } });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "reset_password_failed", error: String(error) }));
+    return { error: messages.resetPassword.expired };
+  }
+  await getDb().update(schema.user).set({ mustChangePassword: false, updatedAt: new Date() }).where(eq(schema.user.id, userId));
+  return { done: true };
 }

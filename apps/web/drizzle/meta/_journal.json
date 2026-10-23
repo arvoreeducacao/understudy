@@ -225,6 +225,13 @@
       "when": 1791772732866,
       "tag": "0031_followups",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792694493838,
+      "tag": "0032_two_factor",
+      "breakpoints": true
     }
   ]
 }

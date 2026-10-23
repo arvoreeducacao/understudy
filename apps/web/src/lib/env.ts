@@ -77,6 +77,10 @@ export const env = {
   get googleEnabled() {
     return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   },
+  get googleOnlyDomains() {
+    if (!this.googleEnabled) return [];
+    return list(process.env.UNDERSTUDY_GOOGLE_ONLY_DOMAINS).map((domain) => domain.replace(/^@/, ""));
+  },
 };
 
 export function isAdminEmail(email: string) {
@@ -85,6 +89,11 @@ export function isAdminEmail(email: string) {
 
 export function isAdmin(email: string, flaggedAdmin: boolean, source?: string | null) {
   return env.adminEmails.length > 0 ? isAdminEmail(email) && trustedForAdminList(source) : flaggedAdmin;
+}
+
+export function isGoogleOnlyEmail(email: string) {
+  const address = email.trim().toLowerCase();
+  return env.googleOnlyDomains.some((domain) => address.endsWith(`@${domain}`));
 }
 
 export function isAllowedEmail(email: string) {
