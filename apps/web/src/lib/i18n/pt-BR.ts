@@ -150,6 +150,13 @@ export const ptBR: Messages = {
     answered: (summary: string, approved: boolean, who: string) => `${approved ? ":white_check_mark: Aprovado" : ":no_entry: Negado"} por ${who}: ${summary}`,
     alreadyAnswered: (summary: string) => `Já respondido: ${summary}`,
     stoppedBeforeAnswer: (summary: string) => `:octagonal_sign: Interrompido antes da resposta, então não foi feito: ${summary}`,
+    approvalClosed: {
+      approved: (who: string, via: string) => `:white_check_mark: Aprovado por ${who} ${via}`,
+      denied: (who: string, via: string) => `:no_entry: Negado por ${who} ${via}`,
+      expired: ":hourglass: Expirou sem resposta, então não foi feito",
+      cancelled: ":octagonal_sign: Interrompido antes da resposta, então não foi feito",
+      via: { panel: "no painel", slack: "no Slack", whatsapp: "no WhatsApp", telegram: "no Telegram" } as Record<string, string>,
+    },
     statusTitle: (pending: number, url: string) => (pending > 0 ? `*${pending} esperando por você* (<${url}|abrir>)` : "*Nada esperando por você.*"),
     howToTalk: "Para falar com um deles, mande uma mensagem começando pelo nome.",
     state: { calm: "descansando", working: "trabalhando", waiting_you: "esperando você", stuck: "travado", done: "terminou", thinking: "pensando", listening: "ouvindo" } as Record<string, string>,

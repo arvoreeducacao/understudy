@@ -334,6 +334,10 @@ export type ApprovalGrant = { serverId: string; tool: string };
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 
+export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram";
+
+export type SlackMessageRef = { channel: string; ts: string };
+
 export const approvals = pgTable(
   "approvals",
   {
@@ -357,6 +361,8 @@ export const approvals = pgTable(
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     usedAt: timestamp("used_at", { withTimezone: true }),
     grant: jsonb("tool_grant").$type<ApprovalGrant | null>(),
+    answeredVia: text("answered_via").$type<ApprovalVia>(),
+    slackMessages: jsonb("slack_messages").$type<SlackMessageRef[]>(),
   },
   (t) => [index("approvals_agent_idx").on(t.agentId, t.status)],
 );

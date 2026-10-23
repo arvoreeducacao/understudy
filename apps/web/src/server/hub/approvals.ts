@@ -13,7 +13,8 @@ import type { ApprovalView } from "../hub-types";
 import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
 import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
-import type { ApprovalGrant } from "@/lib/db/schema";
+import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
+import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 
 export class Approvals {
   private waiters = new Map<string, Set<(answer: Answer) => void>>();
@@ -160,6 +161,7 @@ export class Approvals {
       }
       this.hub.broadcast(row.agentId, { type: "approval_closed", id: row.id, status: "expired" });
       if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "expired");
+      await this.closeOnSlack(row);
     }
   }
 
@@ -179,8 +181,13 @@ export class Approvals {
       }
       this.hub.broadcast(agentId, { type: "approval_closed", id: row.id, status: "cancelled" });
       if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "cancelled");
+      await this.closeOnSlack(row);
     }
     return cancelled.length;
+  }
+
+  private async closeOnSlack(row: typeof schema.approvals.$inferSelect) {
+    await closeApprovalOnSlack(row).catch((error) => log("approval_slack_close_error", { approvalId: row.id, error: String(error) }));
   }
 
   private async leaveChannelLists(agentId: string, approvalId: string) {
@@ -192,12 +199,12 @@ export class Approvals {
     return row?.status ?? null;
   }
 
-  async answer(id: string, approved: boolean, note: string | undefined, userId: string, always = false) {
+  async answer(id: string, approved: boolean, note: string | undefined, userId: string, always = false, via: ApprovalVia = "panel") {
     const db = getDb();
     const status = approved ? "approved" : "denied";
     const [row] = await db
       .update(schema.approvals)
-      .set({ status, note: note ?? null, answeredBy: userId, answeredAt: new Date() })
+      .set({ status, note: note ?? null, answeredBy: userId, answeredAt: new Date(), answeredVia: via })
       .where(and(eq(schema.approvals.id, id), eq(schema.approvals.status, "pending"), or(isNull(schema.approvals.askedBy), eq(schema.approvals.askedBy, userId))))
       .returning();
     if (!row) return false;
@@ -224,6 +231,7 @@ export class Approvals {
     }
     this.hub.broadcast(row.agentId, { type: "approval_closed", id, status });
     if (row.askedBy) await this.hub.rooms.approvalClosed(id, status);
+    await this.closeOnSlack(row);
     return true;
   }
 
@@ -260,7 +268,7 @@ export class Approvals {
     const { text, blocks } = await slackApprovalMessage(owner.name, approval);
     const as = agentIdentity({ id: agentId, name: owner.name });
     const recipients = posted === "slack" ? approvers : [owner, ...approvers];
-    for (const person of recipients) await sendDirectMessage(person, text, blocks, as);
+    for (const person of recipients) await rememberApprovalMessage(approval.id, await sendDirectMessage(person, text, blocks, as));
   }
 
   private async notifyAsker(agentId: string, approval: ApprovalView, askedBy: string) {
@@ -277,7 +285,7 @@ export class Approvals {
       tag: `approval-${approval.id}`,
     }).catch((error) => log("push_error", { error: String(error) }));
     const { text, blocks } = await slackApprovalMessage(person.name, approval);
-    await sendDirectMessage(person, text, blocks, agentIdentity({ id: agentId, name: person.name }));
+    await rememberApprovalMessage(approval.id, await sendDirectMessage(person, text, blocks, agentIdentity({ id: agentId, name: person.name })));
   }
 
   async notifyOwner(agentId: string, text: string) {

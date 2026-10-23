@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { parseComputerToServer, type ApprovalRequest, type Attachment, type ComputerToServer, type JobInfo, type ServerToComputer } from "@understudy/protocol";
 import { canChat, canManage, type Access } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
-import type { ApprovalGrant, MessageArtifact, RunTrigger } from "@/lib/db/schema";
+import type { ApprovalGrant, ApprovalVia, MessageArtifact, RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import { Approvals } from "./hub/approvals";
@@ -456,8 +456,8 @@ export class Hub {
     return this.approvals.wait(id, capMs);
   }
 
-  answerApproval(id: string, approved: boolean, note: string | undefined, userId: string, always = false) {
-    return this.approvals.answer(id, approved, note, userId, always);
+  answerApproval(id: string, approved: boolean, note: string | undefined, userId: string, always = false, via: ApprovalVia = "panel") {
+    return this.approvals.answer(id, approved, note, userId, always, via);
   }
 
   cancelApprovals(agentId: string, userId: string | null, scope?: { askedBy: string } | { exceptAskedBy: string }) {

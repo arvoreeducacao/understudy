@@ -58,7 +58,7 @@ export function slackAdapter(): ChannelAdapter {
       activity: (agentId, text) => relayActivity(agentId, text),
       async approval(agentId, approval) {
         const message = await slackApprovalMessage(await agentName(agentId), approval);
-        return postApprovalInThread(agentId, message.blocks, message.text);
+        return postApprovalInThread(agentId, approval.id, message.blocks, message.text);
       },
       panelSaid: (agentId, author, text) => mirrorPanelMessage(agentId, author, text),
       runStarted: (agentId, runId, title, steps) => startRunProgress(agentId, runId, title, steps),

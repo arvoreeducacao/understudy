@@ -210,7 +210,7 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
   const approvalId = String(action.value ?? "");
   const user = await panelUser(payload.user?.id);
   const [approval] = approvalId
-    ? await getDb().select({ id: schema.approvals.id, agentId: schema.approvals.agentId, summary: schema.approvals.summary, askedBy: schema.approvals.askedBy }).from(schema.approvals).where(eq(schema.approvals.id, approvalId))
+    ? await getDb().select({ id: schema.approvals.id, agentId: schema.approvals.agentId, summary: schema.approvals.summary, askedBy: schema.approvals.askedBy, slackMessages: schema.approvals.slackMessages }).from(schema.approvals).where(eq(schema.approvals.id, approvalId))
     : [];
   if (!user || !approval || !canAnswer(await agentAccess(user.id, approval.agentId), approval.askedBy, user.id)) {
     log("slack_approval_refused", { approvalId, known: Boolean(user) });
@@ -218,8 +218,9 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
     return;
   }
   const approved = action.action_id !== "deny";
-  const ok = await hub.answerApproval(approval.id, approved, undefined, user.id, action.action_id === "approve_always");
+  const ok = await hub.answerApproval(approval.id, approved, undefined, user.id, action.action_id === "approve_always", "slack");
   log("slack_approval_answered", { approvalId, approved, ok });
+  if (approval.slackMessages?.length) return;
   const status = ok ? null : await hub.approvalStatus(approval.id);
   const summary = escapeSlack(approval.summary);
   await respond(ok ? copy.slackApp.answered(summary, approved, escapeSlack(user.name)) : status === "cancelled" ? copy.slackApp.stoppedBeforeAnswer(summary) : copy.slackApp.alreadyAnswered(summary), true);

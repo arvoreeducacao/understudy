@@ -2,6 +2,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { messages as copy } from "@/lib/messages";
 import { agentIdentity, escapeSlack, postMessage, slackCall, type SlackIdentity } from "./slack";
+import { rememberApprovalMessage } from "./approval-slack";
 import { chartImageUrl } from "./chart-png";
 import { plainFallback, richSlackMessage } from "./slack-blocks";
 
@@ -186,13 +187,14 @@ export async function startAssistantThread(input: { channel: string; threadTs: s
   await postAgentText({ channel: input.channel, threadTs: input.threadTs, text });
 }
 
-export async function postApprovalInThread(agentId: string, blocks: unknown[], fallback: string) {
+export async function postApprovalInThread(agentId: string, approvalId: string, blocks: unknown[], fallback: string) {
   const thread = await activeThread(agentId);
   if (!thread) return false;
   const agent = await agentInfo(agentId);
   if (!agent) return false;
   await setThreadStatus(agentId, copy.slackApp.statusWaiting);
   const result = await postMessage({ channel: thread.channel, threadTs: thread.threadTs ?? undefined, text: fallback, blocks, as: agentIdentity(agent) });
+  await rememberApprovalMessage(approvalId, { ...result, channel: result.channel ?? thread.channel });
   return result.ok;
 }
 

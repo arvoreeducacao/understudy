@@ -65,7 +65,7 @@ before(async () => {
         return new Response(JSON.stringify(email ? { ok: true, user: { profile: { email } } } : { ok: false, error: "user_not_found" }));
       }
       if (method === "chat.startStream" && !streamsWork) return new Response(JSON.stringify({ ok: false, error: "method_not_supported" }));
-      return new Response(JSON.stringify({ ok: true, ts: slackPostTs }));
+      return new Response(JSON.stringify({ ok: true, ts: slackPostTs, ...(typeof body.channel === "string" ? { channel: body.channel } : {}) }));
     }
     if (target.startsWith("https://hooks.slack.com/")) {
       responses.push(JSON.parse(String(init?.body)));
@@ -246,7 +246,57 @@ test("approval buttons answer only for people who may approve", { skip }, async 
   [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approvalId));
   assert.equal(row.status, "denied");
   assert.equal(row.answeredBy, ids.owner);
-  assert.match(JSON.stringify(responses.at(-1)), /Denied by Owner/);
+  assert.equal(row.answeredVia, "slack");
+  const update = await waitFor(() => slackCalls.find((c) => c.method === "chat.update" && JSON.stringify(c.body.blocks).includes("Denied by Owner in Slack")), "the card to show who denied it");
+  assert.ok(row.slackMessages?.some((ref) => ref.channel === update.body.channel && ref.ts === update.body.ts));
+  assert.ok(!JSON.stringify(update.body.blocks).includes('"action_id":"approve"'));
+  assert.ok(!responses.some((r) => JSON.stringify(r).includes("Pay supplier")));
+});
+
+test("an approval answered in the panel, stopped or expired leaves no live buttons on Slack", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const hub = createHub();
+  const posted = async (summary: string) => {
+    const id = await hub.createApproval(ids.ana, { summary, runId: "" }, "mcp", 3600);
+    for (let tries = 0; tries < 200; tries++) {
+      const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, id));
+      if (row?.slackMessages?.length) return id;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`the card for ${summary} was never remembered`);
+  };
+  const updatedWith = (text: string) => waitFor(() => slackCalls.find((c) => c.method === "chat.update" && JSON.stringify(c.body.blocks).includes(text)), text);
+  const panelId = await posted("Refund order 1001");
+  assert.equal(await hub.answerApproval(panelId, false, undefined, ids.owner), true);
+  const denied = await updatedWith("Denied by Owner in the panel");
+  assert.match(JSON.stringify(denied.body.blocks), /Refund order 1001/);
+  assert.match(JSON.stringify(denied.body.blocks), /<!date\^\d+\^\{time\}\|\d\d:\d\d UTC>/);
+  assert.ok(!JSON.stringify(denied.body.blocks).includes('"type":"actions"'));
+  await posted("Refund order 1002");
+  await hub.cancelApprovals(ids.ana, ids.owner);
+  await updatedWith("Stopped before anyone answered");
+  const lateId = await posted("Refund order 1003");
+  await getDb().update(schema.approvals).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.approvals.id, lateId));
+  await hub.approvals.expire();
+  await updatedWith("Expired before anyone answered");
+});
+
+test("a card posted after the approval was already answered is closed right away", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const { rememberApprovalMessage } = await import("./approval-slack");
+  const hub = createHub();
+  const id = await hub.createApproval(ids.bruno, { summary: "Archive ticket 77", runId: "" }, "mcp", 3600);
+  await hub.answerApproval(id, true, undefined, ids.owner, false, "whatsapp");
+  slackPostTs = "777.7";
+  await rememberApprovalMessage(id, { ok: true, channel: "D77", ts: "777.7" });
+  const update = slackCalls.filter((c) => c.method === "chat.update" && c.body.ts === "777.7").at(-1);
+  assert.equal(update?.body.channel, "D77");
+  assert.match(JSON.stringify(update?.body.blocks), /Approved by Owner on WhatsApp/);
+  await rememberApprovalMessage(id, { ok: false });
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, id));
+  assert.equal(row.slackMessages?.filter((ref) => ref.ts === "777.7").length, 1);
 });
 
 test("a connector approval that may be remembered offers approve and always allow on Slack", { skip }, async () => {
