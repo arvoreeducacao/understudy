@@ -7,6 +7,7 @@ import { getHub } from "@/server/hub-access";
 import { UserActions } from "@/components/approvals/UserActions";
 import { SettingsSection } from "@/components/ui/Section";
 import { getDb, schema } from "@/lib/db";
+import { isGoogleOnlyEmail } from "@/lib/env";
 import { formatDate, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
 import { requireAdmin } from "@/lib/session";
@@ -52,14 +53,22 @@ export default async function AdminPage() {
           {u.id === me.id && <span className="pill s">{t.you}</span>}
           {u.admin && <span className="pill">{t.adminBadge}</span>}
           {u.status === "rejected" && <span className="pill c">{t.rejected}</span>}
-          {u.mustChangePassword && u.status === "approved" && <span className="pill a">{t.mustChange}</span>}
+          {u.mustChangePassword && u.status === "approved" && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.mustChange}</span>}
+          {!u.mustChangePassword && u.status === "approved" && !u.twoFactorEnabled && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.noTwoFactor}</span>}
         </div>
         <div className="row-sub truncate">
           {u.email} · {t.since(formatDate(u.createdAt))}
         </div>
       </div>
       <div className="row-actions">
-        <UserActions userId={u.id} name={u.name || u.email} status={u.status} self={u.id === me.id} />
+        <UserActions
+          userId={u.id}
+          name={u.name || u.email}
+          status={u.status}
+          self={u.id === me.id}
+          googleOnly={isGoogleOnlyEmail(u.email)}
+          twoFactorEnabled={u.twoFactorEnabled}
+        />
       </div>
     </li>
   );

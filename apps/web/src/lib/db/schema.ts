@@ -11,6 +11,7 @@ export const user = pgTable("user", {
   image: text("image"),
   status: text("status").notNull().default("pending"),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   admin: boolean("admin").notNull().default(false),
   source: text("source"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -56,6 +57,22 @@ export const verification = pgTable("verification", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const twoFactor = pgTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  },
+  (t) => [index("two_factor_user_idx").on(t.userId)],
+);
 
 export type BrainStatus = { brain: Brain; loggedIn: boolean; account?: string };
 

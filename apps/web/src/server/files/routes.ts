@@ -8,6 +8,7 @@ import {
   type ServerToComputer,
 } from "@understudy/protocol";
 import { agentAccess, type Access } from "@/lib/access";
+import { userBlock } from "@/lib/account-gate";
 import { sessionFromHeaders } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
@@ -134,7 +135,7 @@ export function createFileRoutes(hub: Hub) {
 
   async function caller(req: IncomingMessage, agentId: string): Promise<{ userId: string; name: string; access: Access } | null> {
     const user = await sessionFromHeaders(headersOf(req));
-    if (!user || user.status !== "approved" || user.mustChangePassword) return null;
+    if (!user || userBlock(user)) return null;
     const access = await agentAccess(user.id, agentId);
     return access ? { userId: user.id, name: user.name, access } : null;
   }

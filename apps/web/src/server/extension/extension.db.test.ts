@@ -28,8 +28,8 @@ before(async () => {
   await cleanup();
   const db = getDb();
   await db.insert(schema.user).values([
-    { id: ids.owner, name: "Owner", email: "owner-ext@test.local", status: "approved" },
-    { id: ids.other, name: "Other", email: "other-ext@test.local", status: "approved" },
+    { id: ids.owner, name: "Owner", email: "owner-ext@test.local", status: "approved", twoFactorEnabled: true },
+    { id: ids.other, name: "Other", email: "other-ext@test.local", status: "approved", twoFactorEnabled: true },
   ]);
   const tools = { notifyOwner: true, slack: false, slackChannels: [] };
   const look = { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" };
@@ -180,6 +180,17 @@ test("a token stops working when its owner is no longer approved", { skip }, asy
     assert.equal((await call("/me", { token })).status, 401);
   } finally {
     await getDb().update(schema.user).set({ status: "approved" }).where(eq(schema.user.id, ids.owner));
+  }
+});
+
+test("a token stops working when its owner has no two-step sign-in", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { token } = await pair();
+  await getDb().update(schema.user).set({ twoFactorEnabled: false }).where(eq(schema.user.id, ids.owner));
+  try {
+    assert.equal((await call("/me", { token })).status, 401);
+  } finally {
+    await getDb().update(schema.user).set({ twoFactorEnabled: true }).where(eq(schema.user.id, ids.owner));
   }
 });
 

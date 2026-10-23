@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { and, eq, lt } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { userBlock } from "@/lib/account-gate";
 import { isAdmin } from "@/lib/env";
 import { hashToken, newId } from "@/lib/ids";
 
@@ -46,7 +47,7 @@ export async function redeemPairCode(input: string, label: string, now = new Dat
   const [claimed] = await db.delete(schema.extensionPairCodes).where(eq(schema.extensionPairCodes.codeHash, hashToken(code))).returning();
   if (!claimed || claimed.expiresAt < now) return null;
   const [owner] = await db.select().from(schema.user).where(eq(schema.user.id, claimed.userId));
-  if (!owner || owner.status !== "approved" || owner.mustChangePassword) return null;
+  if (!owner || userBlock(owner)) return null;
   const token = newExtensionToken();
   const id = newId("ext");
   await db.insert(schema.extensionTokens).values({ id, userId: owner.id, tokenHash: hashToken(token), label: label.slice(0, 120) });
@@ -62,7 +63,7 @@ export async function authenticateExtension(authorization: string | undefined, n
     .from(schema.extensionTokens)
     .innerJoin(schema.user, eq(schema.user.id, schema.extensionTokens.userId))
     .where(eq(schema.extensionTokens.tokenHash, hashToken(token)));
-  if (!row || row.user.status !== "approved" || row.user.mustChangePassword) return null;
+  if (!row || userBlock(row.user)) return null;
   if (now.getTime() - row.token.lastUsedAt.getTime() > TOUCH_EVERY_MS) {
     await db.update(schema.extensionTokens).set({ lastUsedAt: now }).where(eq(schema.extensionTokens.id, row.token.id));
   }

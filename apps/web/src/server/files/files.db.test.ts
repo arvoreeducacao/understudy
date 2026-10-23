@@ -96,6 +96,7 @@ before(async () => {
   await getDb().insert(schema.agents).values({ id: agentId, ownerId: owner.id, name: "Files", look, tokenHash: "files_hash_a", tools } as never);
   await getDb().insert(schema.agentMembers).values({ agentId, userId: viewer.id, role: "viewer" });
   for (const who of ["owner", "viewer", "stranger"]) cookies[who] = await signIn(`${who}@files.test`);
+  await getDb().update(schema.user).set({ twoFactorEnabled: true }).where(like(schema.user.email, "%@files.test"));
   const { Uploads } = await import("./uploads");
   const { createFileRoutes } = await import("./routes");
   const fake = fakeHub();
