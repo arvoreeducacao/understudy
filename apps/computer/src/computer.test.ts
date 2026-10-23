@@ -146,7 +146,7 @@ test("run prompt gates ask steps and the result line is parsed", () => {
   assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /pass it as action in request_approval[\s\S]*will not ask the owner a second time/);
   assert.deepEqual(parseRunResult('feito\nRESULT {"ok": true, "summary": "Enviei"}'), { ok: true, summary: "Enviei", anomalies: [] });
   const flagged = parseRunResult('RESULT {"ok": true, "summary": "Paid 12 invoices.", "anomalies": ["Invoice 88 is 10x the usual amount"]}');
-  assert.equal(flagged && withAnomalies(flagged), "Paid 12 invoices. Unusual: Invoice 88 is 10x the usual amount");
+  assert.equal(flagged && withAnomalies(flagged), "Paid 12 invoices. ⚠ Invoice 88 is 10x the usual amount");
   assert.equal(parseRunResult("nada"), null);
 });
 
@@ -648,7 +648,7 @@ test("teach by describing writes a recipe; runs send a record and usage", async 
   assert.ok(record.steps.some((step) => step.screenshotJpegBase64 === "jpeg"));
   const finished = sent.find((message) => message.type === "run_finished") as { usage?: unknown; summary: string };
   assert.deepEqual(finished.usage, { inputTokens: 50, outputTokens: 9 });
-  assert.equal(finished.summary, "Exported. Unusual: Sales were zero");
+  assert.equal(finished.summary, "Exported. ⚠ Sales were zero");
 });
 
 test("a recording with no logged-in brain fails fast and tells the panel", async () => {

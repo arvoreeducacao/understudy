@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { involvedAgentIds } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
@@ -12,12 +13,19 @@ const t = messages.recipe;
 
 export default async function RecipesPage() {
   const user = await requireUser();
-  const rows = await getDb()
-    .select({ recipe: schema.recipes, agent: schema.agents })
-    .from(schema.recipes)
-    .innerJoin(schema.agents, eq(schema.agents.id, schema.recipes.agentId))
-    .where(eq(schema.agents.ownerId, user.id))
-    .orderBy(desc(schema.recipes.updatedAt));
+  const ids = await involvedAgentIds(user.id);
+  const rows = ids.length
+    ? await getDb()
+        .select({ recipe: schema.recipes, agent: schema.agents })
+        .from(schema.recipes)
+        .innerJoin(schema.agents, eq(schema.agents.id, schema.recipes.agentId))
+        .where(inArray(schema.agents.id, ids))
+        .orderBy(desc(schema.recipes.updatedAt))
+    : [];
+  const sections = [
+    { key: "mine", title: messages.home.sectionMine, rows: rows.filter((row) => row.agent.ownerId === user.id) },
+    { key: "shared", title: messages.home.sectionShared, rows: rows.filter((row) => row.agent.ownerId !== user.id) },
+  ].filter((section) => section.rows.length > 0);
   const [firstAgent] = rows.length ? [] : await getDb().select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.ownerId, user.id)).limit(1);
   return (
     <div className="page narrow">
@@ -37,7 +45,14 @@ export default async function RecipesPage() {
             action={firstAgent ? { href: `/agents/${firstAgent.id}/teach`, label: messages.empty.tasksAction } : { href: "/agents/new", label: messages.empty.agentsAction }}
           />
         )}
-        {rows.map(({ recipe, agent }) => {
+        {sections.map((section, index) => (
+        <section key={section.key} className="flex flex-col gap-3" aria-label={section.title}>
+          {sections.length > 1 && (
+            <h2 className={`m-0 text-[13px] font-semibold text-ash ${index > 0 ? "pt-4" : ""}`}>
+              {section.title} <span className="text-smoke font-normal">· {section.rows.length}</span>
+            </h2>
+          )}
+        {section.rows.map(({ recipe, agent }) => {
           const next = recipe.active && recipe.cron ? nextRunAt(recipe.cron, recipe.timezone) : null;
           return (
             <Link
@@ -60,6 +75,8 @@ export default async function RecipesPage() {
             </Link>
           );
         })}
+        </section>
+        ))}
       </div>
     </div>
   );
