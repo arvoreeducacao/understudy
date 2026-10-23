@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
@@ -31,6 +31,7 @@ export class Approvals {
     const id = newId("apr");
     const requestId = source === "computer" && request.id ? request.id : null;
     const expiresAt = timeoutSeconds ? new Date(Date.now() + timeoutSeconds * 1000) : null;
+    const askedBy = request.runId ? null : this.hub.turnAudience(agentId);
     const row = {
       id,
       agentId,
@@ -42,12 +43,15 @@ export class Approvals {
       requestId,
       payloadHash: payloadHash ?? null,
       grant: grant ?? null,
+      askedBy,
       expiresAt,
     };
     await db.insert(schema.approvals).values(row);
+    const [asker] = askedBy ? await db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, askedBy)) : [];
+    const note = askedBy ? copy.teams.waitingFor(asker?.name ?? "") : request.summary;
     await db
       .update(schema.agents)
-      .set({ state: "waiting_you", stateNote: request.summary, updatedAt: new Date() })
+      .set({ state: "waiting_you", stateNote: note, updatedAt: new Date() })
       .where(eq(schema.agents.id, agentId));
     const view: ApprovalView = {
       id,
@@ -59,11 +63,12 @@ export class Approvals {
       status: "pending",
       createdAt: new Date().toISOString(),
       ...(grant ? { alwaysAllow: { tool: grant.tool } } : {}),
+      ...(askedBy ? { forYou: true as const } : {}),
     };
-    this.hub.broadcast(agentId, { type: "approval", approval: view });
-    this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note: request.summary });
-    log("approval_created", { agentId, approvalId: id, source });
-    this.notify(agentId, view).catch((error) => log("approval_notify_error", { error: String(error) }));
+    this.hub.broadcast(agentId, { type: "approval", approval: view }, askedBy);
+    this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note });
+    log("approval_created", { agentId, approvalId: id, source, ...(askedBy ? { askedBy } : {}) });
+    this.notify(agentId, view, askedBy).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
   }
 
@@ -181,7 +186,7 @@ export class Approvals {
     const [row] = await db
       .update(schema.approvals)
       .set({ status, note: note ?? null, answeredBy: userId, answeredAt: new Date() })
-      .where(and(eq(schema.approvals.id, id), eq(schema.approvals.status, "pending")))
+      .where(and(eq(schema.approvals.id, id), eq(schema.approvals.status, "pending"), or(isNull(schema.approvals.askedBy), eq(schema.approvals.askedBy, userId))))
       .returning();
     if (!row) return false;
     log("approval_answered", { approvalId: id, agentId: row.agentId, status });
@@ -217,8 +222,9 @@ export class Approvals {
       .orderBy(desc(schema.approvals.createdAt));
   }
 
-  private async notify(agentId: string, approval: ApprovalView) {
+  private async notify(agentId: string, approval: ApprovalView, askedBy: string | null) {
     const db = getDb();
+    if (askedBy) return this.notifyAsker(agentId, approval, askedBy);
     const [owner] = await db
       .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
       .from(schema.agents)
@@ -241,6 +247,23 @@ export class Approvals {
     const as = agentIdentity({ id: agentId, name: owner.name });
     const recipients = posted === "slack" ? approvers : [owner, ...approvers];
     for (const person of recipients) await sendDirectMessage(person, text, blocks, as);
+  }
+
+  private async notifyAsker(agentId: string, approval: ApprovalView, askedBy: string) {
+    const [person] = await getDb()
+      .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
+      .from(schema.agents)
+      .innerJoin(schema.user, eq(schema.user.id, askedBy))
+      .where(eq(schema.agents.id, agentId));
+    if (!person) return;
+    sendPush([person.id], {
+      title: copy.push.approvalTitle(person.name),
+      body: approval.summary.slice(0, 180),
+      url: `/agents/${agentId}`,
+      tag: `approval-${approval.id}`,
+    }).catch((error) => log("push_error", { error: String(error) }));
+    const { text, blocks } = await slackApprovalMessage(person.name, approval);
+    await sendDirectMessage(person, text, blocks, agentIdentity({ id: agentId, name: person.name }));
   }
 
   async notifyOwner(agentId: string, text: string) {

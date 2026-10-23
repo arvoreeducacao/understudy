@@ -43,22 +43,27 @@ export const viewerHandlers: Handlers = {
     if (edit && !prepared) return refuse(copy.artifacts.editRefused);
     const attachments = hub.uploads.claim(agentId, userId, message.attachments);
     if (!text && !attachments.length) return;
-    const [user] = await getDb().select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
-    const messageId = await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments, prepared?.card);
+    const db = getDb();
+    const [[user], [agent]] = await Promise.all([
+      db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId)),
+      db.select({ teamId: schema.agents.teamId }).from(schema.agents).where(eq(schema.agents.id, agentId)),
+    ]);
+    const askedBy = agent?.teamId ? userId : undefined;
+    const messageId = await hub.addMessage(agentId, "user", text, null, userId, undefined, undefined, attachments, prepared?.card, undefined, askedBy);
     await clearRoute(agentId);
     const lead = prepared ? copy.artifacts.editMirror(prepared.title, prepared.card.version) : "";
     const mirrored = [lead, text, ...attachments.map((a) => `📎 ${a.name}`)].filter(Boolean).join("\n");
-    relayPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("channel_mirror_error", { agentId, error: String(error) }));
+    if (!askedBy) relayPanelMessage(agentId, user?.name ?? "", mirrored).catch((error) => log("channel_mirror_error", { agentId, error: String(error) }));
     const artifactEdit = prepared
       ? { artifactId: prepared.card.artifactId, version: prepared.card.version, title: prepared.title, path: prepared.path, ...prepared.card.edit }
       : undefined;
     const repeated = text && !prepared ? await hub.proposals.repeatOf(agentId, userId, text, messageId).catch((error) => (log("repeat_check_error", { agentId, error: String(error) }), null)) : null;
     const result = await hub.deliver(
       agentId,
-      { type: "chat", text, from: user?.name ?? "", ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}), ...(attachments.length ? { attachments } : {}), ...(artifactEdit ? { artifactEdit } : {}) },
+      { type: "chat", text, from: user?.name ?? "", ...(askedBy ? { askedBy } : {}), ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}), ...(attachments.length ? { attachments } : {}), ...(artifactEdit ? { artifactEdit } : {}) },
       { source: "panel" },
     );
-    if (result.status === "queued") await hub.addMessage(agentId, "system", result.starting ? copy.live.startingQueued : copy.live.queued);
+    if (result.status === "queued") await hub.addMessage(agentId, "system", result.starting ? copy.live.startingQueued : copy.live.queued, null, undefined, undefined, undefined, undefined, undefined, undefined, askedBy ?? null);
   },
 
   async record_start({ hub, agentId }) {

@@ -31,6 +31,10 @@ export function approvalFields(args: Record<string, unknown>) {
   return { fields: entries } as const;
 }
 
+export function teamConnector(server: { allowedEmails: string[] | null | undefined; oauthClient?: string | null }) {
+  return !server.allowedEmails && !server.oauthClient;
+}
+
 export function serverAllowedFor(allowedEmails: string[] | null | undefined, email: string) {
   if (!allowedEmails) return true;
   return allowedEmails.map((e) => e.toLowerCase()).includes(email.toLowerCase());

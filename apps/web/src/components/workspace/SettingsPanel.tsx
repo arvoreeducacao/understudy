@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import type { ChannelSettings } from "@/server/channels/settings";
+import { TeamSection, type TeamSettings } from "@/components/teams/TeamSection";
 import { ChannelsSection } from "./ChannelsSection";
 import { PanelSection } from "./PanelSection";
 
@@ -27,6 +28,7 @@ export type SettingsData = {
   rules: OwnerRule[];
   members: { userId: string; name: string; email: string; role: string }[];
   channels: ChannelSettings;
+  team: TeamSettings;
 };
 
 function serialize(form: HTMLFormElement) {
@@ -172,6 +174,8 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
         <p className="m-0 fld-hint">{messages.rules.short}</p>
         <RulesEditor agentId={values.id} initial={data.rules} />
       </PanelSection>
+
+      <TeamSection agentId={values.id} agentName={values.name} data={data.team} />
 
       <PanelSection title={t.shareTitle} hint={t.shareSummary(data.members.length)} collapsible>
         <p className="m-0 fld-hint">{t.shareHint}</p>

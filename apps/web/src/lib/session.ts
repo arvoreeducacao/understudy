@@ -1,9 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { userBlock } from "./account-gate";
 import { sessionFromHeaders, type SessionUser } from "./auth";
-import { agentAccess } from "./access";
+import { agentAccess, canManage } from "./access";
 import { getDb, schema } from "./db";
 
 export async function currentUser(): Promise<SessionUser | null> {
@@ -35,10 +35,8 @@ export async function requireAgentAccess(agentId: string) {
 
 export async function requireOwnAgent(agentId: string) {
   const user = await requireUser();
-  const [agent] = await getDb()
-    .select()
-    .from(schema.agents)
-    .where(and(eq(schema.agents.id, agentId), eq(schema.agents.ownerId, user.id)));
+  if (!canManage(await agentAccess(user.id, agentId))) redirect("/");
+  const [agent] = await getDb().select().from(schema.agents).where(eq(schema.agents.id, agentId));
   if (!agent) redirect("/");
   return { user, agent };
 }

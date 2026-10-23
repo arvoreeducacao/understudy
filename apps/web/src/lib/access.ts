@@ -1,8 +1,9 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDb, schema } from "./db";
+import { teamAccess, type Access } from "./access-rules";
 import { isAdmin } from "./env";
 
-export type Access = "owner" | "approver" | "viewer";
+export { canAnswer, canApprove, canChat, canManage, teamAccess, type Access } from "./access-rules";
 
 async function readsEveryAgent(userId: string) {
   const [row] = await getDb()
@@ -14,9 +15,20 @@ async function readsEveryAgent(userId: string) {
 
 export async function agentAccess(userId: string, agentId: string): Promise<Access | null> {
   const db = getDb();
-  const [agent] = await db.select({ ownerId: schema.agents.ownerId }).from(schema.agents).where(eq(schema.agents.id, agentId));
+  const [agent] = await db
+    .select({ ownerId: schema.agents.ownerId, teamId: schema.agents.teamId, teamOwned: schema.agents.teamOwned })
+    .from(schema.agents)
+    .where(eq(schema.agents.id, agentId));
   if (!agent) return null;
   if (agent.ownerId === userId) return "owner";
+  if (agent.teamId) {
+    const [seat] = await db
+      .select({ role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.teamId, agent.teamId), eq(schema.teamMembers.userId, userId)));
+    const access = teamAccess(seat?.role, agent.teamOwned);
+    if (access) return access;
+  }
   const [member] = await db
     .select({ role: schema.agentMembers.role })
     .from(schema.agentMembers)
@@ -25,7 +37,7 @@ export async function agentAccess(userId: string, agentId: string): Promise<Acce
   return (await readsEveryAgent(userId)) ? "viewer" : null;
 }
 
-export async function accessibleAgentIds(userId: string, roles: Access[] = ["owner", "approver", "viewer"]) {
+export async function accessibleAgentIds(userId: string, roles: Access[] = ["owner", "admin", "member", "approver", "viewer"]) {
   const db = getDb();
   const ids = new Set<string>();
   if (roles.includes("viewer") && (await readsEveryAgent(userId))) {
@@ -35,7 +47,18 @@ export async function accessibleAgentIds(userId: string, roles: Access[] = ["own
   if (roles.includes("owner")) {
     for (const a of await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.ownerId, userId))) ids.add(a.id);
   }
-  const memberRoles = roles.filter((r): r is "approver" | "viewer" => r !== "owner");
+  if (roles.includes("admin") || roles.includes("member")) {
+    const rows = await db
+      .select({ id: schema.agents.id, ownerId: schema.agents.ownerId, teamOwned: schema.agents.teamOwned, role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .innerJoin(schema.agents, eq(schema.agents.teamId, schema.teamMembers.teamId))
+      .where(eq(schema.teamMembers.userId, userId));
+    for (const r of rows) {
+      const access = r.ownerId === userId ? "owner" : teamAccess(r.role, r.teamOwned);
+      if (access && roles.includes(access)) ids.add(r.id);
+    }
+  }
+  const memberRoles = roles.filter((r): r is "approver" | "viewer" => r === "approver" || r === "viewer");
   if (memberRoles.length > 0) {
     const rows = await db
       .select({ id: schema.agentMembers.agentId })
@@ -46,6 +69,8 @@ export async function accessibleAgentIds(userId: string, roles: Access[] = ["own
   return [...ids];
 }
 
-export function canApprove(access: Access | null) {
-  return access === "owner" || access === "approver";
+export async function approvalScope(userId: string) {
+  const ids = await accessibleAgentIds(userId, ["owner", "admin", "approver"]);
+  const mine = eq(schema.approvals.askedBy, userId);
+  return ids.length ? or(and(inArray(schema.approvals.agentId, ids), isNull(schema.approvals.askedBy)), mine)! : mine;
 }

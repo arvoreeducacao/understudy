@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 
 export type Frame = { jpegBase64: string; width: number; height: number; url: string; desktop?: boolean };
 
-export type Viewer = { ws: WebSocket; userId: string; owner: boolean };
+export type Viewer = { ws: WebSocket; userId: string; owner: boolean; chat: boolean };
 
 export type HostConn = { ws: WebSocket; hostId: string; capacity: number; running: Set<string> };
 
