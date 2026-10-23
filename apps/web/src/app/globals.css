@@ -1343,3 +1343,12 @@ button.ac-out { width: 100%; text-align: left; cursor: pointer; font: inherit; f
 .tm-changes .is-warn { color: var(--amber); }
 .cx-team-note { margin: 4px auto 6px; max-width: 560px; padding: 9px 13px; border-radius: 14px; background: rgb(255 255 255 / .04); border: 1px solid var(--glass-edge); color: var(--ash); font-size: 12.5px; line-height: 1.45; text-align: center; }
 .tm-av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #8aa8ff, #e79ab0); display: grid; place-items: center; color: #10121a; font-weight: 700; font-size: 11px; flex: none; }
+.seg a.seg-opt { display: inline-flex; align-items: center; }
+.seg a.seg-opt.is-on { background: rgb(255 255 255 / .14); color: #fff; box-shadow: inset 0 1px 0 rgb(255 255 255 / .08); }
+.seg.chips a.seg-opt.is-on { background: var(--mist); border-color: var(--mist); color: var(--ink); box-shadow: none; }
+.tm-av.sm { width: 22px; height: 22px; font-size: 9px; }
+.rm-person-bubble { display: inline-block; max-width: 100%; padding: 9px 13px; border-radius: 6px 18px 18px 18px; background: rgb(255 255 255 / .07); border: 1px solid var(--glass-edge); font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rm-approval { margin-top: 2px; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; background: rgb(10 12 18 / .5); border: 1px solid rgb(242 180 90 / .32); max-width: 520px; }
+.rm-approval-title { display: flex; gap: 8px; align-items: center; color: #ffd59a; font-weight: 600; font-size: 13px; }
+.rm-approval-who { color: var(--smoke); font-size: 12px; }
+.rm-nobody { margin: 0 14px 6px; color: var(--smoke); font-size: 12px; }

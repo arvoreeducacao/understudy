@@ -53,6 +53,7 @@ export async function removeFromTeam(teamId: string, userId: string) {
   const result = await removeMember(String(teamId ?? ""), user.id, String(userId ?? ""));
   if (result.ok) {
     getHub()?.closeViewers((_, viewer) => viewer.userId === userId);
+    getHub()?.rooms.closeViewersOf(String(userId ?? ""));
     refresh(teamId);
   }
   return result;

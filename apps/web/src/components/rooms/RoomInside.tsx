@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowLeft, MessageCircle, Square, UsersRound } from "lucide-react";
+import { ArrowLeft, MessageCircle, Plus, ShieldCheck, Square, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentState } from "@understudy/protocol";
-import { removeRoom } from "@/app/actions/rooms";
+import { answerApproval } from "@/app/actions/approvals";
+import { addToRoom, removeRoom } from "@/app/actions/rooms";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Composer, DayDivider, MessageRow, StreamingRow, WorkingRow } from "@/components/inside/ChatParts";
@@ -13,6 +14,7 @@ import { useSpeech } from "@/components/live/useSpeech";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { findMentions, mentionsEveryone, mightBePass, roomRows } from "@/lib/rooms";
+import { Select } from "@/components/ui/Select";
 import type { ChatEntry, RoomEntry, RoomPresence } from "@/server/hub-types";
 import { useRoomSocket } from "./useRoomSocket";
 
@@ -20,8 +22,78 @@ export type RoomMemberView = { id: string; name: string; role: string; look: Loo
 
 type Draft = { agentId: string; streamId: string; text: string };
 
+type Person = { id: string; name: string };
+
 function asChat(entry: RoomEntry): ChatEntry {
-  return { id: entry.id, role: entry.author === "owner" ? "user" : entry.author === "agent" ? "agent" : "system", text: entry.text, at: entry.at };
+  return { id: entry.id, role: entry.author === "owner" || entry.author === "person" ? "user" : entry.author === "agent" ? "agent" : "system", text: entry.text, at: entry.at };
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+function PersonRow({ entry, name, continued }: { entry: RoomEntry; name: string; continued: boolean }) {
+  return (
+    <div className={`cx-agent ${continued ? "is-continued" : ""}`}>
+      <div className="cx-avatar">{!continued && <span className="tm-av sm">{initials(name)}</span>}</div>
+      <div className="cx-agent-body">
+        {!continued && (
+          <div className="cx-meta" suppressHydrationWarning>
+            <span className="cx-name">{name}</span>
+            <time dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+          </div>
+        )}
+        <div className="rm-person-bubble">{entry.text}</div>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalRow({ entry, agentName, look, asker, mine, status }: { entry: RoomEntry; agentName: string; look: Look; asker: string; mine: boolean; status: string }) {
+  const t = messages.rooms;
+  const [state, setState] = useState(status);
+  const [busy, setBusy] = useState(false);
+  const answer = async (approved: boolean) => {
+    if (!entry.approvalId) return;
+    setBusy(true);
+    const result = await answerApproval(entry.approvalId, approved);
+    setBusy(false);
+    if (result.ok || result.status) setState(result.status ?? state);
+  };
+  return (
+    <div className="cx-agent">
+      <div className="cx-avatar">
+        <AgentFigure size={22} look={look} live={false} />
+      </div>
+      <div className="cx-agent-body">
+        <div className="rm-approval">
+          <div className="rm-approval-title">
+            <ShieldCheck size={15} aria-hidden />
+            {entry.text}
+          </div>
+          <div className="rm-approval-who">{state === "pending" ? (mine ? t.approvalMine(agentName) : t.approvalWaiting(asker)) : t.approvalDone(messages.approvals.status[state] ?? state)}</div>
+          {mine && state === "pending" && (
+            <div className="flex gap-2 flex-wrap">
+              <button type="button" className="btn pri sm" disabled={busy} onClick={() => answer(true)}>
+                {t.approve}
+              </button>
+              <a className="btn sec sm no-underline" href="/waiting">
+                {t.seeDetails}
+              </a>
+              <button type="button" className="btn sec sm" disabled={busy} onClick={() => answer(false)}>
+                {t.deny}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function merge(list: RoomEntry[], incoming: RoomEntry[]) {
@@ -31,10 +103,35 @@ function merge(list: RoomEntry[], incoming: RoomEntry[]) {
   return [...list, ...fresh].sort((a, b) => a.at.localeCompare(b.at));
 }
 
-export function RoomInside({ room, members, initial, ceiling }: { room: { id: string; name: string }; members: RoomMemberView[]; initial: RoomEntry[]; ceiling: number | null }) {
+export function RoomInside({
+  room,
+  members,
+  initial,
+  ceiling,
+  me = "",
+  team = null,
+  people = [],
+  approvals = {},
+  addable = { agents: [], people: [] },
+  canDelete = true,
+}: {
+  room: { id: string; name: string };
+  members: RoomMemberView[];
+  initial: RoomEntry[];
+  ceiling: number | null;
+  me?: string;
+  team?: { id: string; name: string } | null;
+  people?: Person[];
+  approvals?: Record<string, string>;
+  addable?: { agents: Person[]; people: Person[] };
+  canDelete?: boolean;
+}) {
   const t = messages.rooms;
   const router = useRouter();
   const [entries, setEntries] = useState(initial);
+  const [statuses, setStatuses] = useState(approvals);
+  const [adding, setAdding] = useState("");
+  const personName = useMemo(() => new Map(people.map((person) => [person.id, person.name])), [people]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [presence, setPresence] = useState<Record<string, RoomPresence>>(() =>
     Object.fromEntries(members.map((member) => [member.id, { agentId: member.id, working: false, note: null, online: member.online }])),
@@ -52,6 +149,7 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
     },
     onDelta: (agentId, streamId, text) =>
       setDrafts((list) => (list.some((d) => d.streamId === streamId) ? list.map((d) => (d.streamId === streamId ? { ...d, text } : d)) : [...list, { agentId, streamId, text }])),
+    onApproval: (approvalId, status) => setStatuses((current) => ({ ...current, [approvalId]: status })),
     onPresence: (list) => {
       setPresence((current) => ({ ...current, ...Object.fromEntries(list.map((p) => [p.agentId, p])) }));
       const idle = new Set(list.filter((p) => !p.working).map((p) => p.agentId));
@@ -71,7 +169,8 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
 
   const rows = useMemo(() => roomRows(entries), [entries]);
   const addressed = useMemo(() => findMentions(draft, members), [draft, members]);
-  const toEveryone = addressed.length === 0 || mentionsEveryone(draft);
+  const toEveryone = team ? mentionsEveryone(draft) : addressed.length === 0 || mentionsEveryone(draft);
+  const toNobody = Boolean(team) && addressed.length === 0 && !mentionsEveryone(draft);
 
   function submit() {
     const text = draft.trim();
@@ -115,7 +214,7 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
             <h1 className="cx-title">{room.name}</h1>
             <div className="cx-subtitle">
               <span className={`cx-state ${connected ? "g" : ""}`} aria-hidden />
-              <span className="truncate">{members.map((member) => member.name).join(", ")}</span>
+              <span className="truncate">{team ? t.teamSubtitle(team.name, people.length, members.map((member) => member.name).join(", ")) : members.map((member) => member.name).join(", ")}</span>
             </div>
           </div>
           <button type="button" className="rm-stop" onClick={stop} disabled={!busy || !connected} title={t.stopRoomHint}>
@@ -141,12 +240,28 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
                   </span>
                 ))}
               </span>
-              <p>{t.emptyRoom}</p>
+              <p>{team ? t.emptyTeamRoom : t.emptyRoom}</p>
             </div>
           )}
           {rows.map((row) => {
             if (row.kind === "day") return <DayDivider key={row.key} at={row.at} />;
             const member = row.entry.agentId ? byId.get(row.entry.agentId) : undefined;
+            if (row.entry.approvalId) {
+              return (
+                <ApprovalRow
+                  key={`${row.key}-${statuses[row.entry.approvalId] ?? "pending"}`}
+                  entry={row.entry}
+                  agentName={member?.name ?? t.someoneWhoLeft}
+                  look={member?.look ?? ({} as Look)}
+                  asker={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft}
+                  mine={row.entry.userId === me}
+                  status={statuses[row.entry.approvalId] ?? "pending"}
+                />
+              );
+            }
+            if (row.entry.author === "person" && row.entry.userId !== me) {
+              return <PersonRow key={row.key} entry={row.entry} name={personName.get(row.entry.userId ?? "") ?? t.someoneWhoLeft} continued={row.continued} />;
+            }
             return (
               <MessageRow
                 key={row.key}
@@ -168,10 +283,12 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
         {error && <div className="err mx-3">{error}</div>}
         <div className="rm-talkto" role="group" aria-label={t.talkTo}>
           <span className="rm-talkto-label">{t.talkTo}</span>
-          <button type="button" className="rm-chip" aria-pressed={toEveryone} onClick={() => address(null)}>
-            <UsersRound size={13} aria-hidden />
-            {t.everyone}
-          </button>
+          {!team && (
+            <button type="button" className="rm-chip" aria-pressed={toEveryone} onClick={() => address(null)}>
+              <UsersRound size={13} aria-hidden />
+              {t.everyone}
+            </button>
+          )}
           {members.map((member) => (
             <button key={member.id} type="button" className="rm-chip" aria-pressed={!toEveryone && addressed.includes(member.id)} onClick={() => address(member)}>
               <AgentFigure size={16} look={member.look} live={false} />
@@ -179,6 +296,7 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
             </button>
           ))}
         </div>
+        {toNobody && draft.trim() && <p className="rm-nobody">{t.nobodyWakes}</p>}
         <Composer agentName={t.composerName(room.name)} draft={draft} setDraft={setDraft} onSubmit={submit} speech={speech} />
       </section>
 
@@ -206,18 +324,69 @@ export function RoomInside({ room, members, initial, ceiling }: { room: { id: st
             );
           })}
         </ul>
-        <p className="rm-side-note">{t.mentionHint}</p>
-        <p className="rm-side-note">{t.talkNote(ceiling)}</p>
-        <div className="mt-auto pt-3">
-          <ConfirmButton
-            label={t.deleteRoom}
-            question={t.deleteConfirm}
-            onConfirm={async () => {
-              const result = await removeRoom(room.id);
-              if (result.ok) router.push("/rooms");
-            }}
-          />
-        </div>
+        {team && (
+          <>
+            <h2 className="rm-side-title mt-4">{t.peopleTitle}</h2>
+            <ul className="rm-people">
+              {people.map((person) => (
+                <li key={person.id} className="rm-person">
+                  <span className="tm-av" aria-hidden>
+                    {initials(person.name)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="rm-person-name">{person.name}</div>
+                    {person.id === me && <div className="rm-person-role">{messages.teams.you}</div>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {addable.agents.length + addable.people.length > 0 && (
+              <div className="flex gap-2 items-center mt-2">
+                <Select
+                  className="flex-1"
+                  aria-label={t.addLabel}
+                  value={adding}
+                  onChange={setAdding}
+                  options={[
+                    ...addable.agents.map((agent) => ({ value: `a:${agent.id}`, label: agent.name, description: t.addAgentKind })),
+                    ...addable.people.map((person) => ({ value: `p:${person.id}`, label: person.name, description: t.addPersonKind })),
+                  ]}
+                  placeholder={t.addLabel}
+                />
+                <button
+                  type="button"
+                  className="btn sec sm"
+                  disabled={!adding}
+                  aria-label={t.add}
+                  onClick={async () => {
+                    const [kind, id] = [adding.slice(0, 1), adding.slice(2)];
+                    const result = await addToRoom(room.id, kind === "a" ? { agentIds: [id] } : { peopleIds: [id] });
+                    if (result.ok) {
+                      setAdding("");
+                      router.refresh();
+                    }
+                  }}
+                >
+                  <Plus size={14} aria-hidden />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        <p className="rm-side-note">{team ? t.teamMentionHint : t.mentionHint}</p>
+        {!team && <p className="rm-side-note">{t.talkNote(ceiling)}</p>}
+        {canDelete && (
+          <div className="mt-auto pt-3">
+            <ConfirmButton
+              label={t.deleteRoom}
+              question={t.deleteConfirm}
+              onConfirm={async () => {
+                const result = await removeRoom(room.id);
+                if (result.ok) router.push("/rooms");
+              }}
+            />
+          </div>
+        )}
       </aside>
     </div>
   );

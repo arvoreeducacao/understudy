@@ -129,6 +129,28 @@ export async function recordSent(threadId: string, messageId: string, references
     .where(eq(schema.channelThreads.id, threadId));
 }
 
+const LIST_OF = "case when jsonb_typeof(settings -> $2) = 'array' then settings -> $2 else '[]'::jsonb end";
+
+export async function appendChannelList(channelId: string, key: string, item: Record<string, unknown>, max: number) {
+  await getPool().query(
+    `update agent_channels set settings = jsonb_set(settings, array[$2::text], (
+       select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from (
+         select e, n from jsonb_array_elements(${LIST_OF} || jsonb_build_array($3::jsonb)) with ordinality as t(e, n) order by n desc limit $4
+       ) kept
+     ), true), updated_at = now() where id = $1`,
+    [channelId, key, JSON.stringify(item), max],
+  );
+}
+
+export async function dropFromChannelList(channelId: string, key: string, id: string) {
+  await getPool().query(
+    `update agent_channels set settings = jsonb_set(settings, array[$2::text], (
+       select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from jsonb_array_elements(${LIST_OF}) with ordinality as t(e, n) where e ->> 'id' is distinct from $3
+     ), true), updated_at = now() where id = $1`,
+    [channelId, key, id],
+  );
+}
+
 export async function mergeChannelSettings(channelId: string, patch: Record<string, unknown>, remove: string[] = []) {
   await getPool().query(
     "update agent_channels set settings = (settings - $3::text[]) || $2::jsonb, updated_at = now() where id = $1",

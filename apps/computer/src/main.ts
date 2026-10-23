@@ -183,7 +183,7 @@ async function main() {
         });
         return;
       case "room_turn":
-        agent.enqueue({ kind: "room", roomId: message.roomId, prompt: message.prompt, ...(message.model ? { model: message.model } : {}) });
+        agent.enqueue({ kind: "room", roomId: message.roomId, prompt: message.prompt, ...(message.model ? { model: message.model } : {}), ...(message.askedBy ? { askedBy: message.askedBy } : {}) });
         return;
       case "record_start":
         await recorder.start(message.recordingId);

@@ -68,6 +68,7 @@ export class Approvals {
     this.hub.broadcast(agentId, { type: "approval", approval: view }, askedBy);
     this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note });
     log("approval_created", { agentId, approvalId: id, source, ...(askedBy ? { askedBy } : {}) });
+    if (askedBy) this.hub.rooms.approvalRaised(agentId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
     this.notify(agentId, view, askedBy).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
   }
@@ -155,6 +156,7 @@ export class Approvals {
         });
       }
       this.hub.broadcast(row.agentId, { type: "approval_closed", id: row.id, status: "expired" });
+      if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "expired");
     }
   }
 
@@ -171,6 +173,7 @@ export class Approvals {
         this.hub.sendToComputer(agentId, { type: "approval_answer", requestId: row.requestId ?? row.id, approved: false, note: brainText.stoppedNote });
       }
       this.hub.broadcast(agentId, { type: "approval_closed", id: row.id, status: "cancelled" });
+      if (row.askedBy) await this.hub.rooms.approvalClosed(row.id, "cancelled");
     }
     return cancelled.length;
   }
@@ -210,6 +213,7 @@ export class Approvals {
       this.hub.broadcast(row.agentId, { type: "state", state: "working", note: null });
     }
     this.hub.broadcast(row.agentId, { type: "approval_closed", id, status });
+    if (row.askedBy) await this.hub.rooms.approvalClosed(id, status);
     return true;
   }
 
