@@ -34,7 +34,7 @@ const FIRE_BATCH = 50;
 
 export type Followup = typeof schema.followups.$inferSelect;
 
-type FollowupHub = Pick<Hub, "deliver" | "startRun" | "addMessage" | "notifyOwner">;
+type FollowupHub = Pick<Hub, "deliver" | "startRun" | "addMessage" | "notifyOwner" | "turnAudience">;
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 60 * 60_000, d: 24 * 60 * 60_000, w: 7 * 24 * 60 * 60_000 };
 
@@ -283,7 +283,7 @@ export async function bookFollowup(
     return { ok: false, reason: "too_many", error: `not booked: you already have ${booked.pending} follow-ups waiting, the most allowed. Cancel one you no longer need with cancel_followup, or tell your owner.` };
   }
   const followup = booked.row;
-  await hub.addMessage(agent.id, "system", copy.followups.booked(localTime(parsed.at), followup.note, taskTitle), context.runId).catch(() => undefined);
+  await hub.addMessage(agent.id, "system", copy.followups.booked(localTime(parsed.at), followup.note, taskTitle), context.runId, undefined, undefined, undefined, undefined, undefined, undefined, context.runId ? null : hub.turnAudience(agent.id)).catch(() => undefined);
   return { ok: true, followup, taskTitle };
 }
 

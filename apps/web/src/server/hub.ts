@@ -122,6 +122,18 @@ export class Hub {
     return this.audiences.get(agentId) ?? null;
   }
 
+  seesScreen(agentId: string, viewer: Viewer) {
+    const audience = this.turnAudience(agentId);
+    return viewer.owner || !audience || viewer.userId === audience;
+  }
+
+  broadcastScreen(agentId: string, message: ServerToViewer) {
+    const set = this.viewers.get(agentId);
+    if (!set) return;
+    const payload = JSON.stringify(message);
+    for (const v of set) if (v.ws.readyState === v.ws.OPEN && this.seesScreen(agentId, v)) v.ws.send(payload);
+  }
+
   sendToOwners(agentId: string, message: ServerToViewer) {
     const set = this.viewers.get(agentId);
     if (!set) return;
@@ -225,7 +237,7 @@ export class Hub {
     const id = newId("msg");
     const createdAt = new Date();
     const files = attachments?.length ? attachments : null;
-    const audience = audienceId === undefined ? (runId ? null : this.turnAudience(agentId)) : audienceId;
+    const audience = audienceId ?? null;
     await getDb().insert(schema.messages).values({ id, agentId, role, text, runId: runId ?? null, authorId, via: via ?? null, sender: sender ?? null, attachments: files, artifact: artifact ?? null, audienceId: audience, createdAt });
     this.broadcast(agentId, {
       type: "chat",
@@ -346,7 +358,7 @@ export class Hub {
       computerStatus: this.isOnline(agentId) ? "running" : agent.computerStatus,
       brains: agent.brains,
       recordingId: this.recordings.active(agentId),
-      frame: this.lastFrames.get(agentId) ?? null,
+      frame: this.seesScreen(agentId, viewer) ? (this.lastFrames.get(agentId) ?? null) : null,
     } satisfies ServerToViewer);
     const jobs = this.lastJobs.get(agentId);
     if (viewer.owner && jobs) send(ws, { type: "jobs", jobs } satisfies ServerToViewer);

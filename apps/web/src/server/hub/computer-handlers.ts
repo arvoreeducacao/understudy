@@ -47,7 +47,7 @@ export const computerHandlers: Handlers = {
   frame(hub, agentId, message) {
     const frame = { jpegBase64: message.jpegBase64, width: message.width, height: message.height, url: message.url, ...(message.desktop ? { desktop: true } : {}) };
     hub.rememberFrame(agentId, frame);
-    hub.broadcast(agentId, { type: "frame", ...frame });
+    hub.broadcastScreen(agentId, { type: "frame", ...frame });
   },
 
   async state(hub, agentId, message) {

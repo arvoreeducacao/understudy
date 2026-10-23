@@ -272,12 +272,12 @@ export class Approvals {
 
   async notifyOwner(agentId: string, text: string) {
     const [owner] = await getDb()
-      .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
+      .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name, teamId: schema.agents.teamId })
       .from(schema.agents)
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
       .where(eq(schema.agents.id, agentId));
     if (!owner) return { slack: false, error: "no_owner" };
-    await this.hub.addMessage(agentId, "agent", text);
+    await this.hub.addMessage(agentId, "agent", text, null, undefined, undefined, undefined, undefined, undefined, undefined, owner.teamId ? owner.id : null);
     const result = await sendDirectMessage(owner, escapeSlack(text), undefined, agentIdentity({ id: agentId, name: owner.name }));
     return result.ok ? { slack: true } : { slack: false, error: result.error ?? "unknown" };
   }

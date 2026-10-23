@@ -61,3 +61,29 @@ test("a team group turn says who it is working for", async () => {
   await settle();
   assert.deepEqual(sent.find((m) => m.type === "turn"), { type: "turn", untrusted: true, askedBy: "usr_rafael" });
 });
+
+test("a member's day is not summarized into the journal the whole team shares", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-team-journal-"));
+  const memory = createMemory(home);
+  const requests: TurnRequest[] = [];
+  let day = "2026-10-22";
+  const agent = createAgent({
+    config: { home, workDir: join(home, "work"), serverUrl: "http://x", token: "t" },
+    memory,
+    settingsFile: join(home, ".understudy", "settings.json"),
+    send: () => true,
+    today: () => day,
+    runTurn: ((_config: unknown, request: TurnRequest) => {
+      requests.push(request);
+      return { done: Promise.resolve({ ok: true, text: "Talked about the Aurora refund.", sessionId: `s${requests.length}` }), cancel: () => {} };
+    }) as never,
+  });
+  agent.enqueue({ kind: "chat", text: "Refund for Aurora?", from: "Tiago", askedBy: "usr_tiago" });
+  await settle();
+  day = "2026-10-23";
+  agent.enqueue({ kind: "chat", text: "Anything else?", from: "Tiago", askedBy: "usr_tiago" });
+  await settle();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].resume ?? null, null);
+  assert.deepEqual(memory.lastJournalLines(), []);
+});

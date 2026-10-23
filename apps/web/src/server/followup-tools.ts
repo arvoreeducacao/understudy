@@ -14,7 +14,7 @@ export type FollowupTool = {
 const reply = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
 
 export function followupTools(
-  hub: Pick<Hub, "deliver" | "startRun" | "addMessage" | "notifyOwner">,
+  hub: Pick<Hub, "deliver" | "startRun" | "addMessage" | "notifyOwner" | "turnAudience">,
   agent: { id: string },
   context: { outsider: () => boolean; untrusted?: () => boolean; runId: () => Promise<string | null>; now?: () => Date },
 ): FollowupTool[] {
