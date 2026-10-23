@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createResetLink, resetTwoFactor, setUserStatus } from "@/app/actions/accounts";
+import { createResetLink, resetTwoFactor, setAdmin, setUserStatus } from "@/app/actions/accounts";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Input } from "@/components/ui/controls";
 import { messages } from "@/lib/messages";
@@ -15,6 +15,8 @@ export function UserActions({
   self,
   googleOnly,
   twoFactorEnabled,
+  admin,
+  adminFromServer,
 }: {
   userId: string;
   name: string;
@@ -22,6 +24,8 @@ export function UserActions({
   self: boolean;
   googleOnly: boolean;
   twoFactorEnabled: boolean;
+  admin: boolean;
+  adminFromServer: boolean;
 }) {
   const [pending, start] = useTransition();
   const [link, setLink] = useState<{ url?: string; error?: string } | null>(null);
@@ -53,6 +57,12 @@ export function UserActions({
         >
           {link?.url ? t.resetLinkCopied : t.resetLink}
         </button>
+      )}
+      {approved && !admin && (
+        <ConfirmButton label={t.makeAdmin} question={t.makeAdminConfirm(name)} disabled={pending} onConfirm={() => start(async () => setLink(await setAdmin(userId, true)))} />
+      )}
+      {approved && admin && !adminFromServer && (
+        <ConfirmButton label={t.removeAdmin} question={t.removeAdminConfirm(name)} disabled={pending} onConfirm={() => start(async () => setLink(await setAdmin(userId, false)))} />
       )}
       {approved && twoFactorEnabled && (
         <ConfirmButton label={t.resetTwoFactor} question={t.resetTwoFactorConfirm(name)} disabled={pending} onConfirm={() => start(() => resetTwoFactor(userId))} />
