@@ -55,6 +55,7 @@ export default async function AdminPage() {
           {u.status === "rejected" && <span className="pill c">{t.rejected}</span>}
           {u.mustChangePassword && u.status === "approved" && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.mustChange}</span>}
           {!u.mustChangePassword && u.status === "approved" && !u.twoFactorEnabled && !isGoogleOnlyEmail(u.email) && <span className="pill a">{t.noTwoFactor}</span>}
+          {isGoogleOnlyEmail(u.email) && <span className="pill s">{t.googleOnly}</span>}
         </div>
         <div className="row-sub truncate">
           {u.email} · {t.since(formatDate(u.createdAt))}
