@@ -6,7 +6,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { TeamAdmin } from "@/components/teams/TeamAdmin";
 import { TeamPeople } from "@/components/teams/TeamPeople";
 import { cleanLook } from "@/lib/look";
-import { messages } from "@/lib/messages";
+import { localeOr, messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { STATE_PILL } from "@/lib/state-pill";
 import { formatWhen } from "@/lib/format";
@@ -136,7 +136,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
           <div className="card tm-note">
             <b>{t.rulesTitle}</b> {t.rulesBody}
           </div>
-          <TeamAdmin teamId={data.team.id} admin={admin} name={data.team.name} description={data.team.description} me={user.id} />
+          <TeamAdmin teamId={data.team.id} admin={admin} name={data.team.name} description={data.team.description} language={localeOr(data.team.language)} me={user.id} />
         </div>
       </div>
     </div>

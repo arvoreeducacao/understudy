@@ -15,8 +15,8 @@ import { log } from "./shared";
 export class Runs {
   constructor(private hub: Hub) {}
 
-  async start(recipeId: string, trigger: RunTrigger, options: { scheduledFor?: Date; input?: string } = {}) {
-    const { scheduledFor, input } = options;
+  async start(recipeId: string, trigger: RunTrigger, options: { scheduledFor?: Date; input?: string; group?: { name: string; locale: string } } = {}) {
+    const { scheduledFor, input, group } = options;
     const db = getDb();
     const [found] = await db
       .select({ recipe: schema.recipes, ownerStatus: schema.user.status, model: schema.agents.model })
@@ -39,7 +39,7 @@ export class Runs {
     if (this.hub.isOnline(recipe.agentId)) {
       await this.hub.addMessage(recipe.agentId, "system", copy.runs.started(recipe.recipe.title, trigger), runId);
     }
-    const context = [trigger === "test" ? brainText.testContext : "", input ? brainText.runInput(trigger, input) : ""].filter(Boolean).join("\n\n");
+    const context = [trigger === "test" ? brainText.testContext : "", input ? brainText.runInput(trigger, input) : "", group ? brainText.groupSummary(group.name, group.locale) : ""].filter(Boolean).join("\n\n");
     const delivery = await this.hub.deliver(recipe.agentId, {
       type: "run_recipe",
       runId,

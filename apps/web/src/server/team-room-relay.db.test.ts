@@ -40,7 +40,9 @@ function fakeHub(turnRoom: string | null = null) {
     broadcast: () => {},
     turnAudience: () => null,
     turnRoom: () => turnRoom,
-    startRun: async (recipeId: string) => {
+    started: [] as { recipeId: string; group?: { name: string; locale: string } }[],
+    startRun: async (recipeId: string, _trigger: string, options: { group?: { name: string; locale: string } } = {}) => {
+      hub.started.push({ recipeId, ...(options.group ? { group: options.group } : {}) });
       const { getDb, schema } = await import("@/lib/db");
       const { newId } = await import("@/lib/ids");
       const [found] = await getDb().select({ agentId: schema.recipes.agentId }).from(schema.recipes).where(eq(schema.recipes.id, recipeId));
@@ -245,7 +247,7 @@ test("list_teammates shows, for each teammate, the team groups both are in", { s
   const groupsOf = (name: string) => mates.find((mate) => mate.name === name)?.groups.map((group) => group.id).sort();
   assert.deepEqual(groupsOf("Analyst"), [radar]);
   assert.deepEqual(groupsOf("Editor"), [radar, editing].sort());
-  assert.deepEqual(mates.find((mate) => mate.name === "Analyst")?.groups, [{ id: radar, name: "competitor-radar" }]);
+  assert.deepEqual(mates.find((mate) => mate.name === "Analyst")?.groups, [{ id: radar, name: "competitor-radar", language: "en" }]);
 });
 
 test("the understudy picks the group by name or id, over the one with the latest activity, and the closing line follows it", { skip }, async () => {
@@ -354,4 +356,38 @@ test("speaking in a group, the line stays in that group: another one is refused"
   await message({ agent: "Analyst", text: "can you take it?", group: "competitor-radar" });
   assert.equal((await said(radar)).length, 1);
   assert.equal((await said(launch)).length, 0);
+});
+
+test("in a team whose language is Portuguese, the fixed words follow it and the teammate is asked for a summary in it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { Runs } = await import("./hub/runs");
+  const { brainText } = await import("@/lib/brain-text");
+  await getDb().update(schema.teams).set({ language: "pt-BR" }).where(eq(schema.teams.id, teamId));
+  try {
+    const radar = await openGroup("radar", [ids.scout, ids.analyst]);
+    await inRun(ids.scout);
+    const hub = fakeHub();
+    const { handOff, list } = await toolsOf(hub, ids.scout);
+    const mates = JSON.parse((await list({})).content[0].text) as { name: string; groups: { language: string }[] }[];
+    assert.equal(mates.find((mate) => mate.name === "Analyst")?.groups[0].language, "pt-BR");
+    await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready", note: "varredura da semana pronta" });
+    assert.equal((await said(radar))[0].text, "@Analyst, “Weekly analysis” é com você: varredura da semana pronta");
+    assert.deepEqual(hub.started, [{ recipeId: ids.sweep, group: { name: "radar", locale: "pt-BR" } }]);
+    assert.match(brainText.groupSummary("radar", "pt-BR"), /team group "radar" .*Brazilian Portuguese/);
+    const [handoff] = await getDb().select().from(schema.agentMessages).where(eq(schema.agentMessages.fromAgentId, ids.scout));
+    await new Runs(hub as never).finish(ids.analyst, handoff.runId!, true, "Duas mudanças reais nesta semana.");
+    assert.equal((await said(radar)).at(-1)?.text, "Terminei “Weekly analysis”: Duas mudanças reais nesta semana.");
+  } finally {
+    await getDb().update(schema.teams).set({ language: null }).where(eq(schema.teams.id, teamId));
+  }
+});
+
+test("a team in the server's language asks for nothing extra, and a hand-off outside any group asks for nothing either", { skip }, async () => {
+  await openGroup("radar", [ids.scout, ids.analyst]);
+  await inRun(ids.scout);
+  const hub = fakeHub();
+  const { handOff } = await toolsOf(hub, ids.scout);
+  await handOff({ agent: "Analyst", task: "Weekly analysis", input: "ready" });
+  await handOff({ agent: "Analyst", task: "Weekly analysis", input: "again", group: "none" });
+  assert.deepEqual(hub.started, [{ recipeId: ids.sweep }, { recipeId: ids.sweep }]);
 });

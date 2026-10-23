@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
-import { messages } from "@/lib/messages";
+import { localeOr, messages } from "@/lib/messages";
 import { cleanRoomName, ROOM_LIMITS } from "@/lib/rooms";
 
 export type CreateRoomResult = { ok: true; id: string } | { ok: false; error: string };
@@ -118,17 +118,19 @@ export async function listRooms(userId: string) {
   }));
 }
 
-export type TeamGroup = { id: string; name: string };
+export type TeamGroup = { id: string; name: string; language: string };
 
 export async function teamGroupsOf(agentId: string): Promise<(TeamGroup & { agentIds: string[] })[]> {
   const db = getDb();
-  const rooms = await db
-    .select({ id: schema.rooms.id, name: schema.rooms.name })
+  const found = await db
+    .select({ id: schema.rooms.id, name: schema.rooms.name, language: schema.teams.language })
     .from(schema.roomParticipants)
     .innerJoin(schema.rooms, eq(schema.rooms.id, schema.roomParticipants.roomId))
-    .where(and(eq(schema.roomParticipants.agentId, agentId), isNotNull(schema.rooms.teamId)))
+    .innerJoin(schema.teams, eq(schema.teams.id, schema.rooms.teamId))
+    .where(eq(schema.roomParticipants.agentId, agentId))
     .orderBy(desc(schema.rooms.updatedAt), desc(schema.rooms.createdAt));
-  if (!rooms.length) return [];
+  if (!found.length) return [];
+  const rooms = found.map((room) => ({ ...room, language: localeOr(room.language) }));
   const seats = await db
     .select({ roomId: schema.roomParticipants.roomId, agentId: schema.roomParticipants.agentId })
     .from(schema.roomParticipants)
@@ -137,7 +139,7 @@ export async function teamGroupsOf(agentId: string): Promise<(TeamGroup & { agen
 }
 
 export async function sharedTeamGroups(agentA: string, agentB: string): Promise<TeamGroup[]> {
-  return (await teamGroupsOf(agentA)).filter((room) => room.agentIds.includes(agentB)).map(({ id, name }) => ({ id, name }));
+  return (await teamGroupsOf(agentA)).filter((room) => room.agentIds.includes(agentB)).map(({ id, name, language }) => ({ id, name, language }));
 }
 
 export async function sharedTeamRoom(agentA: string, agentB: string) {

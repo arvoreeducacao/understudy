@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools, TeamRole } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
-import { messages } from "@/lib/messages";
+import { LOCALES, messages } from "@/lib/messages";
 import { teamConnector } from "./approval-payload";
 
 export const TEAM_LIMITS = { nameMax: 60, descriptionMax: 200, membersMax: 200 } as const;
@@ -55,13 +55,13 @@ export async function createTeam(userId: string, input: { name: unknown; descrip
   return { ok: true, id };
 }
 
-export async function updateTeam(teamId: string, actorId: string, input: { name: unknown; description?: unknown }): Promise<TeamResult> {
+export async function updateTeam(teamId: string, actorId: string, input: { name: unknown; description?: unknown; language?: unknown }): Promise<TeamResult> {
   if ((await teamRole(teamId, actorId)) !== "admin") return { ok: false, error: messages.teams.adminsOnly };
   const name = cleanName(input.name);
   if (!name) return { ok: false, error: messages.teams.nameRequired };
   await getDb()
     .update(schema.teams)
-    .set({ name, description: cleanDescription(input.description), updatedAt: new Date() })
+    .set({ name, description: cleanDescription(input.description), ...(input.language === undefined ? {} : { language: LOCALES.includes(String(input.language)) ? String(input.language) : null }), updatedAt: new Date() })
     .where(eq(schema.teams.id, teamId));
   return { ok: true };
 }

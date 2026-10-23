@@ -540,6 +540,7 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 .md .md-h3 { font-size: 13.5px; }
 .md blockquote { padding-left: 12px; color: var(--ash); box-shadow: inset 2px 0 0 var(--line); }
 .md hr { border: 0; height: 1px; background: var(--line); margin: 1em 0; }
+.md-mention { color: var(--sky); font-weight: 600; background: rgb(99 161 255 / .14); border-radius: 5px; padding: 0 .22em; }
 .md .md-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; padding: .12em .4em; border-radius: 6px; background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .06); }
 .md .md-pre { border-radius: 12px; overflow: hidden; background: rgb(5 6 10 / .7); border: 1px solid var(--glass-edge); }
 .md .md-pre-bar { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 5px 12px; font-size: 10.5px; color: var(--smoke); border-bottom: 1px solid var(--glass-edge); text-transform: lowercase; }

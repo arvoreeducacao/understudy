@@ -476,7 +476,7 @@ export class Hub {
     return this.approvals.notifyOwner(agentId, text);
   }
 
-  startRun(recipeId: string, trigger: RunTrigger, options: { scheduledFor?: Date; input?: string } = {}) {
+  startRun(recipeId: string, trigger: RunTrigger, options: { scheduledFor?: Date; input?: string; group?: { name: string; locale: string } } = {}) {
     return this.runs.start(recipeId, trigger, options);
   }
 
