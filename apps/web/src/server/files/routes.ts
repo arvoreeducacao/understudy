@@ -7,7 +7,7 @@ import {
   UPLOAD_CHUNK_BYTES,
   type ServerToComputer,
 } from "@understudy/protocol";
-import { agentAccess, type Access } from "@/lib/access";
+import { agentAccess, canManage, type Access } from "@/lib/access";
 import { userBlock } from "@/lib/account-gate";
 import { sessionFromHeaders } from "@/lib/auth";
 import { env } from "@/lib/env";
@@ -194,7 +194,7 @@ export function createFileRoutes(hub: Hub) {
     if (route.kind === "raw" || route.kind === "thumb") {
       const path = url.searchParams.get("path") ?? "";
       if (!areaPath(path)) return reply(res, 400, { error: "bad_path" });
-      const attached = who.access === "owner" ? false : await attachedToChat(agentId, path);
+      const attached = canManage(who.access) ? false : await attachedToChat(agentId, path, who.userId);
       if (!canRead(who.access, path, attached)) return reply(res, 404, { error: "not_found" });
       if (!limiter.allow(`read:${who.userId}`, 40, 400)) return reply(res, 429, { error: "too_many_requests" });
       if (route.kind === "raw") return stream(req, res, agentId, path, url.searchParams.get("download") === "1");

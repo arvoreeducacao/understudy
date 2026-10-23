@@ -4,12 +4,13 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { NavLink } from "@/components/NavLink";
 import { SideShell } from "@/components/SideShell";
 import { SignOut } from "@/components/SignOut";
-import { accessibleAgentIds } from "@/lib/access";
+import { accessibleAgentIds, approvalScope } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { loadOpenFailures } from "@/server/run-alerts";
+import { teamsFor } from "@/server/teams-store";
 
 function initials(name: string) {
   return name
@@ -23,17 +24,15 @@ function initials(name: string) {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const db = getDb();
-  const ids = await accessibleAgentIds(user.id, ["owner", "approver"]);
-  const waiting = ids.length
-    ? (
-        await db
-          .select({ id: schema.approvals.id })
-          .from(schema.approvals)
-          .where(and(inArray(schema.approvals.agentId, ids), eq(schema.approvals.status, "pending")))
-      ).length
-    : 0;
+  const waiting = (
+    await db
+      .select({ id: schema.approvals.id })
+      .from(schema.approvals)
+      .where(and(await approvalScope(user.id), eq(schema.approvals.status, "pending")))
+  ).length;
   const failing = (await loadOpenFailures(await accessibleAgentIds(user.id, ["owner"]))).length;
   const admin = user.admin;
+  const teams = await teamsFor(user.id);
   const pendingUsers = admin
     ? (await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.status, "pending"))).length
     : 0;
@@ -62,6 +61,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/extension" icon="extension">{messages.extension.nav}</NavLink>
           <NavLink href="/templates" icon="templates">{messages.nav.templates}</NavLink>
           <NavLink href="/rooms" icon="rooms">{messages.rooms.nav}</NavLink>
+          <NavLink href="/teams" exact icon="team">{messages.teams.nav}</NavLink>
+          {teams.map((team) => (
+            <NavLink key={team.id} href={`/teams/${team.id}`} sub>
+              <span className="truncate">{team.name}</span>
+            </NavLink>
+          ))}
           <NavLink href="/connectors" icon="connectors">{messages.nav.connectors}</NavLink>
           <NavLink href="/settings" icon="settings">{messages.nav.settings}</NavLink>
           {admin && (

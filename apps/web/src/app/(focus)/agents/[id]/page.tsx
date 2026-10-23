@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
 import type { OwnerData } from "@/components/workspace/AgentWorkspace";
 import type { RailData } from "@/components/inside/AgentRail";
-import { accessibleAgentIds } from "@/lib/access";
+import { accessibleAgentIds, approvalScope, canManage } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { CHAT_WIDTH_COOKIE, WORKSPACE_HIDDEN_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
@@ -16,12 +16,31 @@ import { loadChat, loadPendingApprovals, loadRuns } from "@/lib/views";
 import { channelSettings } from "@/server/channels/settings";
 import { pendingFollowups, toSummaries } from "@/server/followups";
 import { slackEnabled } from "@/server/slack";
+import { personalConnectors, teamsFor } from "@/server/teams-store";
+import type { TeamSettings } from "@/components/teams/TeamSection";
 
 type Agent = typeof schema.agents.$inferSelect;
 
-async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promise<OwnerData> {
+async function loadTeamSettings(agent: Agent, userId: string): Promise<TeamSettings> {
   const db = getDb();
-  const [files, memory, members, slackAvailable, servers, channels] = await Promise.all([
+  const [teams, personal, [current]] = await Promise.all([
+    teamsFor(userId),
+    personalConnectors(agent.tools),
+    agent.teamId ? db.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(eq(schema.teams.id, agent.teamId)) : Promise.resolve([]),
+  ]);
+  const admin = current ? teams.some((team) => team.id === current.id && team.role === "admin") : false;
+  return {
+    current: current ? { ...current, owned: agent.teamOwned } : null,
+    options: teams.map((team) => ({ id: team.id, name: team.name, people: team.people })),
+    personal: personal.map((connector) => connector.name),
+    canBring: agent.ownerId === userId,
+    canRelease: current ? (agent.teamOwned ? admin : agent.ownerId === userId) : false,
+  };
+}
+
+async function loadOwnerData(agent: Agent, userId: string, email: string, admin: boolean): Promise<OwnerData> {
+  const db = getDb();
+  const [files, memory, members, slackAvailable, servers, channels, team] = await Promise.all([
     db.select().from(schema.agentFiles).where(eq(schema.agentFiles.agentId, agent.id)).orderBy(asc(schema.agentFiles.path)),
     db.select().from(schema.memoryFiles).where(eq(schema.memoryFiles.agentId, agent.id)).orderBy(asc(schema.memoryFiles.path)),
     db
@@ -30,8 +49,9 @@ async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promi
       .innerJoin(schema.user, eq(schema.user.id, schema.agentMembers.userId))
       .where(eq(schema.agentMembers.agentId, agent.id)),
     slackEnabled(),
-    serverOptions({ id: agent.ownerId, email }),
+    serverOptions({ id: agent.ownerId, email }, Boolean(agent.teamId)),
     channelSettings(agent.id),
+    loadTeamSettings(agent, userId),
   ]);
   return {
     files: files.map((f) => ({ path: f.path, size: f.size, updatedAt: f.updatedAt.getTime() })),
@@ -47,6 +67,7 @@ async function loadOwnerData(agent: Agent, email: string, admin: boolean): Promi
       rules: agent.rules ?? [],
       members,
       channels,
+      team,
     },
   };
 }
@@ -62,7 +83,7 @@ async function loadWaitingRuns(runIds: string[]) {
 
 async function loadRail(userId: string, userName: string): Promise<RailData> {
   const db = getDb();
-  const [visible, answerable] = await Promise.all([accessibleAgentIds(userId), accessibleAgentIds(userId, ["owner", "approver"])]);
+  const [visible, answerable] = await Promise.all([accessibleAgentIds(userId), approvalScope(userId)]);
   const [agents, pending] = await Promise.all([
     visible.length
       ? db
@@ -71,12 +92,10 @@ async function loadRail(userId: string, userName: string): Promise<RailData> {
           .where(inArray(schema.agents.id, visible))
           .orderBy(asc(schema.agents.name))
       : [],
-    answerable.length
-      ? db
-          .select({ agentId: schema.approvals.agentId })
-          .from(schema.approvals)
-          .where(and(inArray(schema.approvals.agentId, answerable), eq(schema.approvals.status, "pending")))
-      : [],
+    db
+      .select({ agentId: schema.approvals.agentId })
+      .from(schema.approvals)
+      .where(and(answerable, eq(schema.approvals.status, "pending"))),
   ]);
   const waitingBy = new Map<string, number>();
   for (const row of pending) waitingBy.set(row.agentId, (waitingBy.get(row.agentId) ?? 0) + 1);
@@ -95,17 +114,18 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const chatWidth = parseStoredWidth(jar.get(CHAT_WIDTH_COOKIE)?.value ?? null);
   const workspaceHidden = jar.get(WORKSPACE_HIDDEN_COOKIE)?.value === "1";
   const db = getDb();
-  const [[owner], chat, approvals, runs, recipes, ownerData, rail, followups] = await Promise.all([
+  const [[owner], [team], chat, approvals, runs, recipes, ownerData, rail, followups] = await Promise.all([
     db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, agent.ownerId)),
-    loadChat(id),
-    loadPendingApprovals(id),
+    agent.teamId ? db.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(eq(schema.teams.id, agent.teamId)) : Promise.resolve([]),
+    loadChat(id, 150, user.id),
+    loadPendingApprovals(id, user.id),
     loadRuns(id, 20),
     db
       .select({ id: schema.recipes.id, title: schema.recipes.recipe, active: schema.recipes.active })
       .from(schema.recipes)
       .where(eq(schema.recipes.agentId, id))
       .orderBy(desc(schema.recipes.updatedAt)),
-    access === "owner" ? loadOwnerData(agent, user.email, Boolean(user.admin)) : null,
+    canManage(access) ? loadOwnerData(agent, user.id, user.email, Boolean(user.admin)) : null,
     loadRail(user.id, user.name || user.email),
     pendingFollowups([id]),
   ]);
@@ -126,6 +146,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
       }}
       ownerName={owner?.name ?? ""}
       access={access}
+      team={team ?? null}
       initialChatWidth={chatWidth}
       initialWorkspaceHidden={workspaceHidden}
       initialChat={chat}
@@ -138,7 +159,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
         waiting: waiting.has(r.id),
       }))}
       recipes={recipes.map((r) => ({ id: r.id, title: r.title.title, active: r.active }))}
-      followups={toSummaries(followups, { format: formatWhen, canCancel: () => access === "owner" })}
+      followups={toSummaries(followups, { format: formatWhen, canCancel: () => canManage(access) })}
       ownerData={ownerData}
       rail={rail}
     />

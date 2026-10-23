@@ -51,6 +51,7 @@ export type ApprovalView = {
   status: string;
   createdAt: string;
   alwaysAllow?: { tool: string };
+  forYou?: true;
 };
 
 export type ServerToViewer =

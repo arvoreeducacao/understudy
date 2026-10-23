@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { and, eq, inArray } from "drizzle-orm";
-import { agentAccess, canApprove } from "@/lib/access";
+import { agentAccess, canAnswer } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { messages as copy } from "@/lib/messages";
@@ -208,9 +208,9 @@ async function handleInteractive(hub: Hub, res: ServerResponse, body: string) {
   const approvalId = String(action.value ?? "");
   const user = await panelUser(payload.user?.id);
   const [approval] = approvalId
-    ? await getDb().select({ id: schema.approvals.id, agentId: schema.approvals.agentId, summary: schema.approvals.summary }).from(schema.approvals).where(eq(schema.approvals.id, approvalId))
+    ? await getDb().select({ id: schema.approvals.id, agentId: schema.approvals.agentId, summary: schema.approvals.summary, askedBy: schema.approvals.askedBy }).from(schema.approvals).where(eq(schema.approvals.id, approvalId))
     : [];
-  if (!user || !approval || !canApprove(await agentAccess(user.id, approval.agentId))) {
+  if (!user || !approval || !canAnswer(await agentAccess(user.id, approval.agentId), approval.askedBy, user.id)) {
     log("slack_approval_refused", { approvalId, known: Boolean(user) });
     await respond(copy.slackApp.cannotAnswer, false);
     return;

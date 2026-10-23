@@ -171,6 +171,7 @@ async function main() {
           kind: "chat",
           text: message.text,
           from: message.from,
+          ...(message.askedBy ? { askedBy: message.askedBy } : {}),
           ...(message.fromAgent ? { fromAgent: message.fromAgent } : {}),
           ...(message.repeated ? { repeated: message.repeated } : {}),
           ...(message.external ? { external: message.external } : {}),

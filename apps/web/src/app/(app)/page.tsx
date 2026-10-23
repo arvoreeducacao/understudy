@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
-import { accessibleAgentIds } from "@/lib/access";
+import { accessibleAgentIds, approvalScope } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { formatWhen } from "@/lib/format";
 import { cleanLook } from "@/lib/look";
@@ -17,18 +17,20 @@ const t = messages.home;
 export default async function HomePage() {
   const user = await requireUser();
   const db = getDb();
-  const [visible, answerable] = await Promise.all([accessibleAgentIds(user.id), accessibleAgentIds(user.id, ["owner", "approver"])]);
+  const [visible, answerable] = await Promise.all([accessibleAgentIds(user.id), approvalScope(user.id)]);
   const agents = visible.length
     ? await db.select().from(schema.agents).where(inArray(schema.agents.id, visible)).orderBy(desc(schema.agents.createdAt))
     : [];
   const ids = agents.map((b) => b.id);
-  const pending = answerable.length
-    ? await db
-        .select()
-        .from(schema.approvals)
-        .where(and(inArray(schema.approvals.agentId, answerable), eq(schema.approvals.status, "pending")))
-        .orderBy(desc(schema.approvals.createdAt))
-    : [];
+  const teamIds = [...new Set(agents.map((b) => b.teamId).filter((id): id is string => Boolean(id)))];
+  const teamNames = new Map(
+    (teamIds.length ? await db.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(inArray(schema.teams.id, teamIds)) : []).map((team) => [team.id, team.name]),
+  );
+  const pending = await db
+    .select()
+    .from(schema.approvals)
+    .where(and(answerable, eq(schema.approvals.status, "pending")))
+    .orderBy(desc(schema.approvals.createdAt));
   const recipes = ids.length
     ? await db.select().from(schema.recipes).where(and(inArray(schema.recipes.agentId, ids), eq(schema.recipes.active, true)))
     : [];
@@ -106,7 +108,11 @@ export default async function HomePage() {
             <Link key={b.id} href={`/agents/${b.id}`} className="card p-3 flex flex-col gap-3 no-underline">
               <div className="figure-stage h-[150px]" style={{ "--tint": cleanLook(b.look).color } as CSSProperties}>
                 <AgentFigure state={state} size={108} look={b.look} count={count} />
-                {b.ownerId !== user.id && <span className="pill absolute top-2.5 left-2.5">{t.shared}</span>}
+                {b.teamId && teamNames.has(b.teamId) ? (
+                  <span className="pill absolute top-2.5 left-2.5 max-w-[45%] truncate">{teamNames.get(b.teamId)}</span>
+                ) : (
+                  b.ownerId !== user.id && <span className="pill absolute top-2.5 left-2.5">{t.shared}</span>
+                )}
                 <span className={`pill ${pill} absolute top-2.5 right-2.5`}>
                   <span className="dot" />
                   {messages.states[state]}

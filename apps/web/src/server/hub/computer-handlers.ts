@@ -69,6 +69,11 @@ export const computerHandlers: Handlers = {
       await appendPending(origin.threadId, { text }).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
       return;
     }
+    const audience = message.runId ? null : hub.turnAudience(agentId);
+    if (audience) {
+      await hub.addMessage(agentId, "agent", text, null, undefined, undefined, streamId, undefined, undefined, undefined, audience);
+      return;
+    }
     const found = message.runId ? null : await currentConversation(agentId);
     const conversation = found && !found.route ? found : null;
     await hub.addMessage(agentId, "agent", text, message.runId, undefined, conversation?.kind, streamId);
@@ -80,7 +85,9 @@ export const computerHandlers: Handlers = {
   async chat_delta(hub, agentId, message) {
     if (message.roomId) return hub.rooms.delta(agentId, message.roomId, message.streamId, String(message.text ?? "").slice(0, 8000));
     const text = String(message.text ?? "").slice(0, 8000);
-    hub.broadcast(agentId, { type: "chat_delta", streamId: message.streamId, text });
+    const audience = hub.turnAudience(agentId);
+    hub.broadcast(agentId, { type: "chat_delta", streamId: message.streamId, text }, audience);
+    if (audience) return;
     if (!currentTurn(agentId)) relayDelta(agentId, message.streamId, text).catch((error) => log("channel_stream_error", { agentId, error: String(error) }));
   },
 
@@ -116,7 +123,9 @@ export const computerHandlers: Handlers = {
   async activity(hub, agentId, message) {
     const text = String(message.text ?? "").slice(0, 2000);
     if (message.roomId) return hub.rooms.activity(agentId, message.roomId, text);
-    await hub.addMessage(agentId, "activity", text, message.runId);
+    const audience = message.runId ? null : hub.turnAudience(agentId);
+    await hub.addMessage(agentId, "activity", text, message.runId, undefined, undefined, undefined, undefined, undefined, undefined, audience);
+    if (audience) return;
     if (!currentTurn(agentId)) relayActivityText(agentId, text).catch((error) => log("channel_status_error", { agentId, error: String(error) }));
   },
 
@@ -240,7 +249,8 @@ export const computerHandlers: Handlers = {
     await hub.rooms.turnDone(agentId, message.roomId, message.ok, message.error);
   },
 
-  async turn(_hub, agentId, message) {
+  async turn(hub, agentId, message) {
+    hub.setTurnAudience(agentId, message.runId ? null : message.askedBy);
     noteTurn(agentId, { followup: message.followup, runId: message.runId, untrusted: message.untrusted });
     await startTurn(agentId, message.origin);
   },

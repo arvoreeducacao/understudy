@@ -1,12 +1,13 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import type { ApprovalView, ChatEntry, ProposalView } from "@/server/hub-types";
 
-export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[]> {
+export async function loadChat(agentId: string, limit = 150, viewerId?: string): Promise<ChatEntry[]> {
+  const visible = viewerId ? or(isNull(schema.messages.audienceId), eq(schema.messages.audienceId, viewerId)) : isNull(schema.messages.audienceId);
   const rows = await getDb()
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.agentId, agentId))
+    .where(and(eq(schema.messages.agentId, agentId), visible))
     .orderBy(desc(schema.messages.createdAt))
     .limit(limit);
   const proposalIds = rows.map((m) => m.proposalId).filter((id): id is string => Boolean(id));
@@ -21,11 +22,12 @@ export async function loadChat(agentId: string, limit = 150): Promise<ChatEntry[
     });
 }
 
-export async function loadPendingApprovals(agentId: string): Promise<ApprovalView[]> {
+export async function loadPendingApprovals(agentId: string, viewerId?: string): Promise<ApprovalView[]> {
+  const visible = viewerId ? or(isNull(schema.approvals.askedBy), eq(schema.approvals.askedBy, viewerId)) : isNull(schema.approvals.askedBy);
   const rows = await getDb()
     .select()
     .from(schema.approvals)
-    .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending")))
+    .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending"), visible))
     .orderBy(asc(schema.approvals.createdAt));
   return rows.map(toApprovalView);
 }
@@ -41,6 +43,7 @@ export function toApprovalView(a: typeof schema.approvals.$inferSelect): Approva
     status: a.status,
     createdAt: a.createdAt.toISOString(),
     ...(a.grant ? { alwaysAllow: { tool: a.grant.tool } } : {}),
+    ...(a.askedBy ? { forYou: true as const } : {}),
   };
 }
 

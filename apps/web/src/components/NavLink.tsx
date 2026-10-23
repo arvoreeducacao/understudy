@@ -20,12 +20,12 @@ const ICONS = {
 
 export type NavIcon = keyof typeof ICONS;
 
-export function NavLink({ href, children, exact = false, icon, badge }: { href: string; children: React.ReactNode; exact?: boolean; icon?: NavIcon; badge?: number }) {
+export function NavLink({ href, children, exact = false, icon, badge, sub = false }: { href: string; children: React.ReactNode; exact?: boolean; icon?: NavIcon; badge?: number; sub?: boolean }) {
   const pathname = usePathname();
-  const on = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  const on = exact || sub ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
   const Icon = icon ? ICONS[icon] : null;
   return (
-    <Link href={href} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
+    <Link href={href} className={[on ? "on" : "", sub ? "sub" : ""].filter(Boolean).join(" ") || undefined} aria-current={on ? "page" : undefined}>
       <span className="nav-label">
         {Icon && <Icon size={16} strokeWidth={1.8} aria-hidden />}
         {children}
