@@ -1,7 +1,7 @@
 export type Locale = "en" | "pt-BR";
 
 export const IRREVERSIBLE_WORDS: Record<Locale, string[]> = {
-  en: ["submit", "send", "pay", "emit", "issue", "delete", "remove", "purchase", "buy", "publish", "transfer", "approve", "confirm", "cancel"],
+  en: ["submit", "send", "pay", "emit", "issue", "delete", "remove", "purchase", "buy", "publish", "transfer", "approve", "confirm", "cancel", "withdraw"],
   "pt-BR": [
     "envi(?:ar|e|a)",
     "submeter",
@@ -11,6 +11,7 @@ export const IRREVERSIBLE_WORDS: Record<Locale, string[]> = {
     "apag(?:ar|ue|a)",
     "delet(?:ar|e|a)",
     "remov(?:er|a|e)",
+    "retir(?:ar|e|a)",
     "compr(?:ar|e|a)",
     "public(?:ar|a|que)",
     "transfer(?:ir|a|e)",

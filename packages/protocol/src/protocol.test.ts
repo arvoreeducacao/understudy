@@ -66,6 +66,8 @@ test("one normalizer: irreversible steps ask in English and Portuguese, lengths 
 test("locale patterns cover English and Portuguese", () => {
   assert.equal(looksIrreversible("Pay the supplier"), true);
   assert.equal(looksIrreversible("Pagar o fornecedor"), true);
+  assert.equal(looksIrreversible("Retirar do acervo"), true);
+  assert.equal(looksIrreversible("Withdraw the offer"), true);
   assert.equal(looksIrreversible("Sign in with the account"), false);
   assert.equal(looksIrreversible("Abrir o relatório"), false);
   assert.equal(SENSITIVE_LABEL.test("Card number"), true);

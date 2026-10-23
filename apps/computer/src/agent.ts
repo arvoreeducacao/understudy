@@ -163,6 +163,7 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
     case "call_api":
       return `Calling the ${field("name")} API: ${(field("method") || "GET").toUpperCase()} ${field("url")}`.slice(0, 160);
     case "request_approval":
+    case "browser_ask_first":
       return `Asking for approval: ${field("summary")}`;
     case "message_agent":
       return `Messaging ${field("agent")}`;
@@ -214,7 +215,7 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
 
 export const MULTI_STEP_ACTIONS = 6;
 
-const NOT_ACTIONS = /(request_approval|wait_for_approval|propose_task|save_task|notify_owner|schedule_followup|list_followups|cancel_followup|list_teammates|list_credentials|^Read|^Grep|^Glob|^TodoWrite|^ToolSearch|browser_snapshot|browser_take_screenshot|browser_wait_for|desktop_screenshot|job_output)$/;
+const NOT_ACTIONS = /(request_approval|wait_for_approval|browser_ask_first|propose_task|save_task|notify_owner|schedule_followup|list_followups|cancel_followup|list_teammates|list_credentials|^Read|^Grep|^Glob|^TodoWrite|^ToolSearch|browser_snapshot|browser_take_screenshot|browser_wait_for|desktop_screenshot|job_output)$/;
 
 export function countsAsAction(name: string): boolean {
   const tool = name.replace(/^mcp__.+?__/, "");
@@ -233,7 +234,7 @@ export function offerTaskPrompt(input: { repeated?: { times: number; since: numb
 }
 
 export function isApprovalTool(name: string): boolean {
-  return /(request_approval|wait_for_approval)$/.test(name);
+  return /(request_approval|wait_for_approval|browser_ask_first)$/.test(name);
 }
 
 export function runModelFor(brain: Brain, mainModel?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {

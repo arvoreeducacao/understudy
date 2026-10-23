@@ -141,9 +141,9 @@ test("event log collapses typing and hides screenshots", () => {
 
 test("run prompt gates ask steps and the result line is parsed", () => {
   const recipe: Recipe = { title: "T", trigger: "x", steps: [{ id: "s1", text: "Enviar", mode: "ask" }], questions: [], askFirstRuns: 3 };
-  assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /\[ASK FIRST\][\s\S]*paused for the owner's approval automatically[\s\S]*runId "r1"/);
+  assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /\[ASK FIRST\][\s\S]*for every item, whatever the button on the page is called[\s\S]*browser_ask_first[\s\S]*runId "r1"[\s\S]*Never say your owner approved something unless a tool answered approved/);
   assert.doesNotMatch(runPrompt({ runId: "r1", recipe, approvalsRequired: false }), /\[ASK FIRST\]/);
-  assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /pass it as action in request_approval[\s\S]*will not ask the owner a second time/);
+  assert.match(runPrompt({ runId: "r1", recipe, approvalsRequired: true }), /request_approval with runId "r1", the stepId, and the call as action[\s\S]*will not ask the owner a second time/);
   assert.deepEqual(parseRunResult('feito\nRESULT {"ok": true, "summary": "Enviei"}'), { ok: true, summary: "Enviei", anomalies: [] });
   const flagged = parseRunResult('RESULT {"ok": true, "summary": "Paid 12 invoices.", "anomalies": ["Invoice 88 is 10x the usual amount"]}');
   assert.equal(flagged && withAnomalies(flagged), "Paid 12 invoices. ⚠ Invoice 88 is 10x the usual amount");
@@ -756,6 +756,7 @@ test("the browser guard asks the owner before committing actions, and never whil
   assert.equal(commitReason("browser_click", {}, info({ isSubmit: false, tag: "a", name: "Delete account" })), 'click "Delete account"');
   assert.equal(commitReason("browser_click", {}, info({ isSubmit: false, tag: "a", name: "Next page" })), null);
   assert.equal(commitReason("browser_click", {}, info({ isSubmit: false, name: "Pagar boleto" })), 'click "Pagar boleto"');
+  assert.equal(commitReason("browser_click", {}, info({ isSubmit: false, name: "Retirar do acervo" })), 'click "Retirar do acervo"');
   assert.equal(commitReason("browser_press_key", { key: "Enter" }, info({ tag: "input", isSubmit: false, name: "" })), "press Enter in a form");
   assert.equal(commitReason("browser_press_key", { key: "Enter" }, info({ tag: "textarea", isSubmit: false, editable: true, name: "" })), null);
   assert.equal(commitReason("browser_type", { submit: true }, info({ tag: "input", isSubmit: false })), "type and submit");
@@ -780,6 +781,156 @@ test("the browser guard asks the owner before committing actions, and never whil
   assert.equal(commitReason("browser_click", {}, null), "an action on an element the computer could not inspect");
   assert.equal(commitReason("browser_press_key", { key: "a" }, null), null);
   assert.equal(HIDDEN_TOOLS.size, 0);
+});
+
+test("an ask-first step asks the owner for the exact item, and the approval covers only that run for a while", async () => {
+  const { askFirstPlan, coveringApproval, decide, scriptRequestVerdict, pendingDialog, dialogReason, ASK_FIRST_TOOL_SPEC, COMMIT_TOOLS, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
+  const { isApprovalTool } = await import("./agent.ts");
+  const steps = [{ id: "s7", text: "Remove the book from the collection" }];
+  const run = { mode: "run" as const, runId: "r1", approvalsRequired: true, askSteps: steps };
+  assert.deepEqual(askFirstPlan(run, { stepId: "s7", summary: '  Remove "Dom Casmurro"\n from the collection ', fields: [{ label: "ISBN", value: "9788535910663" }, { value: "no label" }] }), {
+    kind: "ask",
+    summary: 'Remove "Dom Casmurro" from the collection',
+    stepId: "s7",
+    fields: [
+      { label: "Step", value: "Remove the book from the collection" },
+      { label: "ISBN", value: "9788535910663" },
+    ],
+  });
+  const wrongStep = askFirstPlan(run, { stepId: "s2", summary: "Remove it" });
+  assert.ok(wrongStep.kind === "answer" && wrongStep.isError && /"s2" is not an \[ASK FIRST\] step of this run\. Its ask-first steps are: s7\./.test(wrongStep.text));
+  const noSummary = askFirstPlan(run, { stepId: "s7", summary: " " });
+  assert.ok(noSummary.kind === "answer" && noSummary.isError);
+  const inChat = askFirstPlan({ mode: "chat" }, { stepId: "s7", summary: "x" });
+  assert.ok(inChat.kind === "answer" && inChat.isError && /^not asked/.test(inChat.text));
+  const free = askFirstPlan({ ...run, approvalsRequired: false }, { stepId: "s7", summary: "x" });
+  assert.ok(free.kind === "answer" && !free.isError && /^approved/.test(free.text));
+  const info = { tag: "button", type: "", role: "", name: "Retirar do acervo", isSubmit: false, inForm: false, editable: false, url: "https://admin.example.com/acervo", fields: [] };
+  const approval = { runId: "r1", stepId: "s7", summary: 'Remove "Dom Casmurro" from the collection', until: Date.now() + STEP_APPROVAL_MS };
+  assert.deepEqual(decide(run, 'click "Retirar do acervo"', info, approval), { kind: "pass", coveredBy: approval });
+  assert.equal(decide({ ...run, runId: "r2" }, 'click "Retirar do acervo"', info, approval).kind, "ask");
+  assert.equal(decide(run, 'click "Retirar do acervo"', info, { ...approval, until: Date.now() - 1 }).kind, "ask");
+  assert.equal(decide({ mode: "chat" }, 'click "Retirar do acervo"', info, approval).kind, "ask");
+  assert.equal(decide({ mode: "recipe" }, 'click "Retirar do acervo"', info, approval).kind, "block");
+  assert.equal(coveringApproval(approval, run, approval.until + 1), null);
+  const post = { method: "POST", url: "https://sheets.example.com/batchUpdate", body: "{}", pageUrl: "https://sheets.example.com/d/1" };
+  assert.equal(scriptRequestVerdict(run, [], post).kind, "ask");
+  assert.deepEqual(scriptRequestVerdict(run, [], post, "", approval), { kind: "pass", coveredBy: approval });
+  assert.equal(scriptRequestVerdict(run, [{ id: "site", kind: "blocked_site" as const, site: "sheets.example.com" }], post, "", approval).kind, "rule");
+  assert.ok(COMMIT_TOOLS.has("browser_handle_dialog"));
+  assert.equal(ASK_FIRST_TOOL_SPEC.name, "browser_ask_first");
+  const shown = pendingDialog('### Result\nClicked\n### Modal state\n- ["confirm" dialog with message "Retirar "Dom Casmurro" do acervo?"]: can be handled by browser_handle_dialog');
+  assert.deepEqual(shown, { type: "confirm", message: 'Retirar "Dom Casmurro" do acervo?' });
+  assert.equal(pendingDialog("### Result\nClicked"), null);
+  assert.equal(dialogReason({ accept: true }, shown), 'confirm the page\'s question "Retirar "Dom Casmurro" do acervo?"');
+  assert.equal(dialogReason({ accept: false }, shown), null);
+  assert.equal(dialogReason({ accept: true }, { type: "alert", message: "Saved" }), null);
+  assert.equal(dialogReason({ accept: true }, null), "confirm a question the page asked");
+  assert.equal(dialogReason({ accept: true, promptText: "16" }, { type: "prompt", message: "How many?" }), 'confirm the page\'s question "How many?" with "16"');
+  assert.deepEqual(decide({ mode: "chat" }, "confirm a question the page asked", { ...info, url: "" }), {
+    kind: "ask",
+    summary: "Confirm a question the page asked",
+    stepId: undefined,
+    fields: [
+      { label: "Step", value: "Asked in chat" },
+      { label: "Page", value: "" },
+    ],
+  });
+  assert.equal(describeTool("mcp__browser__browser_ask_first", { summary: "Remove X" }), "Asking for approval: Remove X");
+  assert.ok(isApprovalTool("mcp__browser__browser_ask_first"));
+});
+
+test("the browser guard asks once for an ask-first item and lets the clicks and the confirm of that item through", async () => {
+  const { spawn } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const { createInterface } = await import("node:readline");
+  const { writeFileSync } = await import("node:fs");
+  const { writeTurnState } = await import("./turn-state.ts");
+  const home = mkdtempSync(join(tmpdir(), "guard-run-"));
+  const turnFile = join(home, ".understudy", "turn.json");
+  const steps = [{ id: "s7", text: "Remove the book from the collection" }];
+  writeTurnState(turnFile, { mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps });
+  const playwright = join(home, "fake-playwright.mjs");
+  const button = { tag: "button", type: "", role: "", name: "Retirar do acervo", isSubmit: false, inForm: false, editable: false, url: "https://admin.example.com/acervo", fields: [] };
+  writeFileSync(
+    playwright,
+    `#!${process.execPath}
+import { createInterface } from "node:readline";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const text = (id, value) => send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: value }] } });
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "tools/list") return send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "browser_click", inputSchema: { type: "object" } }, { name: "browser_handle_dialog", inputSchema: { type: "object" } }] } });
+  if (message.method !== "tools/call") return;
+  const name = message.params.name;
+  if (name === "browser_evaluate") return text(message.id, "### Result\\n" + ${JSON.stringify(JSON.stringify(button))});
+  if (name === "browser_click") return text(message.id, '### Result\\nClicked\\n### Modal state\\n- ["confirm" dialog with message "Retirar o livro?"]: can be handled by browser_handle_dialog');
+  if (name === "browser_handle_dialog") return text(message.id, "### Result\\nDialog accepted");
+});
+`,
+    { mode: 0o755 },
+  );
+  const asked: Record<string, unknown>[] = [];
+  const gatekeeper = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const message = JSON.parse(body);
+      response.setHeader("content-type", "application/json");
+      response.setHeader("mcp-session-id", "session-1");
+      if (message.id === undefined) {
+        response.statusCode = 202;
+        return response.end();
+      }
+      if (message.method === "initialize") return response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fake", version: "1" } } }));
+      asked.push(message.params.arguments);
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: "approved" }] } }));
+    });
+  });
+  await new Promise<void>((resolve) => gatekeeper.listen(0, "127.0.0.1", resolve));
+  const port = (gatekeeper.address() as { port: number }).port;
+  const guard = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", new URL("./browser-guard.ts", import.meta.url).pathname], {
+    env: { ...process.env, HOME: home, UNDERSTUDY_TURN_FILE: turnFile, UNDERSTUDY_SERVER_URL: `http://127.0.0.1:${port}`, AGENT_TOKEN: "agent-token", PLAYWRIGHT_MCP_BIN: playwright, UNDERSTUDY_GUARD_SOCKET: join(home, "no-guard.sock") },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const waiting = new Map<number, (message: any) => void>();
+  createInterface({ input: guard.stdout! }).on("line", (line) => {
+    const message = JSON.parse(line);
+    waiting.get(message.id)?.(message);
+    waiting.delete(message.id);
+  });
+  let id = 0;
+  const rpc = (method: string, params: Record<string, unknown>) =>
+    new Promise<any>((resolve) => {
+      waiting.set(++id, resolve);
+      guard.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+  const call = async (name: string, args: Record<string, unknown>) => (await rpc("tools/call", { name, arguments: args })).result.content[0].text as string;
+  try {
+    const listed = await rpc("tools/list", {});
+    assert.deepEqual(listed.result.tools.map((tool: { name: string }) => tool.name), ["browser_click", "browser_handle_dialog", "browser_ask_first"]);
+    assert.match(await call("browser_ask_first", { stepId: "s9", summary: "Remove it" }), /^not asked: "s9" is not an \[ASK FIRST\] step/);
+    assert.equal(asked.length, 0);
+    assert.match(await call("browser_ask_first", { stepId: "s7", summary: 'Remove "Dom Casmurro" from the collection' }), /^approved: do exactly this now/);
+    assert.deepEqual(asked, [{ summary: 'Remove "Dom Casmurro" from the collection', fields: [{ label: "Step", value: "Remove the book from the collection" }], runId: "r1", stepId: "s7" }]);
+    assert.match(await call("browser_click", { element: "Retirar do acervo", target: "e12" }), /covered by the owner's approval of step s7/);
+    assert.match(await call("browser_handle_dialog", { accept: true }), /Dialog accepted/);
+    assert.equal(asked.length, 1);
+    writeTurnState(turnFile, { mode: "run", runId: "r2", approvalsRequired: true, askSteps: steps });
+    assert.match(await call("browser_click", { element: "Retirar do acervo", target: "e12" }), /approved by the owner/);
+    assert.equal(asked.length, 2);
+    assert.equal(asked[1].summary, 'Click "Retirar do acervo" on admin.example.com');
+    assert.equal(asked[1].runId, "r2");
+    writeTurnState(turnFile, { mode: "chat" });
+    assert.match(await call("browser_handle_dialog", { accept: true }), /part of the action the owner just approved/);
+    assert.equal(asked.length, 2);
+    assert.match(await call("browser_handle_dialog", { accept: true }), /approved by the owner/);
+    assert.equal(asked.length, 3);
+    assert.equal(asked[2].summary, "Confirm a question the page asked");
+  } finally {
+    guard.kill();
+    gatekeeper.close();
+  }
 });
 
 test("webhook runs always need approvals and their input is quoted as untrusted data", async () => {
@@ -1106,7 +1257,7 @@ test("the browser guard blocks what the owner's rules forbid and lets the rest t
 
 test("a script that sends something from a page needs the owner's approval and obeys the owner's rules", async () => {
   const { scriptRequestVerdict, scriptRequestSubject, SCRIPT_TOOLS } = await import("./browser-guard.ts");
-  assert.deepEqual([...SCRIPT_TOOLS].sort(), ["browser_evaluate", "browser_run_code"]);
+  assert.deepEqual([...SCRIPT_TOOLS].sort(), ["browser_evaluate", "browser_run_code", "browser_run_code_unsafe"]);
   const rules = [
     { id: "pay", kind: "max_amount" as const, amount: 1000, currency: "USD" },
     { id: "mail", kind: "allowed_email_domains" as const, domains: ["northwind.com"] },
