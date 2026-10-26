@@ -224,3 +224,31 @@ test("jobs reach only the owner, also on a later visit, and only the owner can s
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(toComputer.filter((m) => (m as { type: string }).type === "job_stop"), [{ type: "job_stop", jobId: "job_1" }]);
 });
+
+test("a slow screen gets fewer frames and its chat never waits behind them", { skip }, async () => {
+  const { Hub } = await import("./hub");
+  const { handleComputerMessage } = await import("./hub/computer-handlers");
+  const { EventEmitter } = await import("node:events");
+  const hub = new Hub();
+  hub.sendToComputer = (() => true) as typeof hub.sendToComputer;
+  const socket = (bufferedAmount = 0) => {
+    const ws = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, bufferedAmount, received: [] as { type: string; url?: string }[], send(raw: string) { ws.received.push(JSON.parse(raw)); }, ping() {}, close() {} });
+    return ws;
+  };
+  const confirming = socket();
+  const stuck = socket(1024 * 1024);
+  await hub.attachViewer(confirming as never, ids.agentA, ids.owner, "owner", true);
+  await hub.attachViewer(stuck as never, ids.agentA, ids.owner, "owner");
+  const frame = (n: number) => handleComputerMessage(hub, ids.agentA, { type: "frame", jpegBase64: "AAAA", width: 10, height: 10, url: `https://example.test/${n}` } as never);
+  for (let n = 1; n <= 5; n++) await frame(n);
+  await hub.addMessage(ids.agentA, "agent", "on my way");
+  const frames = (ws: ReturnType<typeof socket>) => ws.received.filter((m) => m.type === "frame").map((m) => m.url);
+  assert.deepEqual(frames(confirming), ["https://example.test/1", "https://example.test/2"]);
+  assert.deepEqual(frames(stuck), []);
+  assert.ok(confirming.received.some((m) => m.type === "chat"));
+  assert.ok(stuck.received.some((m) => m.type === "chat"));
+  confirming.emit("message", Buffer.from(JSON.stringify({ type: "frame_ack" })));
+  assert.deepEqual(frames(confirming).at(-1), "https://example.test/5");
+  confirming.emit("message", Buffer.from(JSON.stringify({ type: "frame_ack" })));
+  assert.equal(frames(confirming).length, 3);
+});

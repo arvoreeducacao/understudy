@@ -112,6 +112,8 @@ export type ViewerToServer =
   | { type: "credential_delete"; name: string }
   | { type: "stop" };
 
+export type ViewerFrameAck = { type: "frame_ack" };
+
 export type RoomEntry = {
   id: string;
   author: "owner" | "person" | "agent" | "system";
