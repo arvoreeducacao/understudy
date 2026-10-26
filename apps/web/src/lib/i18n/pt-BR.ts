@@ -459,7 +459,7 @@ export const ptBR: Messages = {
       huggingface: "Encontra modelos de IA, bases de dados e demos no Hugging Face.",
       gmail: "Busca e lê seus e-mails, escreve rascunhos e só envia depois que você aprova cada mensagem.",
       hubspot: "Lê e atualiza contatos, empresas e negócios do seu CRM.",
-      slack: "Manda mensagens pelo seu perfil só depois que você aprova cada uma, e lê canais públicos. Não lê suas DMs nem canais privados.",
+      slack: "Manda mensagens pelo seu perfil, pedindo aprovação antes de cada uma, a menos que você deixe ele postar sozinho, e lê canais públicos. Não lê suas DMs nem canais privados.",
       mslearn: "Pesquisa na documentação oficial da Microsoft.",
       "cloudflare-docs": "Pesquisa na documentação oficial da Cloudflare.",
     } as Record<string, string>,
@@ -619,6 +619,10 @@ export const ptBR: Messages = {
     slackOff: "Desligado",
     slackAsItself: "Com nome e cara próprios",
     slackAsYou: "Como você, pelo seu perfil do Slack",
+    slackProfileModeHint: {
+      ask: "Ele manda mensagens, respostas e DMs em seu nome só depois que você aprova a mensagem exata.",
+      free: "Ele manda mensagens, respostas e DMs em seu nome sozinho. Um texto que ele lê, como um canal público, pode tentar mudar o que ele diz como você. As suas regras continuam valendo e toda mensagem fica registrada.",
+    },
     slackModeHint: {
       ask: "Ele acha canais, lê os que participa, e posta, responde, manda mensagem para qualquer pessoa ou compartilha arquivos depois que você aprova a mensagem exata.",
       free: "Ele posta, responde, manda mensagem para qualquer pessoa e compartilha arquivos sozinho, com nome e cara próprios. As suas regras continuam valendo e toda mensagem fica registrada.",
@@ -712,7 +716,7 @@ export const ptBR: Messages = {
     title: (name: string) => `Prepare ${name}`,
     notifySummary: "Manda mensagem para você",
     slackSummary: (mode: string) => `Slack: ${mode.toLowerCase()}`,
-    slackAsYouSummary: "Slack como você",
+    slackAsYouSummary: (mode: string) => `Slack como você: ${mode.toLowerCase()}`,
     connectorsSummary: (n: number) => (n === 0 ? "Nenhum conector" : n === 1 ? "1 conector" : `${n} conectores`),
     rulesSummary: (n: number) => (n === 0 ? "Nenhuma regra ainda" : n === 1 ? "1 regra" : `${n} regras`),
     shareSummary: (n: number) => (n === 0 ? "Só você" : n === 1 ? "Compartilhado com 1 pessoa" : `Compartilhado com ${n} pessoas`),
