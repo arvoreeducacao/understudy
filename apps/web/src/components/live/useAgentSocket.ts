@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Brain, AgentState, FileEntry, JobInfo, MemoryFile, RecordedEvent, Recipe } from "@understudy/protocol";
 import type { BrainStatus, CredentialInfo } from "@/lib/db/schema";
-import type { ApprovalView, ChatEntry, ProposalView, ServerToViewer, ViewerToServer } from "@/server/hub-types";
+import type { ApprovalView, ChatEntry, ProposalView, ServerToViewer, ViewerFrameAck, ViewerToServer } from "@/server/hub-types";
 
 export type Frame = { jpegBase64: string; width: number; height: number; url: string; desktop?: boolean };
 
@@ -91,7 +91,7 @@ export function useAgentSocket(agentId: string, initial: Initial, handlers: Hand
 
     function connect() {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${window.location.host}/api/ws/viewer?agent=${encodeURIComponent(agentId)}`);
+      const ws = new WebSocket(`${proto}://${window.location.host}/api/ws/viewer?agent=${encodeURIComponent(agentId)}&frames=ack`);
       wsRef.current = ws;
       ws.onopen = () => {
         retry = 0;
@@ -134,6 +134,7 @@ export function useAgentSocket(agentId: string, initial: Initial, handlers: Hand
             }));
             return;
           case "frame":
+            ws.send(JSON.stringify({ type: "frame_ack" } satisfies ViewerFrameAck));
             pushFrame(message);
             setLive((s) => (s.url === message.url ? s : { ...s, url: message.url }));
             return;

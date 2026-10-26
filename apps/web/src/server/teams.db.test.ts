@@ -171,7 +171,7 @@ test("what reaches a team agent outside a member's turn is not kept private to t
   assert.ok((await store.bringAgent(ids.penny, ids.tiago, teamId, true)).ok);
   const hub = new Hub();
   const viewer = () => {
-    const ws = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, received: [] as { type: string }[], send(raw: string) { ws.received.push(JSON.parse(raw)); }, ping() {}, close() {} });
+    const ws = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, bufferedAmount: 0, received: [] as { type: string }[], send(raw: string) { ws.received.push(JSON.parse(raw)); }, ping() {}, close() {} });
     return ws;
   };
   const [tiagoWs, rafaelWs, marinaWs] = [viewer(), viewer(), viewer()];

@@ -1,8 +1,9 @@
 import type { WebSocket } from "ws";
+import type { FrameCredit } from "./frame-credit";
 
 export type Frame = { jpegBase64: string; width: number; height: number; url: string; desktop?: boolean };
 
-export type Viewer = { ws: WebSocket; userId: string; owner: boolean; chat: boolean };
+export type Viewer = { ws: WebSocket; userId: string; owner: boolean; chat: boolean; frames: FrameCredit };
 
 export type HostConn = { ws: WebSocket; hostId: string; capacity: number; running: Set<string> };
 

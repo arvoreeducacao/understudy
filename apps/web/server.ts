@@ -239,7 +239,7 @@ async function main() {
         const access = await agentAccess(user.id, agentId);
         if (!access) return refuse(socket, 403, "Forbidden");
         return accept(req, socket, head, (ws) => {
-          hub.attachViewer(ws, agentId, user.id, access).catch((error) => console.error("attach_viewer_error", error));
+          hub.attachViewer(ws, agentId, user.id, access, url.searchParams.get("frames") === "ack").catch((error) => console.error("attach_viewer_error", error));
         });
       }
       if (url.pathname === ROOM_SOCKET) {

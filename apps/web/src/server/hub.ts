@@ -14,12 +14,13 @@ import { InboundQueue, type DeliverOptions } from "./hub/inbound-queue";
 import { Proposals } from "./hub/proposals";
 import { Recordings } from "./hub/recordings";
 import { Rooms } from "./hub/rooms";
+import { frameAcked, frameCredit, takeFrameSlot } from "./hub/frame-credit";
 import { Runs } from "./hub/runs";
 import { log, send, type Frame, type HostConn, type Viewer } from "./hub/shared";
 import { TurnLedger } from "./hub/turn-ledger";
 import { ownerAudience } from "./teams-store";
 import { handleViewerMessage } from "./hub/viewer-handlers";
-import type { ChatEntry, ServerToViewer, ViewerToServer } from "./hub-types";
+import type { ChatEntry, ServerToViewer, ViewerFrameAck, ViewerToServer } from "./hub-types";
 import { computerLimit, RateLimiter } from "./rate-limit";
 import { Watcher } from "./watcher";
 import { flushStale } from "./channels/relay";
@@ -159,7 +160,13 @@ export class Hub {
     const set = this.viewers.get(agentId);
     if (!set) return;
     const payload = JSON.stringify(message);
-    for (const v of set) if (v.ws.readyState === v.ws.OPEN && this.seesScreen(agentId, v)) v.ws.send(payload);
+    for (const v of set) if (v.ws.readyState === v.ws.OPEN && this.seesScreen(agentId, v) && takeFrameSlot(v.frames, v.ws.bufferedAmount)) v.ws.send(payload);
+  }
+
+  private onFrameAck(agentId: string, viewer: Viewer) {
+    if (!frameAcked(viewer.frames) || !this.seesScreen(agentId, viewer)) return;
+    const frame = this.lastFrames.get(agentId);
+    if (frame && takeFrameSlot(viewer.frames, viewer.ws.bufferedAmount)) send(viewer.ws, { type: "frame", ...frame } satisfies ServerToViewer);
   }
 
   broadcastCard(agentId: string, message: ServerToViewer, audienceId: string | null) {
@@ -351,8 +358,8 @@ export class Hub {
     this.rooms.presenceChanged(agentId).catch((error) => log("room_presence_error", { agentId, error: String(error) }));
   }
 
-  async attachViewer(ws: WebSocket, agentId: string, userId: string, access: Access = "owner") {
-    const viewer: Viewer = { ws, userId, owner: canManage(access), chat: canChat(access) };
+  async attachViewer(ws: WebSocket, agentId: string, userId: string, access: Access = "owner", acksFrames = false) {
+    const viewer: Viewer = { ws, userId, owner: canManage(access), chat: canChat(access), frames: frameCredit(acksFrames) };
     const set = this.viewers.get(agentId) ?? new Set<Viewer>();
     set.add(viewer);
     this.viewers.set(agentId, set);
@@ -361,12 +368,13 @@ export class Hub {
     const offline = () => refuse(copy.live.computerOffline);
 
     ws.on("message", (raw) => {
-      let message: ViewerToServer;
+      let message: ViewerToServer | ViewerFrameAck;
       try {
         message = JSON.parse(raw.toString());
       } catch {
         return;
       }
+      if (message?.type === "frame_ack") return this.onFrameAck(agentId, viewer);
       if (typeof message?.type !== "string" || !(viewer.owner || (viewer.chat && message.type === "chat"))) return;
       Promise.resolve(handleViewerMessage({ hub: this, agentId, userId, offline, refuse }, message)).catch((error) =>
         log("viewer_message_error", { agentId, type: message.type, error: String(error) }),
