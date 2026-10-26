@@ -1675,6 +1675,8 @@ export const ptBR: Messages = {
     approvalSummary: (connector: string, tool: string) => `Usar ${tool} no ${connector}`,
     approveAlways: "Aprovar e sempre permitir",
     approveAlwaysHint: (tool: string) => `Aprova esta chamada e deixa ${tool} rodar sem perguntar daqui em diante. Dá para mudar nas configurações do understudy.`,
+    showActions: (n: number) => (n === 1 ? "Ver 1 ação" : `Ver ${n} ações`),
+    hideActions: "Esconder ações",
     counts: (allow: number, ask: number, never: number) => `${allow} liberadas · ${ask} perguntam antes · ${never} desligadas`,
     allowReadOnly: "Liberar todas as de leitura",
     askForRest: "Perguntar nas demais",
