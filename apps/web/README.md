@@ -60,6 +60,7 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `UNDERSTUDY_BRIEFING_CRON` | When the daily Slack briefing goes out, default `0 8 * * 1-5`; `off` disables it |
 | `SLACK_BOT_TOKEN` | Optional. Enables approval DMs (`users.lookupByEmail`, `chat.postMessage`) and the `slack_post` tool |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional Google sign-in |
+| `SLACK_CONNECTOR_CLIENT_ID`, `SLACK_CONNECTOR_CLIENT_SECRET` | Optional. The Slack app the Slack connector signs in with, so nobody pastes a client and each person only approves on Slack |
 | `UNDERSTUDY_SMTP_URL` | Optional. Outgoing email as an SMTP URL (`smtps://user:password@host:465`); turns on "Forgot your password?". `json` builds messages without sending them (development) |
 | `UNDERSTUDY_MAIL_FROM` | Optional sender, like `Understudy <no-reply@example.com>`; defaults to no-reply at the panel's host |
 | `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` | Optional. Email domains (comma separated) that must sign in with Google: password sign-in, sign-up and admin-created password accounts are refused for them. Ignored unless Google sign-in is set |

@@ -10,6 +10,7 @@ import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
 import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath, storedClient } from "@/server/connector-oauth";
 import { featuredFor } from "@/lib/connector-showcase";
+import { presetClientFor } from "@/server/connector-clients";
 import { requireUser } from "@/lib/session";
 import { accessChangeAllowed, canManageConnector, canUseConnector, startingAccess } from "@/server/connector-rights";
 
@@ -49,7 +50,7 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     oauthClient: null,
   };
   const featured = featuredFor(url);
-  if (featured?.signIn && !headerValue) return { ok: false, message: "", signIn: { needsClient: featured.signIn.needsClient, returnAddress: oauthCallbackUrl() } };
+  if (featured?.signIn && !headerValue) return { ok: false, message: "", signIn: { needsClient: featured.signIn.needsClient && !presetClientFor(url), returnAddress: oauthCallbackUrl() } };
   const test = await testConnection(row);
   if (!test.ok && test.problem === "unauthorized" && !headerValue) {
     const support = await oauthSupport(url);
@@ -111,8 +112,9 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
   const user = await requireUser();
   const name = String(form.get("name") ?? "").trim().slice(0, 60);
   const url = String(form.get("url") ?? "").trim();
-  const clientId = String(form.get("clientId") ?? "").trim().slice(0, 500);
-  const clientSecret = String(form.get("clientSecret") ?? "").trim().slice(0, 2000);
+  const preset = presetClientFor(url);
+  const clientId = preset?.clientId ?? String(form.get("clientId") ?? "").trim().slice(0, 500);
+  const clientSecret = preset?.clientSecret ?? String(form.get("clientSecret") ?? "").trim().slice(0, 2000);
   if (!name || !/^https:\/\//i.test(url)) return { ok: false, message: messages.admin.serverBadInput };
   const db = getDb();
   let slug = slugify(name);
@@ -138,7 +140,7 @@ export async function startConnectorSignIn(_: SignInState, form: FormData): Prom
   } catch (error) {
     console.error(JSON.stringify({ event: "connector_sign_in_failed", url, error: String(error) }));
     await db.delete(schema.mcpServers).where(eq(schema.mcpServers.id, row.id));
-    return { ok: false, message: clientId ? messages.admin.signInRefusedClient : messages.admin.signInFailed };
+    return { ok: false, message: clientId && !preset ? messages.admin.signInRefusedClient : messages.admin.signInFailed };
   }
 }
 

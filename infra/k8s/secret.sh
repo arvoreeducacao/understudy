@@ -36,6 +36,8 @@ auth_secret=$(existing BETTER_AUTH_SECRET); [ -n "$auth_secret" ] || auth_secret
 host_token=$(existing UNDERSTUDY_HOST_TOKEN); [ -n "$host_token" ] || host_token=$(random_token)
 admin_emails="${ADMIN_EMAILS:-$(existing UNDERSTUDY_ADMIN_EMAILS)}"
 slack_token="${SLACK_BOT_TOKEN:-$(existing SLACK_BOT_TOKEN)}"
+slack_connector_client_id="${SLACK_CONNECTOR_CLIENT_ID:-$(existing SLACK_CONNECTOR_CLIENT_ID)}"
+slack_connector_client_secret="${SLACK_CONNECTOR_CLIENT_SECRET:-$(existing SLACK_CONNECTOR_CLIENT_SECRET)}"
 
 kubectl -n "$K8S_NAMESPACE" create secret generic "$secret" \
   --from-literal=DATABASE_URL="$database_url" \
@@ -46,6 +48,8 @@ kubectl -n "$K8S_NAMESPACE" create secret generic "$secret" \
   --from-literal=UNDERSTUDY_ALLOWED_EMAIL_DOMAIN="$ALLOWED_EMAIL_DOMAIN" \
   --from-literal=UNDERSTUDY_ADMIN_EMAILS="$admin_emails" \
   --from-literal=SLACK_BOT_TOKEN="$slack_token" \
+  --from-literal=SLACK_CONNECTOR_CLIENT_ID="$slack_connector_client_id" \
+  --from-literal=SLACK_CONNECTOR_CLIENT_SECRET="$slack_connector_client_secret" \
   --from-literal=UNDERSTUDY_TIMEZONE="${TIMEZONE:-UTC}" \
   --from-literal=UNDERSTUDY_HOST_IDS="${HOST_IDS:-${HOST_ID:-${NAME_PREFIX}-host-1}}" \
   --from-literal=UNDERSTUDY_BLOCKED_CIDRS="${BLOCKED_CIDRS:-}" \
