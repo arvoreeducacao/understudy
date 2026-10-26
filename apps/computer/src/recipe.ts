@@ -123,7 +123,7 @@ export function runPrompt(input: { runId: string; recipe: Recipe; approvalsRequi
 - With one call to a gatekeeper tool (a Slack message, a post in another system): call request_approval with runId "${input.runId}", the stepId, and the call as action: the tool name and the exact arguments you will call it with, calling wait_for_approval while it says pending. Once approved, call that tool once with exactly those arguments; it will not ask the owner a second time. Any other call, or different arguments, asks again.
 - With call_api: just make the call; it asks your owner by itself.
 - Anything else irreversible outside the browser: call request_approval with runId "${input.runId}" and the stepId first, and wait for the answer.
-If an answer is denied, or a browser action comes back "blocked: needs approval", the owner said no: do not try another way, skip that item and everything that depends on it, and report it. The browser can also ask your owner by itself when you submit or send something outside an approved step. Never say your owner approved something unless a tool answered approved for it.`
+If an answer is denied, expired, still pending or never came back (a cut-off call is not a yes), or a browser action comes back "blocked: needs approval", the owner did not say yes: do not try another way, skip that item and everything that depends on it, and report it. The browser can also ask your owner by itself when you submit or send something outside an approved step. Never say your owner approved something unless a tool answered approved for it.`
     : "The owner allowed this run to go without approvals; still never do anything the recipe does not ask for.";
   const context = !input.context
     ? ""

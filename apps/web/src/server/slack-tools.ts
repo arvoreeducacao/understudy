@@ -13,7 +13,7 @@ export type SlackApi = {
   uploadBytes: (url: string, data: Buffer) => Promise<boolean>;
 };
 
-export type GuardInput = { target: string; summary: string; fields: { label: string; value: string }[]; args: Record<string, unknown>; ask: boolean; extra?: unknown };
+export type GuardInput = { target: string; summary: string; fields: { label: string; value: string }[]; args: Record<string, unknown>; ask: boolean; toOwner?: boolean; extra?: unknown };
 
 export type GuardResult = { ok: true } | { ok: false; text: string };
 
@@ -300,7 +300,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
           { label: "To", value: who.label },
           { label: "Message", value: args.text },
         ];
-        const allowed = await deps.guard({ target: "slack:send_dm", summary: `Slack: message ${who.label}`, fields, args, ask: ask && !who.owner, extra });
+        const allowed = await deps.guard({ target: "slack:send_dm", summary: `Slack: message ${who.label}`, fields, args, ask: ask && !who.owner, toOwner: who.owner, extra });
         if (!allowed.ok) return reply(allowed.text, true);
         const data = await post(who.id, args.text);
         if (!data.ok) return failed("sending", data.error);

@@ -353,6 +353,36 @@ test("an approved action does not cover other arguments, a finished run, a stale
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
 });
 
+test("a task handed over by a teammate asks before a connector call the owner lets go without asking", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const [agent] = await db.select().from(schema.agents).where(eq(schema.agents.id, ids.agent));
+  await db.update(schema.mcpServers).set({ askAll: false }).where(eq(schema.mcpServers.id, ids.server));
+  await db.update(schema.agents).set({ tools: { ...agent.tools, toolPolicy: { [ids.server]: { send: "allow" } } } }).where(eq(schema.agents.id, ids.agent));
+  const runId = "run_gk_handoff";
+  try {
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+    await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "manual", status: "running" });
+    const before = calls.length;
+    assert.equal(await rpc("mail__send", { to: "client@example.com", body: "free" }), "sent to client@example.com");
+    assert.equal(calls.length, before + 1);
+
+    await db.update(schema.runs).set({ trigger: "handoff" }).where(eq(schema.runs.id, runId));
+    const handed = rpc("mail__send", { to: "client@example.com", body: "handed over" });
+    const approval = await pendingApproval();
+    assert.equal(approval.runId, runId);
+    assert.equal(approval.fields.find((f) => f.label === "body")?.value, "handed over");
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await handed, /^not called/);
+    assert.equal(calls.length, before + 1);
+  } finally {
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+    await db.update(schema.agents).set({ tools: agent.tools }).where(eq(schema.agents.id, ids.agent));
+    await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  }
+});
+
 test("while it answers someone other than its owner, only asking for approval and telling the owner are available", { skip }, async () => {
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();

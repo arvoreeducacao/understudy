@@ -203,3 +203,60 @@ test("a task step approved with its exact Slack message sends it to another pers
   assert.equal(posted().length, before + 1);
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
 });
+
+test("a task handed over by a teammate asks before posting on Slack, even when the owner lets it post without asking", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setMode("free");
+  const runId = "run_sk_handoff";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "handoff", status: "running" });
+  const before = posted().length;
+  const denied = call("slack_post_message", { channel: "#general", text: "weekly report" });
+  const approval = await pendingApproval();
+  assert.equal(approval.runId, runId);
+  assert.equal(approval.fields.find((f) => f.label === "Message")?.value, "weekly report");
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  assert.match(await denied, /^not done/);
+  assert.equal(posted().length, before);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
+
+test("an approval request that is cut off, pending or expired is not a yes, even when Slack goes without asking", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setMode("free");
+  const runId = "run_sk_unanswered";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "manual", status: "running" });
+  const message = { channel: "#general", text: "weekly report" };
+  const cutOff = new AbortController();
+  const asked = fetch(`${panelUrl}/api/mcp`, {
+    method: "POST",
+    signal: cutOff.signal,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "request_approval", arguments: { summary: "Post the report", runId, stepId: "s4", action: { tool: "slack_post_message", args: message } } } }),
+  }).then((res) => res.text());
+  const request = await pendingApproval();
+  cutOff.abort();
+  await asked.catch(() => undefined);
+
+  const before = posted().length;
+  const refused = await call("slack_post_message", message);
+  assert.match(refused, /^not done: you asked your owner to approve this in this run and they have not \(no answer yet\)/);
+  assert.equal(posted().length, before);
+
+  await db.update(schema.approvals).set({ status: "expired", answeredAt: new Date() }).where(eq(schema.approvals.id, request.id));
+  assert.match(await call("slack_post_message", { ...message, text: "weekly report, again" }), /they have not \(expired\)/);
+  assert.equal(posted().length, before);
+
+  await db.update(schema.approvals).set({ status: "approved", answeredAt: new Date() }).where(eq(schema.approvals.id, request.id));
+  assert.match(await call("slack_post_message", message), /"posted":true/);
+  assert.equal(posted().length, before + 1);
+
+  await db.update(schema.runs).set({ status: "ok", finishedAt: new Date() }).where(eq(schema.runs.id, runId));
+  await db.update(schema.approvals).set({ status: "denied" }).where(eq(schema.approvals.id, request.id));
+  assert.match(await call("slack_post_message", { channel: "#general", text: "a chat post after the run" }), /"posted":true/);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
