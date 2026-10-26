@@ -83,6 +83,7 @@ export type AgentTools = {
   slack: boolean;
   slackChannels: string[];
   slackMode?: "off" | "ask" | "free";
+  slackProfileMode?: "ask" | "free";
   servers?: string[];
   askTools?: string[];
   toolPolicy?: ToolPolicy;

@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useState, type ReactNode } from "react";
 import type { Brain } from "@understudy/protocol";
 import { createAgent } from "@/app/actions/agents";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
-import { recordedHints, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { isReadOnly, recordedHints, withChoice, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { slackProfileMode, type SlackProfileMode } from "@/lib/slack-profile";
 import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -111,7 +112,21 @@ function useConnectorChoices(servers: ServerOption[], initial: AgentTools): Conn
   return { on, toggle, policy, setServerPolicy, seen };
 }
 
-function ServerCard({ server, choices, toolHints, label }: { server: ServerOption; choices: ConnectorChoices; toolHints: AgentTools["toolHints"]; label?: string }) {
+function ServerCard({
+  server,
+  choices,
+  toolHints,
+  label,
+  ceiling,
+  children,
+}: {
+  server: ServerOption;
+  choices: ConnectorChoices;
+  toolHints: AgentTools["toolHints"];
+  label?: string;
+  ceiling?: ConnectorCeiling;
+  children?: ReactNode;
+}) {
   const enabled = choices.on.has(server.id);
   return (
     <div className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-2.5">
@@ -126,18 +141,49 @@ function ServerCard({ server, choices, toolHints, label }: { server: ServerOptio
       />
       {server.signIn && !server.signIn.signedIn && <ConnectorSignIn id={server.id} returnTo={here()} label={messages.admin.signInGo(server.name)} />}
       {server.signIn?.signedIn && <div className="fld-hint">{t.serverSignedInAsYou(server.name)}</div>}
+      {children}
       {enabled && server.tools && server.tools.length > 0 && (
         <ToolPermissions
           serverId={server.id}
           serverName={server.name}
           tools={server.tools}
-          ceiling={server.ceiling}
+          ceiling={ceiling ?? server.ceiling}
           seen={toolHints}
           policy={choices.policy[server.id] ?? {}}
           onChange={(next) => choices.setServerPolicy(server.id, next)}
         />
       )}
     </div>
+  );
+}
+
+function SlackProfileCard({ server, choices, initial }: { server: ServerOption; choices: ConnectorChoices; initial: AgentTools }) {
+  const [mode, setMode] = useState<SlackProfileMode>(slackProfileMode(initial));
+  const enabled = choices.on.has(server.id);
+  const pick = (next: SlackProfileMode) => {
+    setMode(next);
+    let policy = choices.policy[server.id] ?? {};
+    for (const tool of server.tools ?? []) if (!isReadOnly(tool.annotations)) policy = withChoice(policy, tool, next === "free" ? "allow" : "ask");
+    choices.setServerPolicy(server.id, policy);
+  };
+  return (
+    <ServerCard server={server} choices={choices} toolHints={initial.toolHints} label={t.slackAsYou} ceiling={{ ...server.ceiling, askWrites: mode === "ask" && server.ceiling.askWrites }}>
+      <input type="hidden" name="slackProfileMode" value={mode} />
+      {enabled && server.tools && server.tools.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Segmented
+            label={t.slackAsYou}
+            options={[
+              { value: "ask", label: t.slackAsk },
+              { value: "free", label: t.slackFree },
+            ]}
+            value={mode}
+            onChange={pick}
+          />
+          <div className={`fld-hint ${mode === "free" ? "!text-amber" : ""}`}>{t.slackProfileModeHint[mode]}</div>
+        </div>
+      )}
+    </ServerCard>
   );
 }
 
@@ -185,7 +231,7 @@ export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLa
         <div className="flex flex-col gap-3">
           <SlackAccess available={slackAvailable} initial={tools} admin={admin} caption={slackProfiles.length > 0 ? t.slackAsItself : undefined} />
           {slackProfiles.map((server) => (
-            <ServerCard key={server.id} server={server} choices={choices} toolHints={tools.toolHints} label={t.slackAsYou} />
+            <SlackProfileCard key={server.id} server={server} choices={choices} initial={tools} />
           ))}
         </div>
       </div>

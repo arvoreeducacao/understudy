@@ -459,7 +459,7 @@ export const en = {
       huggingface: "Finds AI models, datasets and demos on Hugging Face.",
       gmail: "Searches and reads your mail, writes drafts, and sends only after you approve each message.",
       hubspot: "Reads and updates contacts, companies and deals in your CRM.",
-      slack: "Sends messages as you only after you approve each one, and reads public channels. It never reads your DMs or private channels.",
+      slack: "Sends messages as you, asking before each one unless you let it post on its own, and reads public channels. It never reads your DMs or private channels.",
       mslearn: "Searches Microsoft's official documentation.",
       "cloudflare-docs": "Searches Cloudflare's official documentation.",
     } as Record<string, string>,
@@ -619,6 +619,10 @@ export const en = {
     slackOff: "Off",
     slackAsItself: "With its own name and face",
     slackAsYou: "As you, from your own Slack profile",
+    slackProfileModeHint: {
+      ask: "It sends messages, replies and DMs in your name only after you approve the exact message.",
+      free: "It sends messages, replies and DMs in your name on its own. Text it reads, like a public channel, can try to steer what it says as you. Your rules still apply and every message is recorded.",
+    },
     slackModeHint: {
       ask: "It can find channels, read the ones it is in, and post, reply, message anyone or share files after you approve the exact message.",
       free: "It posts, replies, messages anyone and shares files on its own, with its name and face. Your rules still apply and every message is recorded.",
@@ -712,7 +716,7 @@ export const en = {
     title: (name: string) => `Set up ${name}`,
     notifySummary: "Messages you",
     slackSummary: (mode: string) => `Slack: ${mode.toLowerCase()}`,
-    slackAsYouSummary: "Slack as you",
+    slackAsYouSummary: (mode: string) => `Slack as you: ${mode.toLowerCase()}`,
     connectorsSummary: (n: number) => (n === 0 ? "No connectors" : n === 1 ? "1 connector" : `${n} connectors`),
     rulesSummary: (n: number) => (n === 0 ? "No rules yet" : n === 1 ? "1 rule" : `${n} rules`),
     shareSummary: (n: number) => (n === 0 ? "Only you" : n === 1 ? "Shared with 1 person" : `Shared with ${n} people`),

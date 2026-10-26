@@ -1,8 +1,9 @@
-import { featuredFor, type Connector } from "@/lib/connector-showcase";
+import type { Connector } from "@/lib/connector-showcase";
 import { env } from "@/lib/env";
+import { isSlackProfile } from "@/lib/slack-profile";
 
 export function presetClientFor(url: string) {
-  return featuredFor(url)?.id === "slack" ? env.slackConnectorClient : null;
+  return isSlackProfile(url) ? env.slackConnectorClient : null;
 }
 
 export function withPresetClient(connector: Connector): Connector {

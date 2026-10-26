@@ -85,7 +85,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
   const toolsSummary = [
     values.tools.notifyOwner ? t.notifySummary : null,
     data.slackAvailable ? t.slackSummary(slackLabel) : null,
-    chosenServers.some((id) => slackProfiles.has(id)) ? t.slackAsYouSummary : null,
+    chosenServers.some((id) => slackProfiles.has(id)) ? t.slackAsYouSummary(values.tools.slackProfileMode === "free" ? messages.create.slackFree : messages.create.slackAsk) : null,
     t.connectorsSummary(chosenServers.filter((id) => !slackProfiles.has(id)).length),
   ]
     .filter(Boolean)

@@ -8,7 +8,8 @@ import { argsSubject, describeRule, findViolation, formatBytes } from "@understu
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
-import { canAlwaysAllow, effectivePermission, hintsRecordedFor, isDestructive, oneLine, recordedHints, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
+import { canAlwaysAllow, effectivePermission, hintsRecordedFor, isDestructive, isReadOnly, oneLine, recordedHints, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
+import { ceilingForAgent, isSlackProfile } from "@/lib/slack-profile";
 import { brainText } from "@/lib/brain-text";
 import { hashToken, newId } from "@/lib/ids";
 import type { ComputerReply, Hub } from "./hub";
@@ -20,13 +21,14 @@ import { followupTools } from "./followup-tools";
 import { turnRunId, turnUntrusted } from "./followups";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
-import { slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
+import { SLACK_LIMITS, slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
 import { OUTSIDER_TOOLS, outsiderLabel, outsiderTurn } from "./channels/turns";
 import { RateLimiter } from "./rate-limit";
 
 const outsiderLimiter = new RateLimiter();
+const slackProfileLimiter = new RateLimiter();
 
 const APPROVAL_LIFETIME_SECONDS = 24 * 60 * 60;
 const APPROVAL_CALL_CAP_MS = 30 * 60 * 1000;
@@ -272,7 +274,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
 
   const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail) && (!agent.teamId || teamConnector(server)));
   const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
-  const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingOf(upstream, limits.get(upstream.id))]));
+  const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingForAgent(ceilingOf(upstream, limits.get(upstream.id)), upstream.url, agent.tools)]));
   const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
     effectivePermission({
       serverId: upstream.id,
@@ -428,6 +430,9 @@ async function proxyCall(
     return { ...text(`not called: your owner turned off ${upstream.name}'s ${toolName} for you. Do not try another way; tell your owner if you need it.`, true), verdict: "blocked" };
   }
   const needsApproval = permission === "ask";
+  if (!needsApproval && isSlackProfile(upstream.url) && !isReadOnly(tool.annotations) && !slackProfileLimiter.allow(`slack-profile:${agent.ownerId}:write`, SLACK_LIMITS.writesPerHour / 3600, SLACK_LIMITS.writeBurst)) {
+    return { ...text(`not called: you already did ${SLACK_LIMITS.writeBurst} Slack actions as your owner in a short time; wait a few minutes, or tell your owner if the work needs more.`, true), verdict: "blocked" };
+  }
   const shown = needsApproval ? connectorApprovalFields(upstream.name, tool, args) : { fields: [] };
   if ("error" in shown) {
     return { ...text(`not called: calls that need approval need ${shown.error}, so the owner sees exactly what will run`, true), verdict: "denied" };
