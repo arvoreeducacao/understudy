@@ -10,7 +10,7 @@ import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
 import { isReadOnly, recordedHints, withChoice, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
-import { slackProfileMode, type SlackProfileMode } from "@/lib/slack-profile";
+import { slackPosting, slackProfileMode, type SlackProfileMode } from "@/lib/slack-profile";
 import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -158,16 +158,15 @@ function ServerCard({
 }
 
 function SlackProfileCard({ server, choices, initial }: { server: ServerOption; choices: ConnectorChoices; initial: AgentTools }) {
-  const [mode, setMode] = useState<SlackProfileMode>(slackProfileMode(initial));
+  const { mode, shown } = slackPosting(server.tools, choices.policy[server.id], slackProfileMode(initial));
   const enabled = choices.on.has(server.id);
   const pick = (next: SlackProfileMode) => {
-    setMode(next);
     let policy = choices.policy[server.id] ?? {};
     for (const tool of server.tools ?? []) if (!isReadOnly(tool.annotations)) policy = withChoice(policy, tool, next === "free" ? "allow" : "ask");
     choices.setServerPolicy(server.id, policy);
   };
   return (
-    <ServerCard server={server} choices={choices} toolHints={initial.toolHints} label={t.slackAsYou} ceiling={{ ...server.ceiling, askWrites: mode === "ask" && server.ceiling.askWrites }}>
+    <ServerCard server={server} choices={choices} toolHints={initial.toolHints} label={t.slackAsYou} ceiling={{ ...server.ceiling, askWrites: false }}>
       <input type="hidden" name="slackProfileMode" value={mode} />
       {enabled && server.tools && server.tools.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -177,7 +176,7 @@ function SlackProfileCard({ server, choices, initial }: { server: ServerOption; 
               { value: "ask", label: t.slackAsk },
               { value: "free", label: t.slackFree },
             ]}
-            value={mode}
+            value={shown}
             onChange={pick}
           />
           <div className={`fld-hint ${mode === "free" ? "!text-amber" : ""}`}>{t.slackProfileModeHint[mode]}</div>

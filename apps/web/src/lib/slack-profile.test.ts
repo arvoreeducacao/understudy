@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ceilingForAgent, isSlackProfile, slackProfileMode } from "./slack-profile";
+import { ceilingForAgent, isSlackProfile, slackPosting, slackProfileMode } from "./slack-profile";
 import { canAlwaysAllow, effectivePermission, type ConnectorCeiling } from "./tool-policy";
 
 const SLACK = "https://mcp.slack.com/mcp";
@@ -35,4 +35,19 @@ test("only the Slack connector can be let loose, never another connector that ac
   assert.equal(isSlackProfile(SLACK), true);
   assert.equal(isSlackProfile("https://mcp.slack.com.example.dev/mcp"), false);
   assert.equal(ceilingForAgent(ceiling, "https://gmailmcp.googleapis.com/mcp/v1", { slackProfileMode: "free" }).askWrites, true);
+});
+
+test("allowing any single post as the owner lets it post on its own, and the choice shows only when every post agrees", () => {
+  const schedule = { name: "slack_schedule_message", annotations: { readOnlyHint: false } };
+  const tools = [send, schedule, read];
+  assert.deepEqual(slackPosting(tools, {}, "free"), { mode: "ask", shown: "ask" });
+  assert.deepEqual(slackPosting(tools, { slack_read_channel: "allow" }, "ask"), { mode: "ask", shown: "ask" });
+  assert.deepEqual(slackPosting(tools, { slack_send_message: "allow" }, "ask"), { mode: "free", shown: undefined });
+  assert.deepEqual(slackPosting(tools, { slack_send_message: "allow", slack_schedule_message: "allow" }, "ask"), { mode: "free", shown: "free" });
+  assert.deepEqual(slackPosting(undefined, {}, "free"), { mode: "free", shown: "free" });
+  const policy = { slack: { slack_send_message: "allow" as const } };
+  const lifted = ceilingForAgent(ceiling, SLACK, { slackProfileMode: slackPosting(tools, policy.slack, "ask").mode });
+  assert.equal(effectivePermission({ serverId: "slack", server: lifted, tool: send, policy }).permission, "allow");
+  assert.equal(effectivePermission({ serverId: "slack", server: lifted, tool: schedule, policy }).permission, "ask");
+  assert.equal(canAlwaysAllow(lifted, schedule.name, schedule.annotations), true);
 });
