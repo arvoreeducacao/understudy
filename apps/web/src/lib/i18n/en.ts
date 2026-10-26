@@ -617,6 +617,8 @@ export const en = {
     slackAsk: "Ask me before posting",
     slackFree: "Post without asking",
     slackOff: "Off",
+    slackAsItself: "With its own name and face",
+    slackAsYou: "As you, from your own Slack profile",
     slackModeHint: {
       ask: "It can find channels, read the ones it is in, and post, reply, message anyone or share files after you approve the exact message.",
       free: "It posts, replies, messages anyone and shares files on its own, with its name and face. Your rules still apply and every message is recorded.",
@@ -710,6 +712,7 @@ export const en = {
     title: (name: string) => `Set up ${name}`,
     notifySummary: "Messages you",
     slackSummary: (mode: string) => `Slack: ${mode.toLowerCase()}`,
+    slackAsYouSummary: "Slack as you",
     connectorsSummary: (n: number) => (n === 0 ? "No connectors" : n === 1 ? "1 connector" : `${n} connectors`),
     rulesSummary: (n: number) => (n === 0 ? "No rules yet" : n === 1 ? "1 rule" : `${n} rules`),
     shareSummary: (n: number) => (n === 0 ? "Only you" : n === 1 ? "Shared with 1 person" : `Shared with ${n} people`),

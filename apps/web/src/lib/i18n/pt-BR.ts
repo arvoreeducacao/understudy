@@ -617,6 +617,8 @@ export const ptBR: Messages = {
     slackAsk: "Me pergunte antes de postar",
     slackFree: "Postar sem perguntar",
     slackOff: "Desligado",
+    slackAsItself: "Com nome e cara próprios",
+    slackAsYou: "Como você, pelo seu perfil do Slack",
     slackModeHint: {
       ask: "Ele acha canais, lê os que participa, e posta, responde, manda mensagem para qualquer pessoa ou compartilha arquivos depois que você aprova a mensagem exata.",
       free: "Ele posta, responde, manda mensagem para qualquer pessoa e compartilha arquivos sozinho, com nome e cara próprios. As suas regras continuam valendo e toda mensagem fica registrada.",
@@ -710,6 +712,7 @@ export const ptBR: Messages = {
     title: (name: string) => `Prepare ${name}`,
     notifySummary: "Manda mensagem para você",
     slackSummary: (mode: string) => `Slack: ${mode.toLowerCase()}`,
+    slackAsYouSummary: "Slack como você",
     connectorsSummary: (n: number) => (n === 0 ? "Nenhum conector" : n === 1 ? "1 conector" : `${n} conectores`),
     rulesSummary: (n: number) => (n === 0 ? "Nenhuma regra ainda" : n === 1 ? "1 regra" : `${n} regras`),
     shareSummary: (n: number) => (n === 0 ? "Só você" : n === 1 ? "Compartilhado com 1 pessoa" : `Compartilhado com ${n} pessoas`),
