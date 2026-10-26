@@ -784,7 +784,7 @@ test("the browser guard asks the owner before committing actions, and never whil
 });
 
 test("an ask-first step asks the owner for the exact item, and the approval covers only that run for a while", async () => {
-  const { askFirstPlan, coveringApproval, decide, scriptRequestVerdict, pendingDialog, dialogReason, ASK_FIRST_TOOL_SPEC, COMMIT_TOOLS, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
+  const { askFirstPlan, bareUrl, coveringApproval, decide, droppedSummary, scriptRequestVerdict, pendingDialog, dialogReason, ASK_FIRST_TOOL_SPEC, COMMIT_TOOLS, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
   const { isApprovalTool } = await import("./agent.ts");
   const steps = [{ id: "s7", text: "Remove the book from the collection" }];
   const run = { mode: "run" as const, runId: "r1", approvalsRequired: true, askSteps: steps };
@@ -815,6 +815,18 @@ test("an ask-first step asks the owner for the exact item, and the approval cove
   assert.equal(coveringApproval(approval, run, approval.until + 1), null);
   const post = { method: "POST", url: "https://sheets.example.com/batchUpdate", body: "{}", pageUrl: "https://sheets.example.com/d/1" };
   assert.equal(scriptRequestVerdict(run, [], post).kind, "drop");
+  const tracker = { method: "POST", url: "https://graph.example.com/v1/beacon?access_token=SECRET123&email=ana@cliente.com#frag", body: "{}", pageUrl: "https://app.example.com/reset?token=RESETTOKEN#top" };
+  assert.deepEqual(scriptRequestVerdict(run, [], tracker), { kind: "drop", request: "POST graph.example.com/v1/beacon", pageUrl: "app.example.com/reset" });
+  assert.equal(bareUrl("https://user:pw@x.example.com:8443/a/b?c=1#d"), "x.example.com:8443/a/b");
+  assert.equal(bareUrl("not a url?token=1"), "not a url");
+  assert.deepEqual(
+    droppedSummary([
+      { request: "POST ga.example.com/collect", pageUrl: "app.example.com/inbox" },
+      { request: "POST ga.example.com/collect", pageUrl: "app.example.com/inbox" },
+      { request: "POST fb.example.com/tr", pageUrl: "app.example.com/inbox" },
+    ]),
+    { request: "POST ga.example.com/collect ×2, POST fb.example.com/tr", pageUrl: "app.example.com/inbox" },
+  );
   assert.deepEqual(scriptRequestVerdict(run, [], post, "", approval), { kind: "pass", coveredBy: approval });
   assert.equal(scriptRequestVerdict(run, [{ id: "site", kind: "blocked_site" as const, site: "sheets.example.com" }], post, "", approval).kind, "rule");
   assert.ok(COMMIT_TOOLS.has("browser_handle_dialog"));
@@ -1273,7 +1285,7 @@ test("a script that sends something from a page needs the owner's approval and o
   const run = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post(), "send weekly report");
   assert.equal(run.kind === "ask" && run.stepId, "s4");
   const stray = scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], post({ method: "delete", body: undefined }));
-  assert.deepEqual(stray, { kind: "drop", request: "DELETE https://mail.example.com/api/send", pageUrl: "https://mail.example.com/inbox" });
+  assert.deepEqual(stray, { kind: "drop", request: "DELETE mail.example.com/api/send", pageUrl: "mail.example.com/inbox" });
   const player = post({ url: "https://abuse.video.example/$rpc/Token/Generate", body: '["x"]', pageUrl: "https://video.example/embed/abc" });
   assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: steps }, [], player, "read pricing table").kind, "drop");
   assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: [] }, [], player).kind, "drop");
