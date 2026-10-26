@@ -432,7 +432,7 @@ async function proxyCall(
   if ("error" in shown) {
     return { ...text(`not called: calls that need approval need ${shown.error}, so the owner sees exactly what will run`, true), verdict: "denied" };
   }
-  const grant = canAlwaysAllow(ceiling, toolName) ? { serverId: upstream.id, tool: toolName } : undefined;
+  const grant = canAlwaysAllow(ceiling, toolName, tool.annotations) ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
   const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId, grant });
   if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.asked ? "denied" : "blocked" };

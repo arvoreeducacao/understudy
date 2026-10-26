@@ -60,12 +60,13 @@ export function ToolPermissions({
         </div>
       </div>
       {ceiling.askAll && <p className="fld-hint m-0">{t.adminAsksAll}</p>}
+      {ceiling.askWrites && !ceiling.askAll && <p className="fld-hint m-0">{t.actsAsYou}</p>}
       <ul className="tp-list" aria-label={t.listLabel(serverName)}>
         {tools.map((tool) => {
-          const cap = ceilingFor(ceiling, tool.name);
+          const hints = hintsOf(tool);
+          const cap = ceilingFor(ceiling, tool.name, hints);
           const current = permissionOf(tool);
           const choices = allowedChoices(cap);
-          const hints = hintsOf(tool);
           const destructive = isDestructive(hints);
           const changed = verdictOf(tool).changed;
           return (

@@ -65,6 +65,19 @@ test("ask-all on the connector caps every tool at ask", () => {
   assert.equal(canAlwaysAllow(server, "search_threads"), false);
 });
 
+test("a connector that acts as the person asks before every action that does more than read, whatever the owner chose", () => {
+  const server = { askWrites: true };
+  const policy = { s: { create_draft: "allow", do_something: "allow", search_threads: "allow" } } as const;
+  assert.deepEqual(effectivePermission({ serverId: "s", server, tool: draft, policy }), { permission: "ask", source: "admin" });
+  assert.equal(effectivePermission({ serverId: "s", server, tool: bare, policy }).permission, "ask");
+  assert.equal(effectivePermission({ serverId: "s", server, tool: search, policy }).permission, "allow");
+  assert.equal(canAlwaysAllow(server, draft.name, draft.annotations), false);
+  assert.equal(canAlwaysAllow(server, search.name, search.annotations), true);
+  const nowReadOnly = { name: "create_draft", annotations: { readOnlyHint: true } };
+  const seen = { s: { create_draft: { readOnlyHint: false } } };
+  assert.equal(effectivePermission({ serverId: "s", server, tool: nowReadOnly, policy, seen }).permission, "ask");
+});
+
 test("owners can always be stricter than the ceiling", () => {
   assert.deepEqual(allowedChoices("allow"), ["allow", "ask", "never"]);
   assert.deepEqual(allowedChoices("ask"), ["ask", "never"]);
