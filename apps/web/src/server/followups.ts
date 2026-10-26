@@ -163,7 +163,7 @@ export type BookInput = { when: string; note: string; task?: string; progress?: 
 
 export type BookResult =
   | { ok: true; followup: Followup; taskTitle: string | null }
-  | { ok: false; reason: "outsider" | "untrusted" | "when" | "too_soon" | "too_far" | "too_many" | "daily_limit" | "no_task" | "no_progress" | "chain_limit"; error: string };
+  | { ok: false; reason: "outsider" | "untrusted" | "when" | "too_soon" | "too_far" | "too_many" | "daily_limit" | "no_task" | "private_task" | "no_progress" | "chain_limit"; error: string };
 
 async function untrustedRun(agentId: string, runId: string | null) {
   if (!runId) return false;
@@ -219,6 +219,9 @@ export async function bookFollowup(
 
   let recipeId: string | null = null;
   let taskTitle: string | null = null;
+  if (input.task?.trim() && !context.runId && hub.turnAudience(agent.id)) {
+    return { ok: false, reason: "private_task", error: "not booked: this is a private conversation, and a task run is seen by the whole team. Leave task out: the follow-up wakes you here, where only this person sees it" };
+  }
   if (input.task?.trim()) {
     const found = await findTask(agent.id, input.task);
     if (!found) return { ok: false, reason: "no_task", error: `not booked: you have no task with the id or title ${JSON.stringify(input.task.trim())}; leave task out to be woken in this conversation` };
@@ -388,7 +391,7 @@ export async function fireDueFollowups(hub: FollowupHub, now = new Date()) {
           .where(and(eq(schema.recipes.id, claimed.recipeId), eq(schema.recipes.agentId, claimed.agentId)))
       : [];
     try {
-      if (claimed.recipeId && task?.active) {
+      if (claimed.recipeId && task?.active && !claimed.askedBy) {
         const started = await hub.startRun(claimed.recipeId, "followup", { input: wakeBriefing(claimed) });
         if (started.ok) {
           await db.update(schema.followups).set({ runId: started.runId }).where(eq(schema.followups.id, claimed.id));
