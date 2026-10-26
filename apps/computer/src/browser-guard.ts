@@ -203,6 +203,24 @@ export function scriptRequestSubject(request: Pick<GatedRequest, "url" | "body" 
   return { urls: [...urls, ...(inner.urls ?? [])], texts: [body, ...(inner.texts ?? [])], amounts: inner.amounts ?? [] };
 }
 
+export function bareUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname}`.slice(0, 200);
+  } catch {
+    return url.split(/[?#]/)[0].slice(0, 200);
+  }
+}
+
+export function droppedSummary(drops: { request: string; pageUrl: string }[]): { request: string; pageUrl: string } {
+  const counts = new Map<string, number>();
+  for (const drop of drops) counts.set(drop.request, (counts.get(drop.request) ?? 0) + 1);
+  return {
+    request: [...counts].map(([request, times]) => (times > 1 ? `${request} ×${times}` : request)).join(", ").slice(0, 300),
+    pageUrl: [...new Set(drops.map((drop) => drop.pageUrl))].join(", ").slice(0, 300),
+  };
+}
+
 export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return { kind: "pass" };
@@ -217,7 +235,7 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
     host = new URL(request.url).host;
   } catch {}
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
-  if (state.mode === "run" && !step) return { kind: "drop", request: `${method} ${request.url}`.slice(0, 300), pageUrl: (request.pageUrl || "unknown").slice(0, 300) };
+  if (state.mode === "run" && !step) return { kind: "drop", request: `${method} ${bareUrl(request.url)}`, pageUrl: request.pageUrl ? bareUrl(request.pageUrl) : "unknown" };
   return {
     kind: "ask",
     summary: `Script sent a ${method} to ${host}`.slice(0, 480),
@@ -365,6 +383,7 @@ async function serve() {
   const gatedScript = async (message: Rpc, args: Record<string, unknown>, rules: OwnerRule[]) => {
     const state = readTurnState(stateFile);
     const notes: string[] = [];
+    const drops: { request: string; pageUrl: string }[] = [];
     const pending = new Set<Promise<boolean>>();
     let blocked = false;
     let denied = false;
@@ -390,8 +409,7 @@ async function serve() {
         return false;
       }
       if (verdict.kind === "drop") {
-        await notifyMain({ event: "request_blocked", request: verdict.request, pageUrl: verdict.pageUrl });
-        notes.push(`blocked without asking: ${verdict.request} is not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.`);
+        drops.push({ request: verdict.request, pageUrl: verdict.pageUrl });
         return false;
       }
       const turn = asking.then(async () => {
@@ -432,6 +450,11 @@ async function serve() {
         if (seen === before) break;
       }
       await gate.close();
+      if (drops.length) {
+        const dropped = droppedSummary(drops);
+        await notifyMain({ event: "request_blocked", ...dropped });
+        notes.push(`blocked without asking: ${dropped.request} ${drops.length === 1 ? "is" : "are"} not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.`);
+      }
       if (!notes.length) return reply;
       const text = `Requests this script tried to send:\n${notes.join("\n")}`;
       if (!reply.result?.content) return textResult(reply.id, text);

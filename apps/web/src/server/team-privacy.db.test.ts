@@ -178,6 +178,32 @@ test("artifacts, follow-ups and teammate threads from a private chat stay with w
   assert.equal((await listPairs([ids.ledger], 500, ids.tiago))[0]?.last.id, "amsg_priv_2");
 });
 
+test("a follow-up from a private chat never starts a task run the whole team sees, even one booked before this rule", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { bookFollowup, fireDueFollowups } = await import("./followups");
+  const db = getDb();
+  const { hub, computer } = await connectedHub();
+  await db.insert(schema.recipes).values({ id: "rcp_priv_inbox", agentId: ids.ledger, active: true, recipe: { title: "Check inbox", trigger: "x", steps: [{ id: "s1", text: "Read", mode: "auto" }], questions: [], askFirstRuns: 0 } });
+  try {
+    hub.setTurnAudience(ids.ledger, ids.rafael);
+    const booked = await bookFollowup(hub, { id: ids.ledger }, { when: "2h", note: "check HR's reply on my salary", task: "Check inbox" }, { runId: null, outsider: false });
+    hub.setTurnAudience(ids.ledger, null);
+    assert.equal(booked.ok, false);
+    assert.equal(!booked.ok && booked.reason, "private_task");
+
+    await db.insert(schema.followups).values({ id: "fu_priv_legacy", agentId: ids.ledger, dueAt: new Date(Date.now() - 1000), note: "check HR's reply on my salary", recipeId: "rcp_priv_inbox", chainId: "fuc_priv_legacy", emptyWakes: 0, askedBy: ids.rafael });
+    const fired = await fireDueFollowups(hub);
+    assert.equal(fired.find((f) => f.id === "fu_priv_legacy")?.runId ?? null, null);
+    assert.equal((await db.select().from(schema.runs).where(eq(schema.runs.recipeId, "rcp_priv_inbox"))).length, 0);
+    const woke = computer.received.filter((m) => m.type === "chat" && m.followup && (m.followup as { id: string }).id === "fu_priv_legacy");
+    assert.equal(woke.length, 1);
+    assert.equal(woke[0].askedBy, ids.rafael);
+  } finally {
+    await db.delete(schema.followups).where(eq(schema.followups.id, "fu_priv_legacy"));
+    await db.delete(schema.recipes).where(eq(schema.recipes.id, "rcp_priv_inbox"));
+  }
+});
+
 test("vault names and brain logins go only to whoever manages the understudy", { skip }, async () => {
   const { computerHandlers } = await import("./hub/computer-handlers");
   const { hub } = await connectedHub();

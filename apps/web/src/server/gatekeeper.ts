@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
@@ -50,7 +50,7 @@ const MAX_BODY_BYTES = 1024 * 1024;
 
 function outcomeText(id: string, outcome: Outcome): ToolResult {
   if (outcome.kind === "unknown") return text("denied: unknown request");
-  if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id }));
+  if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id, note: brainText.pendingNote }));
   return decision(outcome.approved, outcome.note, id, outcome.stopped);
 }
 
@@ -64,14 +64,36 @@ function text(value: unknown, isError = false): ToolResult {
   return { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], isError };
 }
 
-export async function runningRunId(agentId: string) {
+export async function runningRun(agentId: string) {
   const [run] = await getDb()
-    .select({ id: schema.runs.id })
+    .select({ id: schema.runs.id, trigger: schema.runs.trigger, startedAt: schema.runs.startedAt })
     .from(schema.runs)
     .where(and(eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
     .orderBy(desc(schema.runs.startedAt))
     .limit(1);
-  return run?.id ?? null;
+  return run ?? null;
+}
+
+export async function runningRunId(agentId: string) {
+  return (await runningRun(agentId))?.id ?? null;
+}
+
+async function unapprovedAsk(agentId: string, tool: string) {
+  const run = await runningRun(agentId);
+  if (!run) return null;
+  const [latest] = await getDb()
+    .select({ id: schema.approvals.id, status: schema.approvals.status })
+    .from(schema.approvals)
+    .where(
+      and(
+        eq(schema.approvals.agentId, agentId),
+        gte(schema.approvals.createdAt, run.startedAt),
+        sql`${schema.approvals.fields} @> ${JSON.stringify([{ label: "Action", value: tool }])}::jsonb`,
+      ),
+    )
+    .orderBy(desc(schema.approvals.createdAt))
+    .limit(1);
+  return latest && latest.status !== "approved" ? latest : null;
 }
 
 async function logCall(agentId: string, tool: string, args: unknown, result: unknown, ok: boolean, verdict?: ToolVerdict, runId?: string | null) {
@@ -256,8 +278,11 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   builtins.push(...(taskTools(hub, agent) as Builtin[]));
   builtins.push(...(followupTools(hub, agent, { outsider, untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
 
-  const guard = (input: GuardInput) =>
-    guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask, waitOutcome, input.extra as Extra);
+  const guard = async (input: GuardInput) => {
+    const run = input.toOwner ? null : await runningRun(agent.id);
+    const handedOff = run?.trigger === "handoff";
+    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId: handedOff ? run?.id : undefined });
+  };
 
   if (await slackEnabled()) {
     builtins.push(
@@ -335,7 +360,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     const builtin = builtins.find((b) => b.name === name);
     const callExtra = { ...(extra as unknown as Extra), call: { name } };
-    const runId = builtin ? null : await runningRunId(agent.id);
+    const run = builtin ? null : await runningRun(agent.id);
+    const runId = run?.id ?? null;
     try {
       let result: ToolResult;
       if (outsider() && !OUTSIDER_TOOLS.has(name)) {
@@ -351,7 +377,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           const tool = await findTool(upstream, toolName);
           const ceiling = ceilings.get(upstream.id) ?? {};
           result = tool
-            ? await proxyCall(hub, agent, upstream, tool, args, permissionOf(upstream, tool), ceiling, runId, waitOutcome, callExtra)
+            ? await proxyCall(hub, agent, upstream, tool, args, permissionOf(upstream, tool), ceiling, run, waitOutcome, callExtra)
             : { ...text(`not called: ${upstream.name} does not list ${toolName}`, true), verdict: "blocked" };
         }
       }
@@ -385,7 +411,11 @@ async function guardOutward(
     await reportRuleBlock(hub, agent.id, rule, violation.reason).catch(() => {});
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
-  if (!ask) return { ok: true };
+  if (!ask) {
+    const asked = extra.call ? await unapprovedAsk(agent.id, actionToolName(extra.call.name)) : null;
+    if (asked) return { ok: false, text: brainText.askedNotApproved(asked.status, asked.id) };
+    return { ok: true };
+  }
   if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
   const id = await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant);
@@ -421,7 +451,7 @@ async function proxyCall(
   args: Record<string, unknown>,
   permission: ToolPermission,
   ceiling: ConnectorCeiling,
-  runId: string | null,
+  run: { id: string; trigger: string } | null,
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
 ): Promise<ToolResult> {
@@ -429,7 +459,7 @@ async function proxyCall(
   if (permission === "never") {
     return { ...text(`not called: your owner turned off ${upstream.name}'s ${toolName} for you. Do not try another way; tell your owner if you need it.`, true), verdict: "blocked" };
   }
-  const needsApproval = permission === "ask";
+  const needsApproval = permission === "ask" || (run?.trigger === "handoff" && !isReadOnly(tool.annotations));
   if (!needsApproval && isSlackProfile(upstream.url) && !isReadOnly(tool.annotations) && !slackProfileLimiter.allow(`slack-profile:${agent.ownerId}:write`, SLACK_LIMITS.writesPerHour / 3600, SLACK_LIMITS.writeBurst)) {
     return { ...text(`not called: you already did ${SLACK_LIMITS.writeBurst} Slack actions as your owner in a short time; wait a few minutes, or tell your owner if the work needs more.`, true), verdict: "blocked" };
   }
@@ -439,7 +469,7 @@ async function proxyCall(
   }
   const grant = canAlwaysAllow(ceiling, toolName, tool.annotations) ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId, grant });
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant });
   if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.asked ? "denied" : "blocked" };
   const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];

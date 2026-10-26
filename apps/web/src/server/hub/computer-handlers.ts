@@ -105,7 +105,8 @@ export const computerHandlers: Handlers = {
     const [run] = await getDb().select({ id: schema.runs.id }).from(schema.runs).where(and(eq(schema.runs.id, message.runId), eq(schema.runs.agentId, agentId)));
     if (!run) return;
     log("request_blocked", { agentId, runId: run.id });
-    await hub.addMessage(agentId, "system", copy.rules.backgroundBlocked(message.request.slice(0, 300), message.pageUrl.slice(0, 300)), run.id);
+    const bare = (text: string) => text.replace(/[?#][^\s,]*/g, "").slice(0, 300);
+    await hub.addMessage(agentId, "system", copy.rules.backgroundBlocked(bare(message.request), bare(message.pageUrl)), run.id);
   },
 
   async watch_result(hub, agentId, message) {
