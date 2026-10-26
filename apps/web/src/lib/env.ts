@@ -77,6 +77,11 @@ export const env = {
   get googleEnabled() {
     return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   },
+  get slackConnectorClient() {
+    const clientId = process.env.SLACK_CONNECTOR_CLIENT_ID?.trim();
+    const clientSecret = process.env.SLACK_CONNECTOR_CLIENT_SECRET?.trim();
+    return clientId && clientSecret ? { clientId, clientSecret } : null;
+  },
   get smtpUrl() {
     return process.env.UNDERSTUDY_SMTP_URL?.trim() || undefined;
   },

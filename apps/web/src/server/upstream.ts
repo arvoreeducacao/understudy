@@ -5,6 +5,7 @@ import { getDb, schema } from "@/lib/db";
 import { open } from "@/lib/secret-box";
 import { renewSignIn, SignInNeededError, StoredOAuthProvider, usesOAuth } from "./connector-oauth";
 import { answersGmailItself, GMAIL_ALWAYS_ASK, GMAIL_TOOLS, gmailApi, runGmailTool } from "./gmail-direct";
+import { actsAsPerson } from "@/lib/connector-showcase";
 import { safeFetch } from "./safe-fetch";
 import type { ToolHints } from "@/lib/tool-policy";
 
@@ -63,7 +64,7 @@ export async function loadToolLimits(ids: string[]) {
 
 export function ceilingOf(server: Pick<UpstreamServer, "askAll" | "askTools" | "url">, limits: { ask: string[]; never: string[] } | undefined) {
   const alwaysAsk = answersGmailItself(server) ? GMAIL_ALWAYS_ASK : [];
-  return { askAll: server.askAll, askTools: [...(server.askTools ?? []), ...(limits?.ask ?? []), ...alwaysAsk], neverTools: limits?.never ?? [] };
+  return { askAll: server.askAll, askTools: [...(server.askTools ?? []), ...(limits?.ask ?? []), ...alwaysAsk], neverTools: limits?.never ?? [], askWrites: actsAsPerson(server.url) };
 }
 
 async function gmailFor(server: UpstreamServer, userId?: string) {

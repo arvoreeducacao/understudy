@@ -4,7 +4,7 @@ export type ToolHints = { readOnlyHint?: boolean; destructiveHint?: boolean };
 
 export type ToolInfo = { name: string; description?: string; annotations?: ToolHints };
 
-export type ConnectorCeiling = { askAll?: boolean; askTools?: string[] | null; neverTools?: string[] | null };
+export type ConnectorCeiling = { askAll?: boolean; askTools?: string[] | null; neverTools?: string[] | null; askWrites?: boolean };
 
 export type ToolPolicy = Record<string, Record<string, ToolPermission>>;
 
@@ -110,11 +110,11 @@ export function stricter(a: ToolPermission, b: ToolPermission): ToolPermission {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
-export function ceilingFor(server: ConnectorCeiling, tool: string): ToolPermission {
+export function ceilingFor(server: ConnectorCeiling, tool: string, hints?: ToolHints): ToolPermission {
   const key = toolSkeleton(tool);
   const listed = (names: string[] | null | undefined) => (names ?? []).some((name) => toolSkeleton(name) === key);
   if (listed(server.neverTools)) return "never";
-  if (server.askAll || listed(server.askTools) || !plainToolName(tool)) return "ask";
+  if (server.askAll || listed(server.askTools) || !plainToolName(tool) || (server.askWrites && !isReadOnly(hints))) return "ask";
   return "allow";
 }
 
@@ -138,8 +138,8 @@ export function effectivePermission(input: {
   legacyAsk?: string[];
   seen?: SeenHints;
 }): { permission: ToolPermission; source: "admin" | "owner" | "default"; changed?: "safer" | "riskier" | "new" } {
-  const ceiling = ceilingFor(input.server, input.tool.name);
   const seen = seenHintsFor(input.seen, input.serverId, input.tool.name);
+  const ceiling = ceilingFor(input.server, input.tool.name, trustedHints(seen, input.tool.annotations));
   const picked = ownerChoice(input.policy, input.legacyAsk, input.serverId, input.tool.name);
   const riskier = picked === "allow" && hintsTightened(seen, input.tool.annotations);
   const chosen = riskier ? undefined : picked;
@@ -172,8 +172,8 @@ export function mergeRecordedHints(input: { stored?: SeenHints; submitted: SeenH
   return merged;
 }
 
-export function canAlwaysAllow(server: ConnectorCeiling, tool: string) {
-  return ceilingFor(server, tool) === "allow";
+export function canAlwaysAllow(server: ConnectorCeiling, tool: string, hints?: ToolHints) {
+  return ceilingFor(server, tool, hints) === "allow";
 }
 
 export function withChoice(policy: Record<string, ToolPermission>, tool: ToolInfo, permission: ToolPermission) {

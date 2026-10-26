@@ -80,10 +80,13 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
 
   const slackMode = values.tools.slackMode === "off" || values.tools.slackMode === "free" ? values.tools.slackMode : "ask";
   const slackLabel = { ask: messages.create.slackAsk, free: messages.create.slackFree, off: messages.create.slackOff }[slackMode];
+  const slackProfiles = new Set(data.servers.filter((server) => server.slackProfile).map((server) => server.id));
+  const chosenServers = values.tools.servers ?? [];
   const toolsSummary = [
     values.tools.notifyOwner ? t.notifySummary : null,
     data.slackAvailable ? t.slackSummary(slackLabel) : null,
-    t.connectorsSummary(values.tools.servers?.length ?? 0),
+    chosenServers.some((id) => slackProfiles.has(id)) ? t.slackAsYouSummary(values.tools.slackProfileMode === "free" ? messages.create.slackFree : messages.create.slackAsk) : null,
+    t.connectorsSummary(chosenServers.filter((id) => !slackProfiles.has(id)).length),
   ]
     .filter(Boolean)
     .join(" · ");

@@ -31,6 +31,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_BRIEFING_CRON` | When owners get their daily Slack briefing; default `0 8 * * 1-5` |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Lets understudies talk on Slack; an admin can also paste both in the panel under People |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Adds Google sign-in |
+| `SLACK_CONNECTOR_CLIENT_ID`, `SLACK_CONNECTOR_CLIENT_SECRET` | The Slack app the Slack connector signs in with. When both are set, nobody pastes a client: each person only approves on Slack |
 | `UNDERSTUDY_SMTP_URL` | Outgoing email as an SMTP URL (`smtps://user:password@host:465`); turns on self-service password reset by email. `json` builds messages without sending (development) |
 | `UNDERSTUDY_MAIL_FROM` | Sender of outgoing email; defaults to no-reply at the panel's host |
 | `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` | Domains (comma separated) that sign in only with Google; they skip password and two-step sign-in. Ignored unless Google sign-in is set |

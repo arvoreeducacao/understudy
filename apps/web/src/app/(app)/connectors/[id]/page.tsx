@@ -9,6 +9,7 @@ import { CUSTOM_CONNECTOR, featuredById, featuredFor, fromCatalog, publisherLine
 import { getDb, schema } from "@/lib/db";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
+import { withPresetClient } from "@/server/connector-clients";
 import { canManageConnector, canUseConnector } from "@/server/connector-rights";
 import { searchCatalog } from "@/server/connector-catalog";
 import { oauthCallbackUrl, usesOAuth } from "@/server/connector-oauth";
@@ -120,7 +121,7 @@ export default async function ConnectorPage({ params, searchParams }: { params: 
             )}
           </>
         ) : (
-          <ConnectForm connector={connector} returnAddress={oauthCallbackUrl()} />
+          <ConnectForm connector={withPresetClient(connector)} returnAddress={oauthCallbackUrl()} />
         )}
       </div>
     </div>

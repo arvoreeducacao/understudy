@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useState, type ReactNode } from "react";
 import type { Brain } from "@understudy/protocol";
 import { createAgent } from "@/app/actions/agents";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ConnectorSignIn } from "@/components/approvals/ConnectorSignIn";
 import { LookPicker } from "@/components/create/LookPicker";
 import type { AgentTools } from "@/lib/db/schema";
-import { recordedHints, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { isReadOnly, recordedHints, withChoice, withLegacyAsks, withoutStaleAllows, type ConnectorCeiling, type SeenHints, type ToolInfo, type ToolPolicy } from "@/lib/tool-policy";
+import { slackPosting, slackProfileMode, type SlackProfileMode } from "@/lib/slack-profile";
 import { ToolPermissions } from "@/components/create/ToolPermissions";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -37,12 +38,13 @@ export type ServerOption = {
   name: string;
   ceiling: ConnectorCeiling;
   signIn?: { signedIn: boolean };
+  slackProfile?: boolean;
   tools: ToolInfo[] | null;
 };
 
 type SlackMode = NonNullable<AgentTools["slackMode"]>;
 
-function SlackAccess({ available, initial, admin }: { available: boolean; initial: AgentTools; admin: boolean }) {
+function SlackAccess({ available, initial, admin, caption }: { available: boolean; initial: AgentTools; admin: boolean; caption?: string }) {
   const [mode, setMode] = useState<SlackMode>(initial.slackMode === "off" || initial.slackMode === "free" ? initial.slackMode : "ask");
   if (!available) {
     return (
@@ -62,6 +64,7 @@ function SlackAccess({ available, initial, admin }: { available: boolean; initia
   return (
     <div className="flex flex-col gap-2">
       <input type="hidden" name="slackMode" value={mode} />
+      {caption && <span className="text-[13px] font-medium">{caption}</span>}
       <Segmented
         label={t.slackLabel}
         options={[
@@ -81,7 +84,15 @@ function here() {
   return typeof window === "undefined" ? "/" : `${window.location.pathname}${window.location.search}`;
 }
 
-function ServerPicker({ servers, initial }: { servers: ServerOption[]; initial: AgentTools }) {
+type ConnectorChoices = {
+  on: Set<string>;
+  toggle: (serverId: string) => void;
+  policy: ToolPolicy;
+  setServerPolicy: (serverId: string, next: ToolPolicy[string]) => void;
+  seen: SeenHints;
+};
+
+function useConnectorChoices(servers: ServerOption[], initial: AgentTools): ConnectorChoices {
   const [on, setOn] = useState(new Set(initial.servers ?? []));
   const [policy, setPolicy] = useState<ToolPolicy>(() => {
     const merged = withLegacyAsks(initial.toolPolicy, initial.askTools);
@@ -90,12 +101,92 @@ function ServerPicker({ servers, initial }: { servers: ServerOption[]; initial: 
   });
   const seen: SeenHints = { ...(initial.toolHints ?? {}) };
   for (const server of servers) if (server.tools) seen[server.id] = recordedHints(initial.toolHints, server.id, server.tools, policy[server.id]);
-  const flip = (set: Set<string>, value: string) => {
-    const next = new Set(set);
-    if (next.has(value)) next.delete(value);
-    else next.add(value);
-    return next;
+  const toggle = (serverId: string) =>
+    setOn((current) => {
+      const next = new Set(current);
+      if (next.has(serverId)) next.delete(serverId);
+      else next.add(serverId);
+      return next;
+    });
+  const setServerPolicy = (serverId: string, next: ToolPolicy[string]) => setPolicy((current) => ({ ...current, [serverId]: next }));
+  return { on, toggle, policy, setServerPolicy, seen };
+}
+
+function ServerCard({
+  server,
+  choices,
+  toolHints,
+  label,
+  ceiling,
+  children,
+}: {
+  server: ServerOption;
+  choices: ConnectorChoices;
+  toolHints: AgentTools["toolHints"];
+  label?: string;
+  ceiling?: ConnectorCeiling;
+  children?: ReactNode;
+}) {
+  const enabled = choices.on.has(server.id);
+  return (
+    <div className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-2.5">
+      <Switch
+        plain
+        name="servers"
+        value={server.id}
+        checked={enabled}
+        onChange={() => choices.toggle(server.id)}
+        label={<span className="font-medium">{label ?? server.name}</span>}
+        hint={server.signIn && !server.signIn.signedIn ? t.serverNeedsYourSignIn(server.name) : server.tools === null ? t.serverUnreachable : t.serverToolCount(server.tools.length)}
+      />
+      {server.signIn && !server.signIn.signedIn && <ConnectorSignIn id={server.id} returnTo={here()} label={messages.admin.signInGo(server.name)} />}
+      {server.signIn?.signedIn && <div className="fld-hint">{t.serverSignedInAsYou(server.name)}</div>}
+      {children}
+      {enabled && server.tools && server.tools.length > 0 && (
+        <ToolPermissions
+          serverId={server.id}
+          serverName={server.name}
+          tools={server.tools}
+          ceiling={ceiling ?? server.ceiling}
+          seen={toolHints}
+          policy={choices.policy[server.id] ?? {}}
+          onChange={(next) => choices.setServerPolicy(server.id, next)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SlackProfileCard({ server, choices, initial }: { server: ServerOption; choices: ConnectorChoices; initial: AgentTools }) {
+  const { mode, shown } = slackPosting(server.tools, choices.policy[server.id], slackProfileMode(initial));
+  const enabled = choices.on.has(server.id);
+  const pick = (next: SlackProfileMode) => {
+    let policy = choices.policy[server.id] ?? {};
+    for (const tool of server.tools ?? []) if (!isReadOnly(tool.annotations)) policy = withChoice(policy, tool, next === "free" ? "allow" : "ask");
+    choices.setServerPolicy(server.id, policy);
   };
+  return (
+    <ServerCard server={server} choices={choices} toolHints={initial.toolHints} label={t.slackAsYou} ceiling={{ ...server.ceiling, askWrites: false }}>
+      <input type="hidden" name="slackProfileMode" value={mode} />
+      {enabled && server.tools && server.tools.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Segmented
+            label={t.slackAsYou}
+            options={[
+              { value: "ask", label: t.slackAsk },
+              { value: "free", label: t.slackFree },
+            ]}
+            value={shown}
+            onChange={pick}
+          />
+          <div className={`fld-hint ${mode === "free" ? "!text-amber" : ""}`}>{t.slackProfileModeHint[mode]}</div>
+        </div>
+      )}
+    </ServerCard>
+  );
+}
+
+function ServerPicker({ servers, choices, toolHints }: { servers: ServerOption[]; choices: ConnectorChoices; toolHints: AgentTools["toolHints"] }) {
   if (servers.length === 0) {
     return (
       <div className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-1.5 text-[12.5px]">
@@ -108,44 +199,25 @@ function ServerPicker({ servers, initial }: { servers: ServerOption[]; initial: 
   }
   return (
     <div className="flex flex-col gap-2">
-      <input type="hidden" name="toolPolicy" value={JSON.stringify(policy)} />
-      <input type="hidden" name="toolHints" value={JSON.stringify(seen)} />
-      {servers.map((server) => {
-        const enabled = on.has(server.id);
-        return (
-          <div key={server.id} className="rounded-[14px] border border-graphite px-3.5 py-3 flex flex-col gap-2.5">
-            <Switch
-              plain
-              name="servers"
-              value={server.id}
-              checked={enabled}
-              onChange={() => setOn((s) => flip(s, server.id))}
-              label={<span className="font-medium">{server.name}</span>}
-              hint={server.signIn && !server.signIn.signedIn ? t.serverNeedsYourSignIn(server.name) : server.tools === null ? t.serverUnreachable : t.serverToolCount(server.tools.length)}
-            />
-            {server.signIn && !server.signIn.signedIn && <ConnectorSignIn id={server.id} returnTo={here()} label={messages.admin.signInGo(server.name)} />}
-            {server.signIn?.signedIn && <div className="fld-hint">{t.serverSignedInAsYou(server.name)}</div>}
-            {enabled && server.tools && server.tools.length > 0 && (
-              <ToolPermissions
-                serverId={server.id}
-                serverName={server.name}
-                tools={server.tools}
-                ceiling={server.ceiling}
-                seen={initial.toolHints}
-                policy={policy[server.id] ?? {}}
-                onChange={(next) => setPolicy((current) => ({ ...current, [server.id]: next }))}
-              />
-            )}
-          </div>
-        );
-      })}
+      {servers.map((server) => (
+        <ServerCard key={server.id} server={server} choices={choices} toolHints={toolHints} />
+      ))}
     </div>
   );
 }
 
 export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLabel = true }: { tools: AgentTools; servers: ServerOption[]; slackAvailable: boolean; admin: boolean; showLabel?: boolean }) {
+  const choices = useConnectorChoices(servers, tools);
+  const slackProfiles = servers.filter((server) => server.slackProfile);
+  const otherServers = servers.filter((server) => !server.slackProfile);
   return (
     <>
+      {servers.length > 0 && (
+        <>
+          <input type="hidden" name="toolPolicy" value={JSON.stringify(choices.policy)} />
+          <input type="hidden" name="toolHints" value={JSON.stringify(choices.seen)} />
+        </>
+      )}
       <div className="fld">
         {showLabel && <span className="fld-label">{t.toolsLabel}</span>}
         <div className="flex flex-col gap-2">
@@ -155,13 +227,18 @@ export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLa
 
       <div className="fld">
         <span className="fld-label">{t.toolSlack}</span>
-        <SlackAccess available={slackAvailable} initial={tools} admin={admin} />
+        <div className="flex flex-col gap-3">
+          <SlackAccess available={slackAvailable} initial={tools} admin={admin} caption={slackProfiles.length > 0 ? t.slackAsItself : undefined} />
+          {slackProfiles.map((server) => (
+            <SlackProfileCard key={server.id} server={server} choices={choices} initial={tools} />
+          ))}
+        </div>
       </div>
 
       <div className="fld">
         <span className="fld-label">{t.toolServers}</span>
         <div className="fld-hint">{t.toolServersHint}</div>
-        <ServerPicker servers={servers} initial={tools} />
+        <ServerPicker servers={otherServers} choices={choices} toolHints={tools.toolHints} />
       </div>
     </>
   );

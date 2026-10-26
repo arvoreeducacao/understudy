@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { catalogExtras, FEATURED_CONNECTORS, featuredFor, filterFeatured, logoSources, monogram, sameAddress, withPrefix } from "./connector-showcase";
+import { actsAsPerson, catalogExtras, FEATURED_CONNECTORS, featuredFor, filterFeatured, logoSources, monogram, sameAddress, withPrefix } from "./connector-showcase";
 import type { CatalogEntry } from "./mcp-registry";
 
 const entry = (id: string, url: string, extra: Partial<CatalogEntry> = {}): CatalogEntry => ({ id, name: id, description: "", url, publisher: { kind: "github", label: "someone" }, ...extra });
@@ -28,6 +28,22 @@ describe("featured connectors", () => {
     );
     assert.equal(filterFeatured("", "all").length, FEATURED_CONNECTORS.length);
     assert.deepEqual(filterFeatured("nothing like this", "all"), []);
+  });
+});
+
+describe("slack", () => {
+  it("asks only to send and to read public channels, never DMs or private channels", () => {
+    const scopes = featuredFor("https://mcp.slack.com/mcp")?.oauth?.scope.split(" ") ?? [];
+    assert.ok(scopes.includes("chat:write"));
+    for (const scope of ["im:history", "mpim:history", "groups:history", "search:read.im", "search:read.mpim", "search:read.private"]) assert.ok(!scopes.includes(scope), scope);
+  });
+
+  it("is known to act with the person's own account, by its host", () => {
+    assert.equal(actsAsPerson("https://mcp.slack.com/mcp"), true);
+    assert.equal(actsAsPerson("https://MCP.slack.com/other"), true);
+    assert.equal(actsAsPerson("https://mcp.slack.com.example.dev/mcp"), false);
+    assert.equal(actsAsPerson("https://mcp.linear.app/mcp"), false);
+    assert.equal(actsAsPerson("not a url"), false);
   });
 });
 

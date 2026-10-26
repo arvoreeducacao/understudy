@@ -20,6 +20,7 @@ export async function toolsFrom(form: FormData, email: string, previous?: AgentT
     slack: false,
     slackChannels: [],
     slackMode: slackModeFrom(form.get("slackMode")),
+    slackProfileMode: form.get("slackProfileMode") === "free" ? "free" : "ask",
     servers: allowed,
     askTools: [],
     toolPolicy,

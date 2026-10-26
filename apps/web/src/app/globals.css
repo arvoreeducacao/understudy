@@ -703,8 +703,13 @@ input.in[type="time"]::-webkit-calendar-picker-indicator { opacity: .75; cursor:
 .tp { display: flex; flex-direction: column; gap: 10px; }
 .tp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .tp-counts { font-size: 12px; color: var(--smoke); }
+.tp-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.tp-toggle { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 4px 0; background: none; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--mist); cursor: pointer; }
+.tp-toggle:hover { color: #fff; }
+.tp-toggle svg { transition: transform .15s; }
 .tp-bulk { display: flex; gap: 6px; flex-wrap: wrap; }
 .tp-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.tp-list[hidden] { display: none; }
 .tp-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--graphite); }
 .tp-row:first-child { border-top: 0; }
 .tp-tool { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }

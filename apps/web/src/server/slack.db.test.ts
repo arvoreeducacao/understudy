@@ -288,6 +288,11 @@ test("a card posted after the approval was already answered is closed right away
   const { rememberApprovalMessage } = await import("./approval-slack");
   const hub = createHub();
   const id = await hub.createApproval(ids.bruno, { summary: "Archive ticket 77", runId: "" }, "mcp", 3600);
+  for (let tries = 0; tries < 200; tries++) {
+    const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, id));
+    if (row?.slackMessages?.length) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   await hub.answerApproval(id, true, undefined, ids.owner, false, "whatsapp");
   slackPostTs = "777.7";
   await rememberApprovalMessage(id, { ok: true, channel: "D77", ts: "777.7" });

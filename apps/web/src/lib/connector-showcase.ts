@@ -23,6 +23,8 @@ export type Connector = {
 const bearer = { headerName: "Authorization", headerPrefix: "Bearer " };
 const by = (label: string) => ({ kind: "domain" as const, label });
 
+export const SLACK_USER_SCOPES = ["chat:write", "im:write", "channels:read", "groups:read", "channels:history", "search:read.public", "users:read", "users:read.email", "search:read.users"];
+
 export const FEATURED_CONNECTORS: Connector[] = [
   {
     id: "linear",
@@ -57,6 +59,17 @@ export const FEATURED_CONNECTORS: Connector[] = [
       authorizeParams: { access_type: "offline", prompt: "consent" },
     },
     keyPage: "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+    featured: true,
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    url: "https://mcp.slack.com/mcp",
+    publisher: by("slack.com"),
+    category: "work",
+    signIn: { needsClient: true },
+    oauth: { scope: SLACK_USER_SCOPES.join(" ") },
+    keyPage: "https://docs.slack.dev/ai/slack-mcp-server/",
     featured: true,
   },
   {
@@ -164,6 +177,16 @@ export const FEATURED_CONNECTORS: Connector[] = [
 ];
 
 export const CUSTOM_CONNECTOR = "new";
+
+const ACTS_AS_PERSON_HOSTS = ["mcp.slack.com"];
+
+export function actsAsPerson(url: string) {
+  try {
+    return ACTS_AS_PERSON_HOSTS.includes(new URL(url).host.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 export function connectorHref(connector: Connector, query?: string) {
   if (connector.featured) return `/connectors/${connector.id}`;
