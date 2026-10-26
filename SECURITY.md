@@ -26,6 +26,8 @@ In scope, among others:
 - leaking subscription logins, recorded passwords or other masked values;
 - authentication or authorization flaws in the panel, the host socket, the computer socket or the gatekeeper MCP.
 
+Known limitation, already tracked: the browser guard on the computer protects against an agent's honest mistakes, not against an agent that a page, email or teammate has manipulated, since that agent controls the same computer (see "Is the browser guard a security boundary?" in the README). Reports of new ways around it are still welcome, and so is anything that gets past the gatekeeper's approvals, which run on the panel.
+
 Out of scope: problems that need a malicious administrator of the deployment, denial of service by volume, and missing hardening headers without a concrete impact.
 
 ## Supported versions
