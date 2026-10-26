@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { ApprovalGrant } from "@/lib/db/schema";
+import { ceilingForAgent } from "@/lib/slack-profile";
 import { canAlwaysAllow, cleanToolNames, grantedPolicy } from "@/lib/tool-policy";
 import { serverAllowedFor } from "./approval-payload";
 import { ceilingOf, loadToolLimits } from "./upstream";
@@ -18,7 +19,7 @@ export async function grantTool(agentId: string, grant: ApprovalGrant, userId: s
     const [server] = await tx.select().from(schema.mcpServers).where(eq(schema.mcpServers.id, grant.serverId));
     if (!server || !serverAllowedFor(server.allowedEmails, row.ownerEmail)) return false;
     const limits = await loadToolLimits([server.id]);
-    if (!canAlwaysAllow(ceilingOf(server, limits.get(server.id)), grant.tool)) return false;
+    if (!canAlwaysAllow(ceilingForAgent(ceilingOf(server, limits.get(server.id)), server.url, row.agent.tools), grant.tool)) return false;
     const tools = { ...row.agent.tools, toolPolicy: grantedPolicy(row.agent.tools.toolPolicy, grant.serverId, grant.tool) };
     await tx.update(schema.agents).set({ tools, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
     return true;
