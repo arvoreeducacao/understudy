@@ -1,4 +1,5 @@
-import { Eye, RefreshCw, TriangleAlert } from "lucide-react";
+import { useId, useState } from "react";
+import { ChevronRight, Eye, RefreshCw, TriangleAlert } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 import { messages } from "@/lib/messages";
 import {
@@ -45,11 +46,19 @@ export function ToolPermissions({
   const permissionOf = (tool: ToolInfo) => verdictOf(tool).permission;
   const counts = { allow: 0, ask: 0, never: 0 };
   for (const tool of tools) counts[permissionOf(tool)] += 1;
+  const [open, setOpen] = useState(() => tools.some((tool) => verdictOf(tool).changed));
+  const listId = useId();
 
   return (
     <div className="tp">
       <div className="tp-head">
-        <span className="tp-counts">{t.counts(counts.allow, counts.ask, counts.never)}</span>
+        <div className="tp-summary">
+          <button type="button" className="tp-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((value) => !value)}>
+            <ChevronRight size={14} aria-hidden className={open ? "rotate-90" : undefined} />
+            {open ? t.hideActions : t.showActions(tools.length)}
+          </button>
+          <span className="tp-counts">{t.counts(counts.allow, counts.ask, counts.never)}</span>
+        </div>
         <div className="tp-bulk">
           <button type="button" className="btn sec sm" disabled={readOnly.length === 0} onClick={() => onChange(allowReadOnly(policy, readOnly))}>
             {t.allowReadOnly}
@@ -61,7 +70,7 @@ export function ToolPermissions({
       </div>
       {ceiling.askAll && <p className="fld-hint m-0">{t.adminAsksAll}</p>}
       {ceiling.askWrites && !ceiling.askAll && <p className="fld-hint m-0">{t.actsAsYou}</p>}
-      <ul className="tp-list" aria-label={t.listLabel(serverName)}>
+      <ul id={listId} className="tp-list" aria-label={t.listLabel(serverName)} hidden={!open}>
         {tools.map((tool) => {
           const hints = hintsOf(tool);
           const cap = ceilingFor(ceiling, tool.name, hints);
@@ -108,7 +117,7 @@ export function ToolPermissions({
           );
         })}
       </ul>
-      <p className="fld-hint m-0">{t.newToolsHint}</p>
+      {open && <p className="fld-hint m-0">{t.newToolsHint}</p>}
     </div>
   );
 }

@@ -1675,6 +1675,8 @@ export const en = {
     approvalSummary: (connector: string, tool: string) => `Use ${tool} on ${connector}`,
     approveAlways: "Approve and always allow",
     approveAlwaysHint: (tool: string) => `Approves this call and lets ${tool} run without asking from now on. You can change it in the understudy's settings.`,
+    showActions: (n: number) => (n === 1 ? "Show 1 action" : `Show ${n} actions`),
+    hideActions: "Hide actions",
     counts: (allow: number, ask: number, never: number) => `${allow} allowed · ${ask} ask first · ${never} off`,
     allowReadOnly: "Allow all read-only",
     askForRest: "Ask for everything else",
