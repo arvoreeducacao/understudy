@@ -31,6 +31,8 @@ On Slack, people are panel accounts: the Slack account is matched to the panel a
 
 Each of these conversations is a row in `slack_asker_threads` (understudy, person, channel, thread), kept for 7 days so a later mention in the same thread reaches the same understudy without its name. The message carries the row as `origin`; when the computer starts the turn, the panel takes the row only if it belongs to the person the ledger expected for that turn, and the replies go to that thread only. The owner's own Slack conversation (`slack_threads`) is never taken over by someone else's message.
 
+A message that starts with an understudy's name goes to that understudy. Without a name, and outside a thread that already belongs to one, it goes to the person's own understudy when they have exactly one; a person with none of their own reaches their team's understudy the same way. An understudy opened to everyone answers only when it is named, so opening one never changes where anyone else's messages go.
+
 ## How a conversation flows
 
 1. The channel's endpoint authenticates the provider (Slack's request signature, a per-channel secret header for Telegram webhooks), finds the understudy, sorts the sender and either holds, drops or delivers.

@@ -9,7 +9,7 @@ import { RateLimiter } from "./rate-limit";
 import { pickAgent, stripMentions, verifySlackSignature } from "./slack-app";
 import { agentIdentity, escapeSlack, slackConfig, slackUserEmail } from "./slack";
 import { linkedPanelUser, slackLinkUrl } from "./slack-link";
-import { agentForAskerThread, rememberAskerThread, slackAgentsFor, type SlackAgent } from "./slack-askers";
+import { agentForAskerThread, rememberAskerThread, slackAgentsFor, unnamedAgents, type SlackAgent } from "./slack-askers";
 import { agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
 import { ownerAudience } from "./teams-store";
 
@@ -147,7 +147,7 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   const clean = stripMentions(event.text ?? "");
   const threadAgentId = (await agentForThread(event.channel, threadTs)) ?? (await agentForAskerThread(event.channel, threadTs));
   const threadAgent = agents.find((a) => a.id === threadAgentId) ?? null;
-  const picked = pickAgent(clean, agents);
+  const picked = pickAgent(clean, agents, unnamedAgents(agents));
   const namedOther = picked.agent && picked.agent.id !== threadAgent?.id && picked.text !== clean;
   const route = threadAgent && !namedOther ? { agent: threadAgent, text: clean } : picked;
   if (!route.agent) {

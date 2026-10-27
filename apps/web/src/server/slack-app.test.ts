@@ -37,5 +37,8 @@ test("a message goes to the agent named at its start, or to the only agent", () 
   assert.deepEqual(pickAgent("Anabel, hi", agents), { agent: null, reason: "ambiguous" });
   assert.deepEqual(pickAgent("do it", [agents[2]]), { agent: agents[2], text: "do it" });
   assert.deepEqual(pickAgent("do it", []), { agent: null, reason: "none" });
+  assert.deepEqual(pickAgent("do it", agents, [agents[1]]), { agent: agents[1], text: "do it" });
+  assert.deepEqual(pickAgent("do it", [agents[2]], []), { agent: null, reason: "ambiguous" });
+  assert.deepEqual(pickAgent("Bruno, do it", agents, [agents[1]]), { agent: agents[2], text: "do it" });
   assert.equal(stripMentions("<@U123ABC> Bruno, hi <@U9|x>"), "Bruno, hi");
 });
