@@ -12,7 +12,7 @@ const t = messages.brainAccount;
 
 type Auth = BrainAccountView["auth"];
 
-export function BrainAccountPicker({ agentId, initial }: { agentId: string; initial: BrainAccountView | null }) {
+export function BrainAccountPicker({ agentId, initial, onOwnChange }: { agentId: string; initial: BrainAccountView | null; onOwnChange?: (own: boolean) => void }) {
   const [saved, setSaved] = useState(initial);
   const [own, setOwn] = useState(Boolean(initial));
   const [url, setUrl] = useState(initial?.url ?? "");
@@ -37,6 +37,7 @@ export function BrainAccountPicker({ agentId, initial }: { agentId: string; init
   const choose = (value: "signed_in" | "own") => {
     const next = value === "own";
     setOwn(next);
+    onOwnChange?.(next);
     setDone(false);
     setError(null);
     if (!next && saved) submit(false);

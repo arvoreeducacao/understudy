@@ -14,11 +14,13 @@ export function BrainConnect({
   send,
   current,
   onSelect,
+  ownKey = false,
 }: {
   live: LiveState;
   send: (message: ViewerToServer) => boolean;
   current: Brain;
   onSelect: (brain: Brain) => void;
+  ownKey?: boolean;
 }) {
   const [connecting, setConnecting] = useState<Brain | null>(null);
   const [code, setCode] = useState("");
@@ -45,7 +47,8 @@ export function BrainConnect({
       <div className="grid grid-cols-2 gap-2.5 max-[600px]:grid-cols-1">
         {(["claude", "codex"] as Brain[]).filter((brain) => brain === "claude" || live.brains.some((b) => b.brain === "codex")).map((brain) => {
           const status = live.brains.find((b) => b.brain === brain);
-          const loggedIn = Boolean(status?.loggedIn);
+          const keyed = ownKey && brain === "claude";
+          const loggedIn = keyed || Boolean(status?.loggedIn);
           const selected = current === brain;
           const isConnecting = connecting === brain && !result;
           return (
@@ -55,11 +58,11 @@ export function BrainConnect({
             >
               <b className="font-semibold">{t[brain].name}</b>
               <span className="text-[11.5px] text-smoke">
-                {t[brain].plan}
-                {status?.account ? ` · ${t.connectedAs(status.account)}` : ""}
+                {keyed ? messages.brainAccount.own : t[brain].plan}
+                {!keyed && status?.account ? ` · ${t.connectedAs(status.account)}` : ""}
               </span>
               <div className="flex gap-2 flex-wrap mt-1">
-                {loggedIn ? (
+                {keyed ? null : loggedIn ? (
                   <span className="pill g">
                     <span className="dot" />
                     {t.connected}

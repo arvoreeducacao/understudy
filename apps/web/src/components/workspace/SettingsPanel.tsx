@@ -43,6 +43,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
   const { live, send } = link;
   const { values } = data;
   const [brain, setBrain] = useState<Brain>(values.brain);
+  const [ownKey, setOwnKey] = useState(Boolean(data.brainAccount));
   const [name, setName] = useState(values.name);
   const [look, setLook] = useState<Look>(values.look);
   const [lookOpen, setLookOpen] = useState(false);
@@ -145,7 +146,13 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
         </PanelSection>
 
         <PanelSection title={t.brainTitle} hint={t.brainHint}>
-          <BrainConnect live={live} send={send} current={brain} onSelect={setBrain} />
+          <BrainConnect live={live} send={send} current={brain} onSelect={setBrain} ownKey={values.brain === "claude" && ownKey} />
+          {values.brain === "claude" && (
+            <div className="fld">
+              <span className="fld-label">{messages.brainAccount.title}</span>
+              <BrainAccountPicker agentId={values.id} initial={data.brainAccount} onOwnChange={setOwnKey} />
+            </div>
+          )}
           {values.brain === "claude" && (
             <div className="fld">
               <span className="fld-label">{messages.models.title}</span>
@@ -154,13 +161,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
               </div>
             </div>
           )}
-          {values.brain === "claude" && (
-            <div className="fld">
-              <span className="fld-label">{messages.brainAccount.title}</span>
-              <BrainAccountPicker agentId={values.id} initial={data.brainAccount} />
-            </div>
-          )}
-          <p className="m-0 fld-hint">{messages.create.brainLock}</p>
+          {!(values.brain === "claude" && ownKey) && <p className="m-0 fld-hint">{messages.create.brainLock}</p>}
         </PanelSection>
 
         <PanelSection title={t.toolsTitle} hint={toolsSummary} collapsible>
