@@ -84,6 +84,7 @@ export type AgentTools = {
   slackChannels: string[];
   slackMode?: "off" | "ask" | "free";
   slackProfileMode?: "ask" | "free";
+  slackAnyone?: boolean;
   servers?: string[];
   askTools?: string[];
   toolPolicy?: ToolPolicy;
@@ -597,6 +598,25 @@ export const slackThreads = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("slack_threads_thread_idx").on(t.channel, t.threadTs)],
+);
+
+export const slackAskerThreads = pgTable(
+  "slack_asker_threads",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    askedBy: text("asked_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    threadTs: text("thread_ts"),
+    slackUser: text("slack_user").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("slack_asker_threads_thread_idx").on(t.channel, t.threadTs), index("slack_asker_threads_expires_idx").on(t.expiresAt)],
 );
 
 export type ChannelKind = "slack" | "telegram" | "teams" | "whatsapp" | "sms";

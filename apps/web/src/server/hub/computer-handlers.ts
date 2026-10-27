@@ -9,6 +9,7 @@ import { taskLink } from "../task-tools";
 import { currentConversation, flushReplies, relayActivityText, relayDelta, relayReply } from "../channels/relay";
 import { appendPending } from "../channels/store";
 import { currentTurn, startTurn } from "../channels/turns";
+import { askerTurn, replyToAsker, startAskerTurn } from "../slack-askers";
 import { noteTurn } from "../followups";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
@@ -65,6 +66,12 @@ export const computerHandlers: Handlers = {
     const streamId = message.runId ? undefined : message.streamId;
     const origin = message.runId ? null : currentTurn(agentId);
     const audience = message.runId ? null : hub.turnAudience(agentId);
+    const asker = message.runId ? null : askerTurn(agentId);
+    if (asker) {
+      await hub.addMessage(agentId, "agent", text, null, undefined, "slack", streamId, undefined, undefined, undefined, audience);
+      await replyToAsker(agentId, asker, text).catch((error) => log("slack_asker_reply_error", { agentId, error: String(error) }));
+      return;
+    }
     if (origin) {
       await hub.addMessage(agentId, "agent", text, null, undefined, origin.kind, streamId, undefined, undefined, undefined, audience);
       await appendPending(origin.threadId, { text }).catch((error) => log("channel_queue_error", { agentId, error: String(error) }));
@@ -257,6 +264,7 @@ export const computerHandlers: Handlers = {
     await hub.beginTurn(agentId, message);
     noteTurn(agentId, { followup: message.followup, runId: message.runId, untrusted: message.untrusted });
     await startTurn(agentId, message.origin);
+    await startAskerTurn(agentId, message.origin, message.askedBy && hub.turnAudience(agentId) === message.askedBy ? message.askedBy : null);
   },
 
   pong() {},

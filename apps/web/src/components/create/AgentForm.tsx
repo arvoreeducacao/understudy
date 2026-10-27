@@ -206,7 +206,7 @@ function ServerPicker({ servers, choices, toolHints }: { servers: ServerOption[]
   );
 }
 
-export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLabel = true }: { tools: AgentTools; servers: ServerOption[]; slackAvailable: boolean; admin: boolean; showLabel?: boolean }) {
+export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLabel = true, team = false }: { tools: AgentTools; servers: ServerOption[]; slackAvailable: boolean; admin: boolean; showLabel?: boolean; team?: boolean }) {
   const choices = useConnectorChoices(servers, tools);
   const slackProfiles = servers.filter((server) => server.slackProfile);
   const otherServers = servers.filter((server) => !server.slackProfile);
@@ -229,6 +229,12 @@ export function AgentToolsFields({ tools, servers, slackAvailable, admin, showLa
         <span className="fld-label">{t.toolSlack}</span>
         <div className="flex flex-col gap-3">
           <SlackAccess available={slackAvailable} initial={tools} admin={admin} caption={slackProfiles.length > 0 ? t.slackAsItself : undefined} />
+          {team && (
+            <div className="flex flex-col gap-1">
+              <Toggle name="slackAnyone" label={t.slackAnyone} defaultOn={Boolean(tools.slackAnyone)} />
+              <div className="fld-hint">{t.slackAnyoneHint}</div>
+            </div>
+          )}
           {slackProfiles.map((server) => (
             <SlackProfileCard key={server.id} server={server} choices={choices} initial={tools} />
           ))}

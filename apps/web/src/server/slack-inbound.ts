@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { and, eq, inArray } from "drizzle-orm";
-import { agentAccess, canAnswer } from "@/lib/access";
+import { agentAccess, canAnswer, canChat } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { messages as copy } from "@/lib/messages";
@@ -9,6 +9,7 @@ import { RateLimiter } from "./rate-limit";
 import { pickAgent, stripMentions, verifySlackSignature } from "./slack-app";
 import { agentIdentity, escapeSlack, slackConfig, slackUserEmail } from "./slack";
 import { linkedPanelUser, slackLinkUrl } from "./slack-link";
+import { agentForAskerThread, rememberAskerThread, slackAgentsFor, type SlackAgent } from "./slack-askers";
 import { agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
 import { ownerAudience } from "./teams-store";
 
@@ -98,6 +99,32 @@ export async function slackGiveUp(agentId: string, channel: string, threadTs?: s
   await postAgentText({ channel, threadTs, text: copy.slackApp.gaveUp, as: agentIdentity(agent) });
 }
 
+type Asking = {
+  agent: SlackAgent;
+  user: { id: string; name: string };
+  text: string;
+  channel: string;
+  threadTs?: string;
+  slackUser: string;
+  dm: boolean;
+  answer: (text: string, as?: { id: string; name: string }) => Promise<unknown>;
+};
+
+async function askAgent(hub: Hub, asking: Asking) {
+  const { agent, user, text } = asking;
+  const member = canChat(await agentAccess(user.id, agent.id));
+  const origin = await rememberAskerThread({ agentId: agent.id, askedBy: user.id, channel: asking.channel, threadTs: asking.threadTs, slackUser: asking.slackUser });
+  const messageId = await hub.addMessage(agent.id, "user", text, null, user.id, "slack", undefined, undefined, undefined, undefined, user.id);
+  const repeated = member ? await hub.proposals.repeatOf(agent.id, user.id, text, messageId).catch((error) => (log("repeat_check_error", { error: String(error) }), null)) : null;
+  log("slack_message_routed", { agentId: agent.id, dm: asking.dm, asker: member ? "member" : "guest" });
+  const result = await hub.deliver(
+    agent.id,
+    { type: "chat", text, from: user.name, askedBy: user.id, origin, ...(repeated ? { repeated: { times: repeated.times, since: repeated.since.getTime() } } : {}) },
+    { source: "slack", slack: { channel: asking.channel, threadTs: asking.threadTs } },
+  );
+  if (result.status === "queued" && result.starting) await asking.answer(copy.slackApp.starting, agent);
+}
+
 async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   const ignored = event.bot_id ? "bot" : event.subtype ? `subtype:${event.subtype}` : !event.user || !event.channel ? "incomplete" : null;
   if (ignored || !event.user || !event.channel) {
@@ -116,9 +143,9 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
     await answer(isDm ? unknownUserMarkdown(event.user) : copy.slackApp.unknownUser(env.publicUrl));
     return;
   }
-  const agents = await getDb().select({ id: schema.agents.id, name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.ownerId, user.id));
+  const agents = await slackAgentsFor(user.id);
   const clean = stripMentions(event.text ?? "");
-  const threadAgentId = await agentForThread(event.channel, threadTs);
+  const threadAgentId = (await agentForThread(event.channel, threadTs)) ?? (await agentForAskerThread(event.channel, threadTs));
   const threadAgent = agents.find((a) => a.id === threadAgentId) ?? null;
   const picked = pickAgent(clean, agents);
   const namedOther = picked.agent && picked.agent.id !== threadAgent?.id && picked.text !== clean;
@@ -131,6 +158,10 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   const text = route.text.slice(0, 4000);
   if (!text) {
     await answer(copy.slackApp.sayWhat, agent);
+    return;
+  }
+  if (agent.ownerId !== user.id) {
+    await askAgent(hub, { agent, user, text, channel: event.channel, threadTs, slackUser: event.user, dm: isDm, answer });
     return;
   }
   const assistant = isDm && Boolean(event.thread_ts);
@@ -158,7 +189,7 @@ async function onAssistantThreadStarted(event: SlackEvent) {
     await postAgentText({ channel: thread.channel_id, threadTs: thread.thread_ts, text });
     return;
   }
-  const agents = await getDb().select({ name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.ownerId, user.id));
+  const agents = await slackAgentsFor(user.id);
   await startAssistantThread({ channel: thread.channel_id, threadTs: thread.thread_ts, agentNames: agents.map((a) => a.name) });
   log("slack_assistant_thread_started");
 }
