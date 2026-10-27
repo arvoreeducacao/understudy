@@ -77,7 +77,7 @@ export class InboundQueue {
         if (row.expiresAt < now) continue;
         const [claimed] = await db.delete(schema.inboundQueue).where(eq(schema.inboundQueue.id, row.id)).returning();
         if (!claimed) continue;
-        if (claimed.slackChannel) await rememberSlackReply(agentId, claimed.slackChannel, claimed.slackThreadTs ?? undefined);
+        if (claimed.slackChannel && !claimed.message.origin) await rememberSlackReply(agentId, claimed.slackChannel, claimed.slackThreadTs ?? undefined);
         if (claimed.channelThreadId) await routeIfTrusted(agentId, claimed.channelThreadId).catch((error) => log("channel_route_error", { agentId, error: String(error) }));
         if (!this.hub.sendToComputer(agentId, claimed.message as unknown as ServerToComputer)) {
           await db.insert(schema.inboundQueue).values(claimed).onConflictDoNothing();

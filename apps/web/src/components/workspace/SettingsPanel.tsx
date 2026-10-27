@@ -156,7 +156,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
 
         <PanelSection title={t.toolsTitle} hint={toolsSummary} collapsible>
           <p className="m-0 fld-hint">{t.toolsHint}</p>
-          <AgentToolsFields tools={values.tools} servers={data.servers} slackAvailable={data.slackAvailable} admin={Boolean(data.admin)} showLabel={false} />
+          <AgentToolsFields tools={values.tools} servers={data.servers} slackAvailable={data.slackAvailable} admin={Boolean(data.admin)} showLabel={false} team={Boolean(data.team.current)} />
         </PanelSection>
 
         {(dirty || saved) && (

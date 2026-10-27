@@ -21,6 +21,7 @@ export async function toolsFrom(form: FormData, email: string, previous?: AgentT
     slackChannels: [],
     slackMode: slackModeFrom(form.get("slackMode")),
     slackProfileMode: form.get("slackProfileMode") === "free" ? "free" : "ask",
+    slackAnyone: team && form.get("slackAnyone") === "on",
     servers: allowed,
     askTools: [],
     toolPolicy,

@@ -18,6 +18,7 @@ import { frameAcked, frameCredit, takeFrameSlot } from "./hub/frame-credit";
 import { Runs } from "./hub/runs";
 import { log, send, type Frame, type HostConn, type Viewer } from "./hub/shared";
 import { TurnLedger } from "./hub/turn-ledger";
+import { forgetAskerTurn } from "./slack-askers";
 import { ownerAudience } from "./teams-store";
 import { handleViewerMessage } from "./hub/viewer-handlers";
 import type { ChatEntry, ServerToViewer, ViewerFrameAck, ViewerToServer } from "./hub-types";
@@ -340,6 +341,7 @@ export class Hub {
       this.lastFrames.delete(agentId);
       this.lastJobs.delete(agentId);
       this.turns.forget(agentId);
+      forgetAskerTurn(agentId);
       for (const [requestId, pending] of this.asks) {
         if (pending.agentId !== agentId) continue;
         this.asks.delete(requestId);

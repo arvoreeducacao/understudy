@@ -628,6 +628,8 @@ export const ptBR: Messages = {
       free: "Ele posta, responde, manda mensagem para qualquer pessoa e compartilha arquivos sozinho, com nome e cara próprios. As suas regras continuam valendo e toda mensagem fica registrada.",
       off: "Sem ferramentas de Slack. Ele continua respondendo quando alguém fala com ele no Slack e continua avisando você.",
     },
+    slackAnyone: "Qualquer pessoa com conta fala com ele no Slack",
+    slackAnyoneHint: "Desligado, só o time fala. Ligado, qualquer pessoa com conta no painel pode marcar ou mandar mensagem para ele. Cada pessoa tem uma conversa só dela, e o que alguém de fora do time pedir que precise de aprovação chega para você.",
     slackSetUp: "Configurar",
     slackChannelsPlaceholder: "#financeiro, #logistica",
     slackDisabled: "O Slack ainda não está conectado a este painel.",

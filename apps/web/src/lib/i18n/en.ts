@@ -628,6 +628,8 @@ export const en = {
       free: "It posts, replies, messages anyone and shares files on its own, with its name and face. Your rules still apply and every message is recorded.",
       off: "No Slack tools. It still answers when someone talks to it on Slack and still messages you.",
     },
+    slackAnyone: "Anyone with an account can talk to it on Slack",
+    slackAnyoneHint: "Off, only its team can. On, anyone signed in to the panel can mention it or message it. Each person gets a conversation of their own, and whatever someone outside the team asks it to do that needs approval comes to you.",
     slackSetUp: "Set it up",
     slackChannelsPlaceholder: "#finance, #logistics",
     slackDisabled: "Slack is not connected to this panel yet.",

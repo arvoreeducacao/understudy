@@ -13,7 +13,14 @@ delete process.env.SLACK_BOT_TOKEN;
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const ids = { owner: "usr_slack_owner", stranger: "usr_slack_stranger", ana: "agt_slack_ana", bruno: "agt_slack_bruno" };
-const slackUsers: Record<string, string> = { UOWNER: "slack-owner@test.local", USTRANGER: "slack-stranger@test.local" };
+const team = { lead: "usr_slack_lead", mate: "usr_slack_mate", guest: "usr_slack_guest", nora: "agt_slack_nora", otto: "agt_slack_otto" };
+const slackUsers: Record<string, string> = {
+  UOWNER: "slack-owner@test.local",
+  USTRANGER: "slack-stranger@test.local",
+  ULEAD: "slack-lead@test.local",
+  UMATE: "slack-mate@test.local",
+  UGUEST: "slack-guest@test.local",
+};
 const slackCalls: { method: string; body: Record<string, unknown> }[] = [];
 const responses: unknown[] = [];
 const sentToComputer: { agentId: string; message: unknown }[] = [];
@@ -114,8 +121,10 @@ after(async () => {
   const { getDb, schema, getPool } = await import("@/lib/db");
   const { deleteSetting } = await import("@/lib/app-settings");
   await deleteSetting("slack");
-  await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.stranger]));
+  await getDb().delete(schema.teams).where(eq(schema.teams.createdBy, team.lead));
+  await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.stranger, team.lead, team.mate, team.guest]));
   panel.close();
+  teamServer?.close();
   await getPool().end();
   setTimeout(() => process.exit(0), 100).unref();
 });
@@ -456,4 +465,143 @@ test("an owner whose Slack email differs from the panel email links their Slack 
   } finally {
     await unlinkSlackUser(ids.owner);
   }
+});
+
+type Received = { type: string; text?: string; askedBy?: string; origin?: string };
+
+let teamServer: Server | null = null;
+let teamPanel: { url: string; hub: import("./hub").Hub; computer: { received: Received[] } } | null = null;
+
+async function teamSetup() {
+  if (teamPanel) return teamPanel;
+  const { EventEmitter } = await import("node:events");
+  const { getDb, schema } = await import("@/lib/db");
+  const { Hub } = await import("./hub");
+  const { handleSlack } = await import("./slack-inbound");
+  const store = await import("./teams-store");
+  const db = getDb();
+  await db.delete(schema.teams).where(eq(schema.teams.createdBy, team.lead));
+  await db.delete(schema.user).where(inArray(schema.user.id, [team.lead, team.mate, team.guest]));
+  await db.insert(schema.user).values([
+    { id: team.lead, name: "Lia Prado", email: "slack-lead@test.local", status: "approved" },
+    { id: team.mate, name: "Davi Rocha", email: "slack-mate@test.local", status: "approved" },
+    { id: team.guest, name: "Gil Moura", email: "slack-guest@test.local", status: "approved" },
+  ]);
+  const look = { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" };
+  const tools = { notifyOwner: true, slack: false, slackChannels: [] };
+  await db.insert(schema.agents).values([
+    { id: team.nora, ownerId: team.lead, name: "Nora", look, tokenHash: "slack_hash_nora", tools, computerStatus: "running", lastSeenAt: new Date() } as never,
+    { id: team.otto, ownerId: team.lead, name: "Otto", look, tokenHash: "slack_hash_otto", tools } as never,
+  ]);
+  const created = await store.createTeam(team.lead, { name: "Support" });
+  assert.ok(created.ok);
+  const teamId = created.ok ? created.id : "";
+  await store.addMember(teamId, team.lead, "slack-mate@test.local", "member");
+  await store.bringAgent(team.nora, team.lead, teamId, true);
+  await store.bringAgent(team.otto, team.lead, teamId, true);
+  const hub = new Hub();
+  const computer = Object.assign(new EventEmitter(), {
+    OPEN: 1,
+    readyState: 1,
+    received: [] as Received[],
+    send(raw: string) {
+      computer.received.push(JSON.parse(raw));
+    },
+    ping() {},
+    close() {},
+  });
+  await hub.attachComputer(computer as never, team.nora);
+  const server = createServer((req, res) => {
+    const handled = handleSlack(hub, req, res, new URL(req.url ?? "/", "http://x").pathname);
+    inflight.add(handled);
+    void handled.finally(() => inflight.delete(handled));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  teamServer = server;
+  teamPanel = { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, hub, computer };
+  return teamPanel;
+}
+
+async function teamEvent(eventId: string, event: Record<string, unknown>) {
+  const { url } = await teamSetup();
+  const { slackSignature } = await import("./slack-app");
+  const body = JSON.stringify({ type: "event_callback", event_id: eventId, event });
+  const ts = String(Math.floor(Date.now() / 1000));
+  await realFetch(`${url}/api/slack/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Slack-Request-Timestamp": ts, "X-Slack-Signature": slackSignature(SECRET, ts, body) },
+    body,
+  });
+  await settle();
+}
+
+const posts = (channel: string) => slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === channel);
+
+test("a team member reaches a team understudy on Slack, privately, and the answer goes back to their own thread", { skip }, async () => {
+  const { hub, computer } = await teamSetup();
+  const { computerHandlers } = await import("./hub/computer-handlers");
+  const { activeThread, setThread } = await import("./slack-threads");
+  const { loadChat } = await import("@/lib/views");
+  await setThread(team.nora, { channel: "C9", threadTs: "900.1", assistant: false, slackUser: "ULEAD" });
+  await teamEvent("EvTeam1", { type: "app_mention", user: "UMATE", text: "<@UBOT> Nora, what is the refund window?", channel: "C5", ts: "500.1" });
+  const delivered = computer.received.find((m) => m.type === "chat" && m.text === "what is the refund window?");
+  assert.equal(delivered?.askedBy, team.mate);
+  assert.match(String(delivered?.origin), /^sat_/);
+  assert.equal((await activeThread(team.nora))?.channel, "C9");
+
+  await computerHandlers.turn(hub, team.nora, { type: "turn", askedBy: team.mate, origin: delivered?.origin });
+  await computerHandlers.chat(hub, team.nora, { type: "chat", role: "understudy", text: "Refunds take five working days." });
+  const reply = posts("C5").at(-1);
+  assert.equal(reply?.body.thread_ts, "500.1");
+  assert.equal(reply?.body.username, "Nora");
+  assert.equal(reply?.body.text, "Refunds take five working days.");
+  assert.ok(!posts("C9").some((c) => c.body.text === "Refunds take five working days."));
+  assert.ok((await loadChat(team.nora, 50, team.mate)).some((m) => m.text === "what is the refund window?"));
+  assert.ok(!(await loadChat(team.nora, 50, team.lead)).some((m) => m.text === "what is the refund window?"));
+});
+
+test("in a member's thread a mention without a name stays with the same understudy", { skip }, async () => {
+  const { computer } = await teamSetup();
+  await teamEvent("EvTeam2", { type: "app_mention", user: "UMATE", text: "<@UBOT> and for school books?", channel: "C5", ts: "500.2", thread_ts: "500.1" });
+  assert.equal(computer.received.find((m) => m.type === "chat" && m.text === "and for school books?")?.askedBy, team.mate);
+  await teamEvent("EvTeam3", { type: "app_mention", user: "UMATE", text: "<@UBOT> who is on call?", channel: "C5", ts: "501.1" });
+  assert.ok(!computer.received.some((m) => m.type === "chat" && m.text === "who is on call?"));
+  assert.match(String(posts("C5").at(-1)?.body.text), /Nora/);
+  assert.match(String(posts("C5").at(-1)?.body.text), /Otto/);
+});
+
+test("the computer cannot send a member's answer to someone else's thread", { skip }, async () => {
+  const { hub, computer } = await teamSetup();
+  const { computerHandlers } = await import("./hub/computer-handlers");
+  const mateOrigin = computer.received.find((m) => m.type === "chat" && m.text === "what is the refund window?")?.origin;
+  await computerHandlers.turn(hub, team.nora, { type: "turn", askedBy: team.guest, origin: mateOrigin });
+  await computerHandlers.chat(hub, team.nora, { type: "chat", role: "understudy", text: "Here is the private refund list." });
+  assert.ok(!posts("C5").some((c) => c.body.text === "Here is the private refund list."));
+});
+
+test("someone outside the team talks to a team understudy only once it is open to everyone, and their approvals go to the owner", { skip }, async () => {
+  const { hub, computer } = await teamSetup();
+  const { getDb, schema } = await import("@/lib/db");
+  const { computerHandlers } = await import("./hub/computer-handlers");
+  const { guestTurn } = await import("./slack-askers");
+  await teamEvent("EvGuest1", { type: "app_mention", user: "UGUEST", text: "<@UBOT> Nora, refund order 12", channel: "C6", ts: "600.1" });
+  assert.ok(!computer.received.some((m) => m.type === "chat" && m.text === "refund order 12"));
+  assert.match(String(posts("C6").at(-1)?.body.text), /no understudies/);
+
+  const [nora] = await getDb().select({ tools: schema.agents.tools }).from(schema.agents).where(eq(schema.agents.id, team.nora));
+  await getDb().update(schema.agents).set({ tools: { ...nora.tools, slackAnyone: true } }).where(eq(schema.agents.id, team.nora));
+  await teamEvent("EvGuest2", { type: "app_mention", user: "UGUEST", text: "<@UBOT> Nora, refund order 12", channel: "C6", ts: "600.2" });
+  const delivered = computer.received.find((m) => m.type === "chat" && m.text === "refund order 12");
+  assert.equal(delivered?.askedBy, team.guest);
+
+  await computerHandlers.turn(hub, team.nora, { type: "turn", askedBy: team.guest, origin: delivered?.origin });
+  assert.equal(guestTurn(team.nora), true);
+  const approvalId = await hub.createApproval(team.nora, { summary: "Refund order 12", runId: "" }, "mcp", 3600);
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.id, approvalId));
+  assert.equal(row.askedBy, null);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(!posts("C6").some((c) => JSON.stringify(c.body.blocks ?? "").includes(approvalId)));
+  await computerHandlers.chat(hub, team.nora, { type: "chat", role: "understudy", text: "Your refund is waiting for Lia's approval." });
+  assert.equal(posts("C6").at(-1)?.body.thread_ts, "600.2");
+  await hub.cancelApprovals(team.nora, null);
 });

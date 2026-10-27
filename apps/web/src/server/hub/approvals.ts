@@ -15,6 +15,7 @@ import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
 import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
+import { guestTurn } from "../slack-askers";
 
 export class Approvals {
   private waiters = new Map<string, Set<(answer: Answer) => void>>();
@@ -33,7 +34,8 @@ export class Approvals {
     const id = newId("apr");
     const requestId = source === "computer" && request.id ? request.id : null;
     const expiresAt = timeoutSeconds ? new Date(Date.now() + timeoutSeconds * 1000) : null;
-    const askedBy = request.runId ? null : this.hub.turnAudience(agentId);
+    const guest = !request.runId && guestTurn(agentId);
+    const askedBy = request.runId || guest ? null : this.hub.turnAudience(agentId);
     const roomId = askedBy ? this.hub.turnRoom(agentId) : null;
     const row = {
       id,
@@ -72,7 +74,7 @@ export class Approvals {
     this.hub.broadcast(agentId, { type: "state", state: "waiting_you", note });
     log("approval_created", { agentId, approvalId: id, source, ...(askedBy ? { askedBy } : {}) });
     if (askedBy && roomId) this.hub.rooms.approvalRaised(agentId, roomId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
-    this.notify(agentId, view, askedBy).catch((error) => log("approval_notify_error", { error: String(error) }));
+    this.notify(agentId, view, askedBy, guest).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
   }
 
@@ -244,7 +246,7 @@ export class Approvals {
       .orderBy(desc(schema.approvals.createdAt));
   }
 
-  private async notify(agentId: string, approval: ApprovalView, askedBy: string | null) {
+  private async notify(agentId: string, approval: ApprovalView, askedBy: string | null, guest = false) {
     const db = getDb();
     const [owner] = await db
       .select({ id: schema.user.id, email: schema.user.email, name: schema.agents.name })
@@ -264,7 +266,7 @@ export class Approvals {
       url: "/waiting",
       tag: `approval-${approval.id}`,
     }).catch((error) => log("push_error", { error: String(error) }));
-    const posted = await notifyApprovalOnChannel(this.hub, agentId, approval).catch((error) => (log("approval_channel_error", { error: String(error) }), null));
+    const posted = guest ? null : await notifyApprovalOnChannel(this.hub, agentId, approval).catch((error) => (log("approval_channel_error", { error: String(error) }), null));
     const { text, blocks } = await slackApprovalMessage(owner.name, approval);
     const as = agentIdentity({ id: agentId, name: owner.name });
     const recipients = posted === "slack" ? approvers : [owner, ...approvers];

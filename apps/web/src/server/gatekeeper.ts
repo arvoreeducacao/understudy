@@ -25,6 +25,7 @@ import { SLACK_LIMITS, slackApi, slackMode, slackTools, type GuardInput, type Gu
 import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
 import { OUTSIDER_TOOLS, outsiderLabel, outsiderTurn } from "./channels/turns";
+import { guestTurn } from "./slack-askers";
 import { RateLimiter } from "./rate-limit";
 
 const outsiderLimiter = new RateLimiter();
@@ -276,7 +277,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
 
   builtins.push(...(teamTools(hub, agent) as Builtin[]));
   builtins.push(...(taskTools(hub, agent) as Builtin[]));
-  builtins.push(...(followupTools(hub, agent, { outsider, untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
+  builtins.push(...(followupTools(hub, agent, { outsider: () => outsider() || guestTurn(agent.id), untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
 
   const guard = async (input: GuardInput) => {
     const run = input.toOwner ? null : await runningRun(agent.id);

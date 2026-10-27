@@ -22,6 +22,15 @@ Every channel sorts the person writing into one of three groups, per understudy:
 - **People the owner allowed** (Telegram usernames or ids, phone numbers with country code for WhatsApp, matched on the number and never on the display name; a Telegram username is replaced by the account id the first time it writes). Their message reaches the brain with `external: { channel, sender }`: quoted as data, marked as not the owner, never able to approve anything. It runs in a session of its own, separate from the owner's chat, with no built-in tools and only the restricted gatekeeper address, which offers nothing but asking for approval and telling the owner (labelled with who the understudy was answering, and rate limited). The answer goes back to them.
 - **Anyone else** is held for the owner (Settings › Channels lists it with Let it through, Always allow and Discard, and the owner gets a note in the chat and a push) or dropped, as the owner chooses.
 
+## Slack and team understudies
+
+On Slack, people are panel accounts: the Slack account is matched to the panel account by email or by the link the app sends. Besides the owner, these people can talk to a team understudy there:
+
+- **Its team.** Anyone who may chat with it in the panel can mention it or message the app. The turn is theirs, as in the panel: a session of its own, messages only they see, and approvals that wait for them.
+- **Anyone with an account**, when the owner turns on "Anyone with an account can talk to it on Slack" in the understudy's settings. The turn is private to that person in the same way, but they cannot book follow-ups, and whatever needs approval goes to the owner and the understudy's approvers by direct message, never into the thread.
+
+Each of these conversations is a row in `slack_asker_threads` (understudy, person, channel, thread), kept for 7 days so a later mention in the same thread reaches the same understudy without its name. The message carries the row as `origin`; when the computer starts the turn, the panel takes the row only if it belongs to the person the ledger expected for that turn, and the replies go to that thread only. The owner's own Slack conversation (`slack_threads`) is never taken over by someone else's message.
+
 ## How a conversation flows
 
 1. The channel's endpoint authenticates the provider (Slack's request signature, a per-channel secret header for Telegram webhooks), finds the understudy, sorts the sender and either holds, drops or delivers.
