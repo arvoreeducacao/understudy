@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
 import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
+import { brainAccount, withBrainAccount } from "./brain-account.ts";
 import { gatekeeperUrl, restrictedGatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
@@ -65,6 +66,8 @@ export type BrainConfig = {
 };
 
 export const APPROVAL_POLL_MS = 60 * 60 * 1000;
+
+export const BUDGET_REACHED = "I stopped because this turn reached the spending limit set for me.";
 
 export const VAULT_MCP_PATH = new URL("./vault-mcp.ts", import.meta.url).pathname;
 
@@ -141,7 +144,7 @@ export function restrictedMcpConfig(config: BrainConfig) {
   return { mcpServers: { gatekeeper: { type: "http", url: restrictedGatekeeperUrl(config.serverUrl), headers: { Authorization: `Bearer ${config.token}` } } } };
 }
 
-export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string, restricted = false): string[] {
+export function claudeArgs(mcpConfig: string, system: string, resume?: string | null, model?: string, restricted = false, maxBudgetUsd?: number): string[] {
   const args = [
     "-p",
     "--output-format",
@@ -160,6 +163,7 @@ export function claudeArgs(mcpConfig: string, system: string, resume?: string | 
     system,
   ];
   if (validModel(model)) args.push("--model", validModel(model)!);
+  if (maxBudgetUsd && Number.isFinite(maxBudgetUsd) && maxBudgetUsd > 0) args.push("--max-budget-usd", String(maxBudgetUsd));
   if (resume) args.push("--resume", resume);
   return args;
 }
@@ -276,7 +280,8 @@ export function claudeResult(line: string): { ok: boolean; text: string; session
   try {
     const message = JSON.parse(line);
     if (message.type !== "result") return null;
-    return { ok: !message.is_error, text: String(message.result ?? ""), sessionId: message.session_id };
+    const overBudget = Boolean(message.is_error) && /budget/i.test(String(message.subtype ?? ""));
+    return { ok: !message.is_error, text: overBudget ? BUDGET_REACHED : String(message.result ?? ""), sessionId: message.session_id };
   } catch {
     return null;
   }
@@ -367,9 +372,10 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
   mkdirSync(config.workDir, { recursive: true });
   let child: ChildProcess;
   if (request.brain === "claude") {
-    child = spawn("claude", claudeArgs(JSON.stringify(request.restricted ? restrictedMcpConfig(config) : claudeMcpConfig(config)), request.system, request.resume, request.model, request.restricted), {
+    const account = brainAccount();
+    child = spawn("claude", claudeArgs(JSON.stringify(request.restricted ? restrictedMcpConfig(config) : claudeMcpConfig(config)), request.system, request.resume, request.model, request.restricted, account?.maxUsdPerTurn), {
       cwd: config.workDir,
-      env: claudeEnv(process.env, config.home),
+      env: withBrainAccount(claudeEnv(process.env, config.home), config.serverUrl, account),
       stdio: ["pipe", "pipe", "pipe"],
     });
   } else {

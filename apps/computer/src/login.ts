@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Brain, ComputerToServer } from "@understudy/protocol";
+import { brainAccount } from "./brain-account.ts";
 import { brainLock, claudeConfigDir, clearStaleRefreshLock } from "./brain-lock.ts";
 import { fakeBrainEnabled } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
@@ -131,7 +132,7 @@ export function createLoginManager(options: {
 
   const claudeStatus = async (whenBusy: "wait" | "reuse" = "wait"): Promise<BrainStatus> => {
     if (fakeBrainEnabled(env)) return { brain: "claude", loggedIn: true, account: "fake-brain" };
-    if (apiKeyMode("claude", env)) return { brain: "claude", loggedIn: true, account: "api-key" };
+    if (apiKeyMode("claude", env) || brainAccount()) return { brain: "claude", loggedIn: true, account: "api-key" };
     if (whenBusy === "reuse" && claudeLock.busy()) return lastClaudeStatus ?? { brain: "claude", loggedIn: true };
     lastClaudeStatus = await claudeLock.run(() => readClaudeStatus(env, options.home));
     return lastClaudeStatus;

@@ -8,7 +8,9 @@ import { DeleteAgent } from "@/components/create/DeleteAgent";
 import { LookSheet } from "@/components/create/LookPicker";
 import { SharePanel } from "@/components/create/SharePanel";
 import type { AgentLink } from "@/components/live/useAgentSocket";
+import { BrainAccountPicker } from "@/components/BrainAccountPicker";
 import { ModelPicker } from "@/components/ModelPicker";
+import type { BrainAccountView } from "@/lib/brain-account";
 import { RulesEditor } from "@/components/RulesEditor";
 import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
@@ -25,6 +27,7 @@ export type SettingsData = {
   admin?: boolean;
   model: string | null;
   serverDefaultModel: string | null;
+  brainAccount: BrainAccountView | null;
   rules: OwnerRule[];
   members: { userId: string; name: string; email: string; role: string }[];
   channels: ChannelSettings;
@@ -149,6 +152,12 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
               <div className="max-w-[420px]">
                 <ModelPicker agentId={values.id} initial={data.model} serverDefault={data.serverDefaultModel} />
               </div>
+            </div>
+          )}
+          {values.brain === "claude" && (
+            <div className="fld">
+              <span className="fld-label">{messages.brainAccount.title}</span>
+              <BrainAccountPicker agentId={values.id} initial={data.brainAccount} />
             </div>
           )}
           <p className="m-0 fld-hint">{messages.create.brainLock}</p>

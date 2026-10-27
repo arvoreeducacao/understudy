@@ -63,11 +63,17 @@ export const OwnerRuleSchema = z.discriminatedUnion("kind", [
 ]);
 export const FileEntrySchema = z.object({ path: text, size: z.number(), updatedAt: time });
 export const BrainStatusSchema = z.object({ brain: BrainSchema, loggedIn: z.boolean(), account: optionalText });
+
+export const BRAIN_BUDGET_MAX_USD = 1000;
+
+export const BrainBudgetSchema = z.number().positive().max(BRAIN_BUDGET_MAX_USD);
+
+export const BrainAccountStateSchema = z.object({ key: z.string().max(64), maxUsdPerTurn: BrainBudgetSchema.optional() });
 export const SendAsSchema = z.enum(["bearer", "scheme", "header", "basic", "query"]);
 export const CredentialInfoSchema = z.object({ name: text, username: text, site: optionalText, kind: z.literal("api_key").optional(), sendAs: SendAsSchema.optional(), field: optionalText, tokenPath: optionalText });
 
 export const ComputerToServerSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("hello"), agentId: text, version: text, build: optionalText, brains: z.array(BrainStatusSchema), model: optionalText }),
+  z.object({ type: z.literal("hello"), agentId: text, version: text, build: optionalText, brains: z.array(BrainStatusSchema), model: optionalText, brainAccount: BrainAccountStateSchema.optional() }),
   z.object({ type: z.literal("frame"), jpegBase64: text, width: z.number(), height: z.number(), url: text, desktop: z.boolean().optional() }),
   z.object({ type: z.literal("state"), state: AgentStateSchema, note: optionalText }),
   z.object({ type: z.literal("chat"), runId: optionalText, role: z.literal("understudy"), text, streamId: id.optional(), roomId: id.optional() }),
@@ -135,6 +141,7 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("login_code"), brain: BrainSchema, code: text }),
   z.object({ type: z.literal("set_brain"), brain: BrainSchema }),
   z.object({ type: z.literal("set_model"), model: z.string().max(100) }),
+  z.object({ type: z.literal("set_brain_account"), token: z.string().max(400), maxUsdPerTurn: BrainBudgetSchema.optional() }),
   z.object({ type: z.literal("terminal_open"), terminalId: id, cols: z.number().int().min(20).max(400), rows: z.number().int().min(5).max(200) }),
   z.object({ type: z.literal("terminal_input"), terminalId: id, data: z.string().max(65536) }),
   z.object({ type: z.literal("terminal_resize"), terminalId: id, cols: z.number().int().min(20).max(400), rows: z.number().int().min(5).max(200) }),

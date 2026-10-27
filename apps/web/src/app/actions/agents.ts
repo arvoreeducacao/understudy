@@ -15,6 +15,10 @@ import { computerProfile } from "@/server/computer-profile";
 import { cleanLook, type Look } from "@/lib/look";
 import { agentTabPath } from "@/lib/workspace-tabs";
 import { toolsFrom, parseLook, ownAgent } from "./shared";
+import { brainAccountView, cleanBrainAccount, type BrainAccountInput } from "@/lib/brain-account";
+import { seal } from "@/lib/secret-box";
+import { brainAccountMessage } from "@/server/model-proxy";
+import { allowPrivateUpstreams } from "@/server/safe-fetch";
 
 export async function createAgent(_: { error?: string; redirectTo?: string } | null, form: FormData) {
   const user = await requireUser();
@@ -122,6 +126,21 @@ export async function setAgentModel(agentId: string, model: string) {
   revalidatePath(`/agents/${agent.id}`, "layout");
   revalidatePath("/settings");
   return { model: chosen };
+}
+
+export async function setAgentBrainAccount(agentId: string, input: BrainAccountInput) {
+  const { agent } = await ownAgent(agentId);
+  const cleaned = cleanBrainAccount(input, agent.brainAccount, seal, allowPrivateUpstreams());
+  if (!cleaned.ok) return { ok: false as const, error: messages.brainAccount.problems[cleaned.problem] };
+  const [saved] = await getDb()
+    .update(schema.agents)
+    .set({ brainAccount: cleaned.account, updatedAt: new Date() })
+    .where(eq(schema.agents.id, agent.id))
+    .returning({ id: schema.agents.id, tokenHash: schema.agents.tokenHash, brainAccount: schema.agents.brainAccount });
+  getHub()?.sendToComputer(agent.id, brainAccountMessage(saved));
+  console.log(JSON.stringify({ event: "brain_account_set", agentId: agent.id, own: Boolean(cleaned.account) }));
+  revalidatePath(`/agents/${agent.id}`, "layout");
+  return { ok: true as const, account: brainAccountView(cleaned.account) };
 }
 
 export async function setAgentRules(agentId: string, input: unknown) {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseServerToComputer, PROTOCOL_VERSION, type ComputerToServer, type ServerToComputer } from "@understudy/protocol";
 import { createAgent } from "./agent.ts";
+import { brainAccountState, setBrainAccount } from "./brain-account.ts";
 import { computerSocketUrl } from "./endpoints.ts";
 import { launchBrowser } from "./browser.ts";
 import { applyInput } from "./input.ts";
@@ -142,7 +143,8 @@ async function main() {
   const sayHello = async () => {
     const brains = await login.status();
     const model = agent.model();
-    link.send({ type: "hello", agentId, version: PROTOCOL_VERSION, build: BUILD, brains, ...(model ? { model } : {}) });
+    const account = brainAccountState();
+    link.send({ type: "hello", agentId, version: PROTOCOL_VERSION, build: BUILD, brains, ...(model ? { model } : {}), ...(account ? { brainAccount: account } : {}) });
     outbox({ type: "state", state: agent.state() });
     memorySync.publish();
     files.publish();
@@ -248,6 +250,11 @@ async function main() {
         return;
       case "set_model":
         agent.setModel(message.model);
+        void sayHello();
+        return;
+      case "set_brain_account":
+        setBrainAccount(message.token ? { token: message.token, ...(message.maxUsdPerTurn ? { maxUsdPerTurn: message.maxUsdPerTurn } : {}) } : null);
+        log("main", message.token ? "the brain now runs on this understudy's own key" : "the brain runs on the signed-in account");
         void sayHello();
         return;
       case "set_brain":

@@ -78,6 +78,14 @@ export const twoFactor = pgTable(
 
 export type BrainStatus = { brain: Brain; loggedIn: boolean; account?: string };
 
+export type BrainAccount = {
+  url: string | null;
+  auth: "x-api-key" | "bearer";
+  key: string;
+  last4: string;
+  maxUsdPerTurn: number | null;
+};
+
 export type AgentTools = {
   notifyOwner: boolean;
   slack: boolean;
@@ -146,6 +154,7 @@ export const agents = pgTable(
     tools: jsonb("tools").$type<AgentTools>().notNull(),
     hostId: text("host_id"),
     model: text("model"),
+    brainAccount: jsonb("brain_account").$type<BrainAccount>(),
     rules: jsonb("rules").$type<OwnerRule[]>().notNull().default([]),
     teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
     teamOwned: boolean("team_owned").notNull().default(false),
