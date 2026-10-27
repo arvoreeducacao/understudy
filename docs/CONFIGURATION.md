@@ -32,6 +32,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Lets understudies talk on Slack; an admin can also paste both in the panel under People |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Adds Google sign-in |
 | `SLACK_CONNECTOR_CLIENT_ID`, `SLACK_CONNECTOR_CLIENT_SECRET` | The Slack app the Slack connector signs in with. When both are set, nobody pastes a client: each person only approves on Slack |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | A GitHub App the GitHub connector signs in with. When all three are set, the GitHub connector needs no key: the panel asks GitHub for a one-hour installation token whenever it calls GitHub, and the token never reaches a computer. What understudies can reach is what the app's installation can reach, so only an admin can connect GitHub this way, and the connector's access list decides who uses it; actions that write still ask the owner first. The private key may be written with `\n` for line breaks |
 | `UNDERSTUDY_SMTP_URL` | Outgoing email as an SMTP URL (`smtps://user:password@host:465`); turns on self-service password reset by email. `json` builds messages without sending (development) |
 | `UNDERSTUDY_MAIL_FROM` | Sender of outgoing email; defaults to no-reply at the panel's host |
 | `UNDERSTUDY_GOOGLE_ONLY_DOMAINS` | Domains (comma separated) that sign in only with Google; they skip password and two-step sign-in. Ignored unless Google sign-in is set |

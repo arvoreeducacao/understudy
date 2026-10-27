@@ -177,10 +177,10 @@ export function ConnectForm({ connector, returnAddress }: { connector: Connector
       ) : (
         <div className="conn-ready">
           <Check size={15} aria-hidden />
-          <span>{connector.featured ? t.connectNoKey : t.connectCatalogNoKey}</span>
-          {!connector.featured && (
+          <span>{connector.serverApp ? t.connectServerApp(connector.name) : connector.featured ? t.connectNoKey : t.connectCatalogNoKey}</span>
+          {(!connector.featured || connector.serverApp) && (
             <button type="button" className="conn-link ml-auto" onClick={() => setWantsKey(true)}>
-              {t.connectHasKey}
+              {connector.serverApp ? t.connectOwnKey : t.connectHasKey}
             </button>
           )}
         </div>

@@ -2,6 +2,8 @@ import { ARTIFACT_MAX_BYTES, uploadLimitFrom } from "@understudy/protocol";
 import { AGENT_TALK_CEILING_ENV, parseTalkCeiling } from "./agent-talk";
 import { trustedForAdminList } from "./approval-policy";
 
+export type GithubApp = { appId: string; installationId: string; privateKey: string };
+
 function list(value: string | undefined) {
   return (value ?? "")
     .split(",")
@@ -76,6 +78,12 @@ export const env = {
   },
   get googleEnabled() {
     return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  },
+  get githubApp(): GithubApp | null {
+    const appId = process.env.GITHUB_APP_ID?.trim();
+    const installationId = process.env.GITHUB_APP_INSTALLATION_ID?.trim();
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim().replace(/\\n/g, "\n");
+    return appId && installationId && privateKey ? { appId, installationId, privateKey } : null;
   },
   get slackConnectorClient() {
     const clientId = process.env.SLACK_CONNECTOR_CLIENT_ID?.trim();
