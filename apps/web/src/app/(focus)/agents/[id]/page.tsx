@@ -1,4 +1,4 @@
-import { brainAccountView } from "@/lib/brain-account";
+import { brainAccountView, runsOnOwnKey } from "@/lib/brain-account";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
@@ -154,6 +154,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
         note: agent.stateNote,
         computerStatus: agent.computerStatus,
         brains: agent.brains,
+        ownKey: runsOnOwnKey(agent.brain, agent.brainAccount),
       }}
       ownerName={owner?.name ?? ""}
       access={access}

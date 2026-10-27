@@ -9,7 +9,7 @@ import { LookSheet } from "@/components/create/LookPicker";
 import { SharePanel } from "@/components/create/SharePanel";
 import type { AgentLink } from "@/components/live/useAgentSocket";
 import { ModelPicker } from "@/components/ModelPicker";
-import type { BrainAccountView } from "@/lib/brain-account";
+import { runsOnOwnKey, type BrainAccountView } from "@/lib/brain-account";
 import { RulesEditor } from "@/components/RulesEditor";
 import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
@@ -154,7 +154,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
               </div>
             </div>
           )}
-          {!(values.brain === "claude" && brainKey) && <p className="m-0 fld-hint">{messages.create.brainLock}</p>}
+          {!runsOnOwnKey(values.brain, brainKey) && <p className="m-0 fld-hint">{messages.create.brainLock}</p>}
         </PanelSection>
 
         <PanelSection title={t.toolsTitle} hint={toolsSummary} collapsible>
@@ -181,7 +181,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
         <RulesEditor agentId={values.id} initial={data.rules} />
       </PanelSection>
 
-      <TeamSection agentId={values.id} agentName={values.name} data={data.team} />
+      <TeamSection agentId={values.id} agentName={values.name} data={data.team} ownKey={runsOnOwnKey(values.brain, brainKey)} />
 
       <PanelSection title={t.shareTitle} hint={t.shareSummary(data.members.length)} collapsible>
         <p className="m-0 fld-hint">{t.shareHint}</p>

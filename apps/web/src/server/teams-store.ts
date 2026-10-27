@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { runsOnOwnKey } from "@/lib/brain-account";
 import { getDb, schema } from "@/lib/db";
 import type { AgentTools, TeamRole } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
@@ -130,6 +131,8 @@ export async function loadTeam(teamId: string, userId: string) {
         ownerId: schema.agents.ownerId,
         ownerName: schema.user.name,
         tools: schema.agents.tools,
+        brain: schema.agents.brain,
+        brainAccount: schema.agents.brainAccount,
       })
       .from(schema.agents)
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
@@ -144,7 +147,7 @@ export async function loadTeam(teamId: string, userId: string) {
     team,
     role,
     people,
-    agents: agents.map(({ tools: _, ...agent }) => agent),
+    agents: agents.map(({ tools: _, brain, brainAccount, ...agent }) => ({ ...agent, ownKey: runsOnOwnKey(brain, brainAccount) })),
     connectors: connectors
       .filter(teamConnector)
       .map((connector) => ({ id: connector.id, name: connector.name, agents: agents.filter((agent) => agent.tools.servers?.includes(connector.id)).map((agent) => agent.name) }))

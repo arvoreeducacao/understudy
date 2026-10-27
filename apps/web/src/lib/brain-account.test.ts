@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { brainAccountView, cleanBrainAccount } from "./brain-account";
+import { brainAccountView, cleanBrainAccount, runsOnOwnKey } from "./brain-account";
 
 const seal = (plain: string) => `sealed:${plain}`;
 
@@ -27,4 +27,11 @@ test("bad addresses, keys and limits are refused, and turning it off clears ever
   assert.deepEqual(cleanBrainAccount({ own: true, key: "sk-test-1234abcd", maxUsdPerTurn: 5000 }, null, seal), { ok: false, problem: "budget" });
   assert.ok(cleanBrainAccount({ own: true, url: "http://localhost:4000", key: "sk-test-1234abcd" }, null, seal, true).ok);
   assert.deepEqual(cleanBrainAccount({ own: false, key: "sk-test-1234abcd" }, null, seal), { ok: true, account: null });
+});
+
+test("only a Claude understudy with a key saved runs on its own key", () => {
+  const view = { url: null, auth: "x-api-key" as const, last4: "abcd", maxUsdPerTurn: null };
+  assert.equal(runsOnOwnKey("claude", view), true);
+  assert.equal(runsOnOwnKey("claude", null), false);
+  assert.equal(runsOnOwnKey("codex", view), false);
 });
