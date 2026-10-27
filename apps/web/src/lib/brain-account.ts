@@ -1,4 +1,4 @@
-import { BRAIN_BUDGET_MAX_USD } from "@understudy/protocol";
+import { BRAIN_BUDGET_MAX_USD, type Brain } from "@understudy/protocol";
 import type { BrainAccount } from "@/lib/db/schema";
 
 export type BrainAccountView = { url: string | null; auth: BrainAccount["auth"]; last4: string; maxUsdPerTurn: number | null };
@@ -6,6 +6,10 @@ export type BrainAccountView = { url: string | null; auth: BrainAccount["auth"];
 export type BrainAccountInput = { own: boolean; url?: string; auth?: string; key?: string; maxUsdPerTurn?: string | number | null };
 
 export type BrainAccountProblem = "url" | "key" | "budget";
+
+export function runsOnOwnKey(brain: Brain, account: BrainAccount | BrainAccountView | null | undefined) {
+  return brain === "claude" && Boolean(account);
+}
 
 export function brainAccountView(account: BrainAccount | null | undefined): BrainAccountView | null {
   if (!account) return null;

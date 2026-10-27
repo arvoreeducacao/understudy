@@ -16,7 +16,7 @@ export type TeamSettings = {
   canRelease: boolean;
 };
 
-export function TeamSection({ agentId, agentName, data }: { agentId: string; agentName: string; data: TeamSettings }) {
+export function TeamSection({ agentId, agentName, data, ownKey = false }: { agentId: string; agentName: string; data: TeamSettings; ownKey?: boolean }) {
   const t = messages.teams;
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -110,7 +110,7 @@ export function TeamSection({ agentId, agentName, data }: { agentId: string; age
             <li>{t.changeTasks}</li>
             <li>{t.changeMemory(agentName)}</li>
             <li className={data.personal.length ? "is-warn" : undefined}>{data.personal.length ? t.changeConnectors(data.personal.join(", ")) : t.changeNoConnectors}</li>
-            <li>{t.changeSubscription}</li>
+            <li>{ownKey ? t.changeKey : t.changeSubscription}</li>
           </ul>
           <div className="flex gap-2">
             <button type="submit" className="btn pri sm" disabled={pending || !teamId}>

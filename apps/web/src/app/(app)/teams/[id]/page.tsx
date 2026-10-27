@@ -58,7 +58,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
                         <span className="truncate">{agent.note || messages.states[agent.state]}</span>
                       </span>
                       <span className="text-smoke text-[11.5px] truncate">
-                        {agent.teamOwned ? t.runsOn(agent.ownerName.split(" ")[0]) : t.lentShort(agent.ownerName.split(" ")[0])}
+                        {agent.teamOwned ? (agent.ownKey ? t.runsOnKey : t.runsOn(agent.ownerName.split(" ")[0])) : t.lentShort(agent.ownerName.split(" ")[0])}
                       </span>
                     </span>
                   </Link>

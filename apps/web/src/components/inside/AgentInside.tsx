@@ -101,6 +101,7 @@ type AgentInfo = {
   note: string | null;
   computerStatus: string;
   brains: BrainStatus[];
+  ownKey: boolean;
 };
 
 export function AgentInside({
@@ -245,6 +246,14 @@ export function AgentInside({
   const state: AgentState = approvals.length > 0 ? "waiting_you" : live.state;
   const toAnswer = approvals.filter((approval) => approval.forYou || canApprove(access)).length;
   const brainName = messages.brains[agent.brain].name;
+  const ownerFirst = ownerName.split(" ")[0];
+  const subtitle = team
+    ? agent.ownKey
+      ? messages.teams.agentKeyLine(team.name)
+      : messages.teams.agentLine(team.name, ownerFirst, brainName)
+    : agent.ownKey
+      ? t.ownKeyLine(ownerFirst)
+      : t.ownerLine(ownerFirst, brainName);
 
   function submit() {
     const text = draft.trim();
@@ -353,7 +362,7 @@ export function AgentInside({
             </h1>
             <div className="cx-subtitle">
               <span className={`cx-state ${live.online ? STATE_PILL[state] : ""}`} aria-hidden />
-              <span className="truncate">{team ? messages.teams.agentLine(team.name, ownerName.split(" ")[0], brainName) : t.ownerLine(ownerName.split(" ")[0], brainName)}</span>
+              <span className="truncate">{subtitle}</span>
             </div>
           </div>
           <button
