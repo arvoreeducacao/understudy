@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type {
   AgentStateSchema,
   ApprovalRequestSchema,
+  BrainAccountStateSchema,
   BrainSchema,
   BrainStatusSchema,
   ComputerSpecSchema,
@@ -48,6 +49,7 @@ export type FileEntry = z.infer<typeof FileEntrySchema>;
 export type JobInfo = z.infer<typeof JobInfoSchema>;
 export type OwnerRule = z.infer<typeof OwnerRuleSchema>;
 export type BrainStatus = z.infer<typeof BrainStatusSchema>;
+export type BrainAccountState = z.infer<typeof BrainAccountStateSchema>;
 export type CredentialInfo = z.infer<typeof CredentialInfoSchema>;
 export type SendAs = z.infer<typeof SendAsSchema>;
 export type ComputerToServer = z.infer<typeof ComputerToServerSchema>;
@@ -71,4 +73,5 @@ export const PATHS = {
   viewerSocket: "/api/ws/viewer",
   gatekeeperMcp: "/api/mcp",
   gatekeeperMcpRestricted: "/api/mcp/restricted",
+  modelProxy: "/api/model",
 } as const;

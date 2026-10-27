@@ -66,6 +66,16 @@ Everything is configured through `.env` at the repository root (copy `example.en
 
 For example, to run every understudy on one Anthropic key, set `ANTHROPIC_API_KEY` and `UNDERSTUDY_COMPUTER_ENV=ANTHROPIC_API_KEY`.
 
+## A key of its own per understudy
+
+Instead of one key for every computer, a manager of an understudy can give it a key of its own under Settings › Brain and model, with the Claude brain. Nothing is configured on the server.
+
+- **Where it goes.** An Anthropic key, or the address and key of any gateway that speaks the Anthropic Messages API, sent as `x-api-key` or as `Authorization: Bearer`. The address must be `https` without user, password or query; `UNDERSTUDY_ALLOW_PRIVATE_MCP=1` also allows `http` and private addresses, for local development.
+- **Where it stays.** The key is stored in the panel encrypted with `UNDERSTUDY_SECRET_KEY` and only its last four characters are shown again. The computer never receives it: it gets a token that is valid only for the panel's model proxy (`/api/model`) and only for that understudy, and changes when the understudy's computer token is rotated. The proxy forwards only Messages calls and adds the real key on the way out.
+- **Changing the address** asks for the key again, so a saved key is never sent somewhere else.
+- **Spending limit.** An optional limit in US dollars per turn, up to 1000, passed to the Claude CLI as `--max-budget-usd`. When a turn reaches it, the understudy stops and says so. The CLI enforces it on the computer, from its own cost estimate; a cap the computer cannot lift belongs in the gateway.
+- **Turning it off** goes back to the signed-in account, or to the computer-wide variables above.
+
 ## Talking on Telegram
 
 Owners connect a bot of their own per understudy under Settings › Channels: create it with @BotFather, paste the token, then open the bot with the Start link shown there so their Telegram account counts as the owner. Nothing is needed on the server. Everything else (allowed people, held messages, approvals with buttons) works as described in [CHANNELS.md](CHANNELS.md).

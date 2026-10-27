@@ -1,3 +1,4 @@
+import { brainAccountView } from "@/lib/brain-account";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { AgentInside } from "@/components/inside/AgentInside";
@@ -64,6 +65,7 @@ async function loadOwnerData(agent: Agent, userId: string, email: string, admin:
       admin,
       model: agent.model,
       serverDefaultModel: defaultModel(),
+      brainAccount: brainAccountView(agent.brainAccount),
       rules: agent.rules ?? [],
       members,
       channels,

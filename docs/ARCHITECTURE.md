@@ -36,6 +36,7 @@ Message shapes live in `packages/protocol/src/index.ts`. Changing them is a cont
 ## Security rules
 
 - Subscription credentials stay on the computer volume. The panel never sees them.
+- A key of an understudy's own stays in the panel, encrypted. The computer holds only a token derived from that understudy's id and computer token, which the panel's model proxy (`/api/model`, `apps/web/src/server/model-proxy.ts`) trades for the real key on Messages calls only, through the same private-address guard as connectors. [CONFIGURATION.md](CONFIGURATION.md) has the details.
 - Password fields are masked in recordings (`masked: true`, value replaced).
 - The gatekeeper only exposes tools the owner enabled for that understudy, and logs every call.
 - Slack and connectors are gatekeeper tools too. The `slack_*` tools (list channels, read, join, post, DM, share a file from `~/files/outbox`) use the panel's Slack app and post with the understudy's name and face; each owner picks per understudy whether they ask first (default), post without asking, or are off. Owner rules are checked on every outward call, even without asking, and writes are rate limited per understudy. Connectors are remote MCP servers an admin adds under People; the panel tests one when it is added and lists its actions.
