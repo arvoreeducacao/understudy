@@ -38,6 +38,9 @@ admin_emails="${ADMIN_EMAILS:-$(existing UNDERSTUDY_ADMIN_EMAILS)}"
 slack_token="${SLACK_BOT_TOKEN:-$(existing SLACK_BOT_TOKEN)}"
 slack_connector_client_id="${SLACK_CONNECTOR_CLIENT_ID:-$(existing SLACK_CONNECTOR_CLIENT_ID)}"
 slack_connector_client_secret="${SLACK_CONNECTOR_CLIENT_SECRET:-$(existing SLACK_CONNECTOR_CLIENT_SECRET)}"
+github_app_id="${GITHUB_APP_ID:-$(existing GITHUB_APP_ID)}"
+github_app_installation_id="${GITHUB_APP_INSTALLATION_ID:-$(existing GITHUB_APP_INSTALLATION_ID)}"
+github_app_private_key="${GITHUB_APP_PRIVATE_KEY:-$(existing GITHUB_APP_PRIVATE_KEY)}"
 
 kubectl -n "$K8S_NAMESPACE" create secret generic "$secret" \
   --from-literal=DATABASE_URL="$database_url" \
@@ -50,6 +53,9 @@ kubectl -n "$K8S_NAMESPACE" create secret generic "$secret" \
   --from-literal=SLACK_BOT_TOKEN="$slack_token" \
   --from-literal=SLACK_CONNECTOR_CLIENT_ID="$slack_connector_client_id" \
   --from-literal=SLACK_CONNECTOR_CLIENT_SECRET="$slack_connector_client_secret" \
+  --from-literal=GITHUB_APP_ID="$github_app_id" \
+  --from-literal=GITHUB_APP_INSTALLATION_ID="$github_app_installation_id" \
+  --from-literal=GITHUB_APP_PRIVATE_KEY="$github_app_private_key" \
   --from-literal=UNDERSTUDY_TIMEZONE="${TIMEZONE:-UTC}" \
   --from-literal=UNDERSTUDY_HOST_IDS="${HOST_IDS:-${HOST_ID:-${NAME_PREFIX}-host-1}}" \
   --from-literal=UNDERSTUDY_BLOCKED_CIDRS="${BLOCKED_CIDRS:-}" \

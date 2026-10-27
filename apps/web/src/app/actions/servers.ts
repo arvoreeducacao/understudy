@@ -6,6 +6,7 @@ import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { messages } from "@/lib/messages";
 import { forgetServer, slugify, testConnection } from "@/server/upstream";
+import { usesGithubApp } from "@/server/github-app";
 import { seal } from "@/lib/secret-box";
 import { searchCatalog } from "@/server/connector-catalog";
 import { beginSignIn, oauthCallbackUrl, oauthSupport, safeReturnPath, storedClient } from "@/server/connector-oauth";
@@ -49,6 +50,7 @@ export async function addMcpServer(_: AddServerState, form: FormData): Promise<A
     allowedEmails: startingAccess(user),
     oauthClient: null,
   };
+  if (usesGithubApp(row) && !user.admin) return { ok: false, message: messages.admin.serverAppAdminOnly };
   const featured = featuredFor(url);
   if (featured?.signIn && !headerValue) return { ok: false, message: "", signIn: { needsClient: featured.signIn.needsClient && !presetClientFor(url), returnAddress: oauthCallbackUrl() } };
   const test = await testConnection(row);

@@ -6,6 +6,7 @@ import { open } from "@/lib/secret-box";
 import { renewSignIn, SignInNeededError, StoredOAuthProvider, usesOAuth } from "./connector-oauth";
 import { answersGmailItself, GMAIL_ALWAYS_ASK, GMAIL_TOOLS, gmailApi, runGmailTool } from "./gmail-direct";
 import { actsAsPerson } from "@/lib/connector-showcase";
+import { githubAppToken, usesGithubApp } from "./github-app";
 import { safeFetch } from "./safe-fetch";
 import type { ToolHints } from "@/lib/tool-policy";
 
@@ -33,6 +34,7 @@ const toolCache = new Map<string, { at: number; tools: UpstreamTool[] }>();
 async function connect(server: UpstreamServer, userId?: string) {
   const headers: Record<string, string> = {};
   if (server.headerName && server.headerValue) headers[server.headerName] = open(server.headerValue);
+  if (usesGithubApp(server)) headers.Authorization = `Bearer ${await githubAppToken()}`;
   const client = new Client({ name: "understudy-gatekeeper", version: "1.0.0" });
   let authProvider: StoredOAuthProvider | undefined;
   if (usesOAuth(server)) {

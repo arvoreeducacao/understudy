@@ -76,7 +76,7 @@ Every script is idempotent: it finds what already exists by name and tag and cre
 
 RDS rotates the database password every seven days. With `WEB_ROLE_ARN` set, `k8s/secret.sh` lets that role read the database secret and stores the secret's ARN as `DATABASE_PASSWORD_SECRET_ARN` instead of putting the password in `DATABASE_URL`; the panel then reads the current password whenever it opens a connection, so a rotation needs no redeploy. Without `WEB_ROLE_ARN` the password is copied into `DATABASE_URL` and you must rerun `k8s/secret.sh` and restart the panel after every rotation.
 
-Random values are kept across runs: `k8s/secret.sh` reuses what the Secret already holds. Set `SLACK_BOT_TOKEN`, `SLACK_CONNECTOR_CLIENT_ID`, `SLACK_CONNECTOR_CLIENT_SECRET` or `ADMIN_EMAILS` in the environment and rerun it to change them.
+Random values are kept across runs: `k8s/secret.sh` reuses what the Secret already holds. Set `SLACK_BOT_TOKEN`, `SLACK_CONNECTOR_CLIENT_ID`, `SLACK_CONNECTOR_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` or `ADMIN_EMAILS` in the environment and rerun it to change them.
 
 ## Continuous deployment
 

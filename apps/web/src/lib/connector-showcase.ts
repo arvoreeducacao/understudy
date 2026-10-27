@@ -16,6 +16,7 @@ export type Connector = {
   keyPage?: string;
   icon?: string;
   signIn?: { needsClient: boolean };
+  serverApp?: boolean;
   oauth?: { scope: string; authorizeParams?: Record<string, string> };
   featured: boolean;
 };

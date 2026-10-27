@@ -499,8 +499,10 @@ export const en = {
     connectKeySafe: "It is stored locked on the server and never shown again.",
     connectKeyWhere: (name: string) => `Where to get a ${name} key`,
     connectNoKey: "No key needed. It works right away.",
+    connectServerApp: (name: string) => `No key needed: this server signs in to ${name} with its own app.`,
     connectCatalogNoKey: "The catalog lists no key for this one.",
     connectHasKey: "It asks for a key",
+    connectOwnKey: "Use a key of my own",
     connectCommunity: "Published by a person on GitHub, not by the company behind the system. Connect it only if you trust who made it.",
     connectDetails: "Technical details",
     connectCancel: "Cancel",
@@ -548,6 +550,7 @@ export const en = {
     presetKeyPlaceholder: "Paste your key",
     serverTesting: "Testing the connection…",
     serverBadInput: "Give it a name and an address that starts with https://.",
+    serverAppAdminOnly: "Only an admin can connect this with the server's app. Paste a key of your own instead.",
     serverProblem: {
       unauthorized: "The server refused the key. Check the header name and the key, including any \"Bearer \" before it.",
       not_found: "Nothing answers at that address. Check the path (it often ends in /mcp).",

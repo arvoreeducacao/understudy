@@ -499,8 +499,10 @@ export const ptBR: Messages = {
     connectKeySafe: "Ela fica guardada trancada no servidor e nunca mais aparece.",
     connectKeyWhere: (name: string) => `Onde pegar a chave do ${name}`,
     connectNoKey: "Não precisa de chave. Funciona na hora.",
+    connectServerApp: (name: string) => `Não precisa de chave: este servidor entra no ${name} com o app dele.`,
     connectCatalogNoKey: "O catálogo não indica chave para este.",
     connectHasKey: "Ele pede uma chave",
+    connectOwnKey: "Usar uma chave minha",
     connectCommunity: "Publicado por uma pessoa no GitHub, não pela empresa do sistema. Conecte só se você confia em quem fez.",
     connectDetails: "Detalhes técnicos",
     connectCancel: "Cancelar",
@@ -548,6 +550,7 @@ export const ptBR: Messages = {
     presetKeyPlaceholder: "Cole a sua chave",
     serverTesting: "Testando a conexão…",
     serverBadInput: "Dê um nome e um endereço que comece com https://.",
+    serverAppAdminOnly: "Só um admin conecta isso com o app do servidor. Cole uma chave sua.",
     serverProblem: {
       unauthorized: "O servidor recusou a chave. Confira o nome do header e a chave, inclusive o \"Bearer \" antes dela.",
       not_found: "Nada responde nesse endereço. Confira o caminho (costuma terminar em /mcp).",
