@@ -135,6 +135,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .pill.s { background: #14223a; color: var(--sky); }
 .pill.a { background: #33270f; color: var(--amber); }
 button.pill { border: 0; cursor: pointer; }
+button.pill[aria-pressed="true"] { background: #fff; color: #0b0c10; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .card { background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 20px; backdrop-filter: blur(24px) saturate(140%); -webkit-backdrop-filter: blur(24px) saturate(140%); box-shadow: 0 24px 60px -36px rgb(0 0 0 / .7), inset 0 1px 0 rgb(255 255 255 / .05); }
 a.card { transition: transform .2s cubic-bezier(.2,.8,.2,1), border-color .2s, background .2s; }

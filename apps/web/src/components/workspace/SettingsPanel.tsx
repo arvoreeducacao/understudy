@@ -8,7 +8,6 @@ import { DeleteAgent } from "@/components/create/DeleteAgent";
 import { LookSheet } from "@/components/create/LookPicker";
 import { SharePanel } from "@/components/create/SharePanel";
 import type { AgentLink } from "@/components/live/useAgentSocket";
-import { BrainAccountPicker } from "@/components/BrainAccountPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import type { BrainAccountView } from "@/lib/brain-account";
 import { RulesEditor } from "@/components/RulesEditor";
@@ -43,7 +42,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
   const { live, send } = link;
   const { values } = data;
   const [brain, setBrain] = useState<Brain>(values.brain);
-  const [ownKey, setOwnKey] = useState(Boolean(data.brainAccount));
+  const [brainKey, setBrainKey] = useState(data.brainAccount);
   const [name, setName] = useState(values.name);
   const [look, setLook] = useState<Look>(values.look);
   const [lookOpen, setLookOpen] = useState(false);
@@ -146,13 +145,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
         </PanelSection>
 
         <PanelSection title={t.brainTitle} hint={t.brainHint}>
-          <BrainConnect live={live} send={send} current={brain} onSelect={setBrain} ownKey={values.brain === "claude" && ownKey} />
-          {values.brain === "claude" && (
-            <div className="fld">
-              <span className="fld-label">{messages.brainAccount.title}</span>
-              <BrainAccountPicker agentId={values.id} initial={data.brainAccount} onOwnChange={setOwnKey} />
-            </div>
-          )}
+          <BrainConnect live={live} send={send} current={brain} onSelect={setBrain} claudeKey={{ agentId: values.id, saved: brainKey, onChange: setBrainKey }} />
           {values.brain === "claude" && (
             <div className="fld">
               <span className="fld-label">{messages.models.title}</span>
@@ -161,7 +154,7 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
               </div>
             </div>
           )}
-          {!(values.brain === "claude" && ownKey) && <p className="m-0 fld-hint">{messages.create.brainLock}</p>}
+          {!(values.brain === "claude" && brainKey) && <p className="m-0 fld-hint">{messages.create.brainLock}</p>}
         </PanelSection>
 
         <PanelSection title={t.toolsTitle} hint={toolsSummary} collapsible>
