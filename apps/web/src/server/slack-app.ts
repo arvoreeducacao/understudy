@@ -80,7 +80,7 @@ function fold(text: string) {
   return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
-export function pickAgent<T extends { id: string; name: string }>(text: string, agents: T[]): { agent: T; text: string } | { agent: null; reason: "none" | "ambiguous" } {
+export function pickAgent<T extends { id: string; name: string }>(text: string, agents: T[], unnamed: T[] = agents): { agent: T; text: string } | { agent: null; reason: "none" | "ambiguous" } {
   const clean = text.trim();
   const folded = fold(clean);
   const byLength = [...agents].sort((a, b) => b.name.length - a.name.length);
@@ -93,6 +93,6 @@ export function pickAgent<T extends { id: string; name: string }>(text: string, 
       if (/[\s,:;.!?-]/.test(next)) return { agent, text: clean.slice(agent.name.trim().length).replace(/^[\s,:;.!?-]+/, "").trim() };
     }
   }
-  if (agents.length === 1) return { agent: agents[0], text: clean };
+  if (unnamed.length === 1) return { agent: unnamed[0], text: clean };
   return { agent: null, reason: agents.length === 0 ? "none" : "ambiguous" };
 }

@@ -605,3 +605,24 @@ test("someone outside the team talks to a team understudy only once it is open t
   assert.equal(posts("C6").at(-1)?.body.thread_ts, "600.2");
   await hub.cancelApprovals(team.nora, null);
 });
+
+test("without a name, a message goes to the person's own understudy first and never to one opened to everyone", { skip }, async () => {
+  const { computer } = await teamSetup();
+  const { getDb, schema } = await import("@/lib/db");
+  const { loadChat } = await import("@/lib/views");
+  const { unnamedAgents } = await import("./slack-askers");
+  const agent = (id: string, reach: "own" | "team" | "open") => ({ id, name: id, ownerId: "x", reach });
+  assert.deepEqual(unnamedAgents([agent("a", "team"), agent("b", "own"), agent("c", "open")]).map((a) => a.id), ["b"]);
+  assert.deepEqual(unnamedAgents([agent("a", "team"), agent("c", "open")]).map((a) => a.id), ["a"]);
+  assert.deepEqual(unnamedAgents([agent("c", "open")]), []);
+
+  await teamEvent("EvUnnamed1", { type: "app_mention", user: "UGUEST", text: "<@UBOT> refund order 13", channel: "C7", ts: "700.1" });
+  assert.ok(!computer.received.some((m) => m.type === "chat" && m.text === "refund order 13"));
+  assert.match(String(posts("C7").at(-1)?.body.text), /Which understudy\?.*Nora/);
+
+  const look = { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" };
+  await getDb().insert(schema.agents).values({ id: "agt_slack_mia", ownerId: team.mate, name: "Mia", look, tokenHash: "slack_hash_mia", tools: { notifyOwner: true, slack: false, slackChannels: [] } } as never);
+  await teamEvent("EvUnnamed2", { type: "app_mention", user: "UMATE", text: "<@UBOT> book my dentist", channel: "C7", ts: "701.1" });
+  assert.ok((await loadChat("agt_slack_mia", 50, team.mate)).some((m) => m.text === "book my dentist"));
+  assert.ok(!computer.received.some((m) => m.type === "chat" && m.text === "book my dentist"));
+});

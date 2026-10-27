@@ -9,7 +9,7 @@ export const ASKER_THREAD_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ORIGIN_PREFIX = "sat_";
 
-export type SlackAgent = { id: string; name: string; ownerId: string };
+export type SlackAgent = { id: string; name: string; ownerId: string; reach: "own" | "team" | "open" };
 
 type AskerTurn = { channel: string; threadTs: string | null; guest: boolean };
 
@@ -30,8 +30,14 @@ export async function slackAgentsFor(userId: string): Promise<SlackAgent[]> {
       .where(and(isNotNull(schema.agents.teamId), sql`(${schema.agents.tools} ->> 'slackAnyone') = 'true'`)),
   ]);
   const seen = new Map<string, SlackAgent>();
-  for (const agent of [...owned, ...teams, ...open]) if (!seen.has(agent.id)) seen.set(agent.id, agent);
+  const reached = [...owned.map((agent) => ({ ...agent, reach: "own" as const })), ...teams.map((agent) => ({ ...agent, reach: "team" as const })), ...open.map((agent) => ({ ...agent, reach: "open" as const }))];
+  for (const agent of reached) if (!seen.has(agent.id)) seen.set(agent.id, agent);
   return [...seen.values()];
+}
+
+export function unnamedAgents(agents: SlackAgent[]) {
+  const own = agents.filter((agent) => agent.reach === "own");
+  return own.length ? own : agents.filter((agent) => agent.reach === "team");
 }
 
 export function askerThreadId(input: { agentId: string; askedBy: string; channel: string; threadTs?: string | null }) {
