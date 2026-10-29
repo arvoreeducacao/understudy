@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url && "set TEST_DATABASE_URL to a disposable Postgres to run";
 
 if (url) process.env.DATABASE_URL = url;
 
-const ids = { owner: "usr_team_owner", other: "usr_team_other", mine: "agt_team_mine", mate: "agt_team_mate", foreign: "agt_team_foreign" };
+const ids = { owner: "usr_team_owner", other: "usr_team_other", mine: "agt_team_mine", mate: "agt_team_mate", foreign: "agt_team_foreign", team: "team_team_crew", lead: "agt_team_lead", crew: "agt_team_crew" };
 
 before(async () => {
   if (!url) return;
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();
   await (await import("./test-db")).migrateTestDb();
+  await db.delete(schema.teams).where(eq(schema.teams.id, ids.team));
   await db.delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.other]));
   await db.insert(schema.user).values([
     { id: ids.owner, name: "Owner", email: "team-owner@test.local", status: "approved" },
@@ -26,12 +27,22 @@ before(async () => {
     { id: ids.mate, ownerId: ids.owner, name: "Ben", look, tokenHash: "hash_team_mate", tools } as never,
     { id: ids.foreign, ownerId: ids.other, name: "Cleo", look, tokenHash: "hash_team_foreign", tools } as never,
   ]);
+  await db.insert(schema.teams).values({ id: ids.team, name: "Crew", createdBy: ids.owner });
+  await db.insert(schema.teamMembers).values([
+    { teamId: ids.team, userId: ids.owner, role: "admin" },
+    { teamId: ids.team, userId: ids.other, role: "member" },
+  ]);
+  await db.insert(schema.agents).values([
+    { id: ids.lead, ownerId: ids.owner, name: "Eli", look, tokenHash: "hash_team_lead", tools, teamId: ids.team } as never,
+    { id: ids.crew, ownerId: ids.other, name: "Dora", look, tokenHash: "hash_team_crew", tools, teamId: ids.team } as never,
+  ]);
   await db.insert(schema.agentMembers).values({ agentId: ids.foreign, userId: ids.owner, role: "approver" });
 });
 
 after(async () => {
   if (!url) return;
   const { getDb, schema, getPool } = await import("@/lib/db");
+  await getDb().delete(schema.teams).where(eq(schema.teams.id, ids.team));
   await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.other]));
   await getPool().end();
 });
@@ -39,19 +50,29 @@ after(async () => {
 test("an agent shared with the owner by someone else is not a teammate, so it can be neither messaged nor handed work", { skip }, async () => {
   const { listTeammates, pickTeammate } = await import("./team");
   const mates = await listTeammates({ id: ids.mine, ownerId: ids.owner });
-  assert.deepEqual(mates.map((mate) => mate.id), [ids.mate]);
+  assert.deepEqual(mates.map((mate) => mate.id).sort(), [ids.lead, ids.mate].sort());
   assert.equal(pickTeammate(mates, "Cleo"), null);
   assert.equal(pickTeammate(mates, ids.foreign), null);
   const theirs = await listTeammates({ id: ids.foreign, ownerId: ids.other });
-  assert.deepEqual(theirs, []);
+  assert.deepEqual(theirs.map((mate) => mate.id), [ids.crew]);
+});
+
+test("on a team, the understudies of the other people on it are teammates too, and say whose they are", { skip }, async () => {
+  const { listTeammates } = await import("./team");
+  const lead = await listTeammates({ id: ids.lead, ownerId: ids.owner, teamId: ids.team });
+  assert.deepEqual(lead.map((mate) => [mate.name, mate.owner]).sort(), [["Ada", null], ["Ben", null], ["Dora", "Other"]]);
+  const crew = await listTeammates({ id: ids.crew, ownerId: ids.other, teamId: ids.team });
+  assert.deepEqual(crew.map((mate) => [mate.name, mate.owner]).sort(), [["Cleo", null], ["Eli", "Owner"]]);
+  const ownOnly = await listTeammates({ id: ids.lead, ownerId: ids.owner, teamId: ids.team }, { team: false });
+  assert.deepEqual(ownOnly.map((mate) => mate.name).sort(), ["Ada", "Ben"]);
 });
 
 function fakeHub() {
-  const delivered: { agentId: string; text?: string }[] = [];
+  const delivered: { agentId: string; text?: string; fromAgent?: unknown }[] = [];
   return {
     delivered,
-    deliver: async (agentId: string, message: { text?: string }) => {
-      delivered.push({ agentId, text: message.text });
+    deliver: async (agentId: string, message: { text?: string; fromAgent?: unknown }) => {
+      delivered.push({ agentId, text: message.text, fromAgent: message.fromAgent });
       return { status: "sent" };
     },
     addMessage: async () => {},
@@ -61,11 +82,11 @@ function fakeHub() {
   };
 }
 
-async function toolsFor(hub: ReturnType<typeof fakeHub>) {
+async function toolsFor(hub: ReturnType<typeof fakeHub>, agentId: string = ids.mine) {
   const { getDb, schema } = await import("@/lib/db");
   const { eq } = await import("drizzle-orm");
   const { teamTools } = await import("./team");
-  const [agent] = await getDb().select().from(schema.agents).where(eq(schema.agents.id, ids.mine));
+  const [agent] = await getDb().select().from(schema.agents).where(eq(schema.agents.id, agentId));
   const tools = teamTools(hub as never, agent);
   const tool = (name: string) => tools.find((t) => t.name === name)!.run as unknown as (args: object) => Promise<{ content: { text: string }[]; isError?: boolean }>;
   return { message: tool("message_agent") };
@@ -73,9 +94,23 @@ async function toolsFor(hub: ReturnType<typeof fakeHub>) {
 
 async function clearPair() {
   const { getDb, schema } = await import("@/lib/db");
-  await getDb().delete(schema.agentMessages).where(inArray(schema.agentMessages.fromAgentId, [ids.mine, ids.mate]));
+  await getDb().delete(schema.agentMessages).where(inArray(schema.agentMessages.fromAgentId, [ids.mine, ids.mate, ids.lead]));
   await getDb().delete(schema.inboundQueue).where(inArray(schema.inboundQueue.agentId, [ids.mine, ids.mate]));
 }
+
+test("a message to another owner's understudy on the team says whose understudy sent it", { skip }, async () => {
+  await clearPair();
+  const hub = fakeHub();
+  const { message } = await toolsFor(hub, ids.lead);
+  assert.equal((await message({ agent: "Dora", text: "is the Aurora invoice out?" })).isError, undefined);
+  assert.equal((await message({ agent: "Ada", text: "Dora has the invoice" })).isError, undefined);
+  assert.deepEqual(hub.delivered, [
+    { agentId: ids.crew, text: "is the Aurora invoice out?", fromAgent: { id: ids.lead, name: "Eli", owner: "Owner" } },
+    { agentId: ids.mine, text: "Dora has the invoice", fromAgent: { id: ids.lead, name: "Eli" } },
+  ]);
+  const offTeam = await toolsFor(hub, ids.mine);
+  assert.equal((await offTeam.message({ agent: "Dora", text: "hi" })).isError, true);
+});
 
 test("with no ceiling set, two understudies can go back and forth far past the old limits", { skip }, async () => {
   delete process.env.UNDERSTUDY_AGENT_TALK_CEILING;

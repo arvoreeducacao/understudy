@@ -113,3 +113,26 @@ test("a member's day is not summarized into the journal the whole team shares", 
   assert.equal(requests[1].resume ?? null, null);
   assert.deepEqual(memory.lastJournalLines(), []);
 });
+
+test("a teammate that belongs to someone else on the team is named with its owner", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-team-mate-"));
+  const requests: TurnRequest[] = [];
+  const agent = createAgent({
+    config: { home, workDir: join(home, "work"), serverUrl: "http://x", token: "t" },
+    memory: createMemory(home),
+    settingsFile: join(home, ".understudy", "settings.json"),
+    send: () => true,
+    today: () => "2026-10-23",
+    runTurn: ((_config: unknown, request: TurnRequest) => {
+      requests.push(request);
+      return { done: Promise.resolve({ ok: true, text: "", sessionId: `s${requests.length}` }), cancel: () => {} };
+    }) as never,
+  });
+  agent.enqueue({ kind: "chat", text: "Is the Aurora invoice out?", from: "Eli", fromAgent: { id: "agt_eli", name: "Eli", owner: "Marina Souza" } });
+  await settle();
+  agent.enqueue({ kind: "chat", text: "Weekly numbers are in", from: "Ben", fromAgent: { id: "agt_ben", name: "Ben" } });
+  await settle();
+  assert.match(requests[0].prompt, /Message from your teammate "Eli", another understudy, which belongs to "Marina Souza" on your team, not to your owner\. What you answer reaches that person/);
+  assert.match(requests[1].prompt, /Message from your teammate "Ben", another understudy \(not your owner\)/);
+  assert.doesNotMatch(requests[1].prompt, /belongs to/);
+});
