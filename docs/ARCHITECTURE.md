@@ -105,11 +105,13 @@ A room is a group chat between an owner and two or more of their own understudie
 
 ## Conversations between understudies
 
-Outside rooms, an understudy reaches a teammate with `message_agent` (a chat turn marked as coming from a teammate) or `hand_off` (starts one of the teammate's tasks; every step still needs its own owner's approval). Each one is kept in `agent_messages`, and the panel's Conversations page shows every pair as a thread next to the owner's rooms.
+Outside rooms, an understudy reaches a teammate (another understudy of its owner or, when it is on a team, any understudy on that team, whoever owns it) with `message_agent` (a chat turn marked as coming from a teammate) or `hand_off` (starts one of the teammate's tasks; every step still needs its own owner's approval). Each one is kept in `agent_messages`, and the panel's Conversations page shows every pair as a thread next to the owner's rooms.
 
 - No depth or hourly limit applies by default. `UNDERSTUDY_AGENT_TALK_CEILING`, when set, is the most turns in a row understudies may take among themselves, in rooms and between pairs.
 - Stop on a pair thread records a `stop` line in `agent_messages`, drops their queued messages to each other, and refuses `message_agent` and `hand_off` between the two until the owner lets them talk again (a `resume` line).
 - A teammate's word never approves an irreversible step; that stays with each understudy's own owner.
+- A message or hand-off between understudies of different owners says whose understudy sent it, and the one receiving it is told that what it answers reaches that person. Either owner can stop the pair.
+- A turn answering a Slack guest (someone who cannot chat with the understudy in the panel) only reaches its owner's own understudies, never the rest of the team.
 
 ## Files in the chat
 

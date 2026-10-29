@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { pastCeiling } from "@/lib/agent-talk";
 import { getDb, schema } from "@/lib/db";
@@ -10,6 +10,7 @@ import type { Hub } from "./hub";
 import { turnRunId } from "./followups";
 import { pairStopped } from "./pair-threads";
 import { teamGroupsOf, type TeamGroup } from "./room-store";
+import { guestTurn } from "./slack-askers";
 
 export const TALK_KINDS: AgentMessageKind[] = ["message", "handoff"];
 
@@ -26,7 +27,7 @@ export type TeamTool = {
   run: (args: never) => Promise<ToolResult>;
 };
 
-export type Teammate = { id: string; name: string; role: string; tasks: { id: string; title: string }[]; groups: TeamGroup[] };
+export type Teammate = { id: string; name: string; role: string; owner: string | null; tasks: { id: string; title: string }[]; groups: TeamGroup[] };
 
 export const NO_GROUP = "none";
 
@@ -64,12 +65,15 @@ export function groupRefusal(teammate: string, wanted: string, groups: { id: str
     : `you share no team group with ${teammate} you can post to here; leave group out or use "${NO_GROUP}"`;
 }
 
-export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId">): Promise<Teammate[]> {
+export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId"> & { teamId?: string | null }, options: { team?: boolean } = {}): Promise<Teammate[]> {
   const db = getDb();
+  const sameOwner = eq(schema.agents.ownerId, agent.ownerId);
+  const reach = agent.teamId && options.team !== false ? or(sameOwner, eq(schema.agents.teamId, agent.teamId)) : sameOwner;
   const agents = await db
-    .select({ id: schema.agents.id, name: schema.agents.name, role: schema.agents.role })
+    .select({ id: schema.agents.id, name: schema.agents.name, role: schema.agents.role, ownerId: schema.agents.ownerId, ownerName: schema.user.name })
     .from(schema.agents)
-    .where(and(ne(schema.agents.id, agent.id), eq(schema.agents.ownerId, agent.ownerId)));
+    .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
+    .where(and(ne(schema.agents.id, agent.id), reach));
   if (!agents.length) return [];
   const groups = await teamGroupsOf(agent.id);
   const recipes = await db
@@ -80,6 +84,7 @@ export async function listTeammates(agent: Pick<AgentRow, "id" | "ownerId">): Pr
     id: row.id,
     name: row.name,
     role: row.role ?? "",
+    owner: row.ownerId === agent.ownerId ? null : row.ownerName,
     tasks: recipes.filter((recipe) => recipe.agentId === row.id).map((recipe) => ({ id: recipe.id, title: recipe.recipe.title })),
     groups: groups.filter((group) => group.agentIds.includes(row.id)).map((group) => ({ id: group.id, name: group.name, language: group.language })),
   }));
@@ -95,7 +100,19 @@ export async function conversationDepth(agentId: string, now = Date.now()): Prom
   return (latest?.depth ?? 0) + 1;
 }
 
+async function ownerName(userId: string) {
+  const [row] = await getDb().select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
+  return row?.name ?? "";
+}
+
 export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
+  const teammates = () => listTeammates(agent, { team: !guestTurn(agent.id) });
+
+  const sender = async (to: Teammate) => {
+    const owner = to.owner === null ? "" : await ownerName(agent.ownerId);
+    return { owner, label: owner ? `${agent.name}, ${owner}'s understudy` : agent.name };
+  };
+
   const guard = async (to: Teammate) => {
     const depth = await conversationDepth(agent.id);
     const refusal = limitRefusal({ depth, ceiling: env.agentTalkCeiling, stopped: await pairStopped(agent.id, to.id), teammate: to.name });
@@ -156,12 +173,12 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
     {
       name: "list_teammates",
       description:
-        "List the other understudies you may work with (same owner, or shared with your owner), with their role, the tasks they know and the team groups you share with them (id and name), where the people of the team see your hand-offs and messages to them.",
+        "List the other understudies you may work with: your owner's, and on a team the understudies of the other people on it (owner says whose they are), with their role, the tasks they know and the team groups you share with them (id and name), where the people of the team see your hand-offs and messages to them.",
       schema: z.object({}),
       run: (async () => {
-        const mates = await listTeammates(agent);
+        const mates = await teammates();
         if (!mates.length) return reply("You have no teammates yet.");
-        return reply(JSON.stringify(mates.map((mate) => ({ name: mate.name, role: mate.role, tasks: mate.tasks.map((task) => task.title), groups: mate.groups }))));
+        return reply(JSON.stringify(mates.map((mate) => ({ name: mate.name, role: mate.role, ...(mate.owner === null ? {} : { owner: mate.owner }), tasks: mate.tasks.map((task) => task.title), groups: mate.groups }))));
       }) as TeamTool["run"],
     },
     {
@@ -169,13 +186,15 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
       description: "Send a short message to a teammate (by name). It reaches them as a chat turn marked as coming from you. Use it to ask or tell them something the work needs; keep it brief.",
       schema: z.object({ agent: z.string().min(1).max(200), text: z.string().min(1).max(2000), note, group }),
       run: (async (args: { agent: string; text: string; note?: string; group?: string }) => {
-        const to = pickTeammate(await listTeammates(agent), args.agent);
+        const to = pickTeammate(await teammates(), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
         const where = await place(to, args.group);
         if ("error" in where) return reply(where.error, true);
         const { depth, refusal } = await guard(to);
         if (refusal) return reply(refusal, true);
-        const delivered = (await hub.deliver(to.id, { type: "chat", text: args.text, from: agent.name, fromAgent: { id: agent.id, name: agent.name } }, { source: "team" })).status === "sent";
+        const { owner } = await sender(to);
+        const fromAgent = { id: agent.id, name: agent.name, ...(owner ? { owner } : {}) };
+        const delivered = (await hub.deliver(to.id, { type: "chat", text: args.text, from: agent.name, fromAgent }, { source: "team" })).status === "sent";
         await getDb()
           .insert(schema.agentMessages)
           .values({ id: newId("amsg"), fromAgentId: agent.id, toAgentId: to.id, kind: "message", text: args.text, depth, delivered, audienceId: hub.turnAudience(agent.id) });
@@ -190,7 +209,7 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         "Start one of a teammate's own tasks (by its title, see list_teammates) with some input for it. The input reaches them as quoted data, and their owner still approves anything irreversible. During a task, if you share a team group with them, the people there see a short line about it and its result; choose that group with group.",
       schema: z.object({ agent: z.string().min(1).max(200), task: z.string().min(1).max(300), input: z.string().max(20000), note, group }),
       run: (async (args: { agent: string; task: string; input: string; note?: string; group?: string }) => {
-        const to = pickTeammate(await listTeammates(agent), args.agent);
+        const to = pickTeammate(await teammates(), args.agent);
         if (!to) return reply(`unknown teammate "${args.agent}"; call list_teammates`, true);
         const task = pickTask(to.tasks, args.task);
         if (!task) return reply(`${to.name} has no task called "${args.task}"; their tasks: ${to.tasks.map((t) => t.title).join(", ") || "none"}`, true);
@@ -199,7 +218,8 @@ export function teamTools(hub: Hub, agent: AgentRow): TeamTool[] {
         const { depth, refusal } = await guard(to);
         if (refusal) return reply(refusal, true);
         const room = await relayRoom(to, where);
-        const started = await hub.startRun(task.id, "handoff", { input: `From ${agent.name}: ${args.input}`, ...(room && room.locale !== "en" ? { group: { name: room.name, locale: room.locale } } : {}) });
+        const { label } = await sender(to);
+        const started = await hub.startRun(task.id, "handoff", { input: `From ${label}: ${args.input}`, ...(room && room.locale !== "en" ? { group: { name: room.name, locale: room.locale } } : {}) });
         const runId = "runId" in started ? (started.runId as string | undefined) : undefined;
         await getDb()
           .insert(schema.agentMessages)
