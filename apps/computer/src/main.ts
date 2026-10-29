@@ -23,6 +23,7 @@ import { apiKeyOptions, openVault, validCredentialName } from "./vault.ts";
 import { createRecorder } from "./recorder.ts";
 import { startScreencastControl } from "./screencast.ts";
 import { startHome } from "./home.ts";
+import { installGitConfig, startGitForward } from "./git-forward.ts";
 import { log, openLink } from "@understudy/runtime";
 
 const BUILD = process.env.UNDERSTUDY_VERSION || "dev";
@@ -103,6 +104,12 @@ async function main() {
   setInterval(prune, 6 * 60 * 60 * 1000).unref();
   const memorySync = startMemorySync(join(home, "memory"), outbox, { dir: join(home, "files", "skills"), parent: join(home, "files") });
   const files = startFileExchange(home, outbox);
+  await startGitForward(serverUrl, token)
+    .then((forward) => {
+      installGitConfig(home, forward.port);
+      log("main", `git for github.com goes through the panel on port ${forward.port}`);
+    })
+    .catch((error) => log("main", `git through the panel is off: ${(error as Error).message}`));
   const store = createFileStore(home);
   let lastJobs = "";
   const workbench = startLocalWorkbench(home, desktop?.env.DISPLAY);

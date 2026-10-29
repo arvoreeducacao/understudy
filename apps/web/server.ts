@@ -21,6 +21,8 @@ import { handleTelegramWebhook, isTelegramRoute, startTelegramPolling } from "@/
 import { handleFigureRoute, isFigureRoute } from "@/server/figure-png";
 import { handleChartRoute, isChartRoute } from "@/server/chart-png";
 import { handleModelProxy, isModelProxyRoute } from "@/server/model-proxy";
+import { handleGitProxy, isGitProxyRoute } from "@/server/git-proxy";
+import { gitProxyDeps } from "@/server/git-access";
 import { handleSlack, isSlackRoute } from "@/server/slack-inbound";
 import { createExtensionRoutes, isExtensionRoute } from "@/server/extension/routes";
 import { ARTIFACT_CONTENT_PREFIX, handleArtifactContent, isArtifactContentRoute } from "@/server/artifacts/routes";
@@ -75,6 +77,7 @@ async function main() {
   const briefings = startBriefings();
   const extension = createExtensionRoutes(hub);
   const fileRoutes = createFileRoutes(hub);
+  const git = gitProxyDeps(hub);
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -190,6 +193,16 @@ async function main() {
     if (isModelProxyRoute(url.pathname)) {
       handleModelProxy(req, res, url).catch((error) => {
         console.error("model_proxy_error", error);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        } else res.destroy();
+      });
+      return;
+    }
+    if (isGitProxyRoute(url.pathname)) {
+      handleGitProxy(req, res, url, git).catch((error) => {
+        console.error("git_proxy_error", error);
         if (!res.headersSent) {
           res.writeHead(500);
           res.end();

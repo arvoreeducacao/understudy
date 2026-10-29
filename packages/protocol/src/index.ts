@@ -74,4 +74,5 @@ export const PATHS = {
   gatekeeperMcp: "/api/mcp",
   gatekeeperMcpRestricted: "/api/mcp/restricted",
   modelProxy: "/api/model",
+  gitProxy: "/api/git",
 } as const;

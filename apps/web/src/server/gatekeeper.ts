@@ -26,6 +26,8 @@ import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLi
 import { queueReplyFile } from "./channels/relay";
 import { OUTSIDER_TOOLS, outsiderLabel, outsiderTurn } from "./channels/turns";
 import { guestTurn } from "./slack-askers";
+import { usesGithubApp } from "./github-app";
+import { gitPushApproval, type GitAccess, type GitPush, type PushGate } from "./git-proxy";
 import { RateLimiter } from "./rate-limit";
 
 const outsiderLimiter = new RateLimiter();
@@ -150,19 +152,15 @@ function jsonSchemaOf(schema: z.ZodType) {
   return rest as { type: "object"; [key: string]: unknown };
 }
 
-async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restricted = false) {
-  const outsider = () => restricted || outsiderTurn(agent.id);
-  const server = new Server({ name: "understudy-gatekeeper", version: "1.0.0" }, { capabilities: { tools: {}, logging: {} } });
-  const enabled = toolsEnabled(agent.tools);
-
-  const waitOutcome = async (id: string, extra: Extra): Promise<Outcome> => {
+function outcomeWaiter(hub: Hub, agentId: string) {
+  return async (id: string, extra: Extra): Promise<Outcome> => {
     const heartbeat = setInterval(() => {
       extra
         .sendNotification({ method: "notifications/message", params: { level: "info", data: "waiting for owner" } })
         .catch(() => undefined);
     }, HEARTBEAT_MS);
     try {
-      const existing = await hub.approvalOutcome(id, agent.id);
+      const existing = await hub.approvalOutcome(id, agentId);
       if (!existing) return { kind: "unknown" };
       if (existing.status === "expired") return { kind: "decided", approved: false, note: brainText.expiredNote };
       if (existing.status === "cancelled") return { kind: "decided", approved: false, note: brainText.stoppedNote, stopped: true };
@@ -174,6 +172,35 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       clearInterval(heartbeat);
     }
   };
+}
+
+async function connectorAccess(agent: AgentRow, ownerEmail: string, restricted = false) {
+  const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail) && (!agent.teamId || teamConnector(server)));
+  const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
+  const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingForAgent(ceilingOf(upstream, limits.get(upstream.id)), upstream.url, agent.tools)]));
+  const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
+    effectivePermission({
+      serverId: upstream.id,
+      server: ceilings.get(upstream.id) ?? {},
+      tool,
+      policy: agent.tools.toolPolicy,
+      legacyAsk: agent.tools.askTools,
+      seen: agent.tools.toolHints,
+    }).permission;
+  const toolsOf = (upstream: UpstreamServer) => listUpstreamTools(upstream, agent.ownerId);
+  const findTool = async (upstream: UpstreamServer, toolName: string) => {
+    const tool = (await toolsOf(upstream).catch(() => [] as UpstreamTool[])).find((listed) => listed.name === toolName);
+    return tool && { ...tool, annotations: trustedHints(seenHintsFor(agent.tools.toolHints, upstream.id, tool.name), tool.annotations) };
+  };
+  return { upstreams, ceilings, permissionOf, toolsOf, findTool };
+}
+
+async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restricted = false) {
+  const outsider = () => restricted || outsiderTurn(agent.id);
+  const server = new Server({ name: "understudy-gatekeeper", version: "1.0.0" }, { capabilities: { tools: {}, logging: {} } });
+  const enabled = toolsEnabled(agent.tools);
+
+  const waitOutcome = outcomeWaiter(hub, agent.id);
 
   const waitWithHeartbeat = async (id: string, extra: Extra) => outcomeText(id, await waitOutcome(id, extra));
 
@@ -298,23 +325,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     );
   }
 
-  const upstreams = restricted ? [] : (await loadServers(agent.tools.servers ?? [])).filter((server) => serverAllowedFor(server.allowedEmails, ownerEmail) && (!agent.teamId || teamConnector(server)));
-  const limits = await loadToolLimits(upstreams.map((upstream) => upstream.id));
-  const ceilings = new Map(upstreams.map((upstream) => [upstream.id, ceilingForAgent(ceilingOf(upstream, limits.get(upstream.id)), upstream.url, agent.tools)]));
-  const permissionOf = (upstream: UpstreamServer, tool: Pick<UpstreamTool, "name" | "annotations">) =>
-    effectivePermission({
-      serverId: upstream.id,
-      server: ceilings.get(upstream.id) ?? {},
-      tool,
-      policy: agent.tools.toolPolicy,
-      legacyAsk: agent.tools.askTools,
-      seen: agent.tools.toolHints,
-    }).permission;
-  const toolsOf = (upstream: UpstreamServer) => listUpstreamTools(upstream, agent.ownerId);
-  const findTool = async (upstream: UpstreamServer, toolName: string) => {
-    const tool = (await toolsOf(upstream).catch(() => [] as UpstreamTool[])).find((listed) => listed.name === toolName);
-    return tool && { ...tool, annotations: trustedHints(seenHintsFor(agent.tools.toolHints, upstream.id, tool.name), tool.annotations) };
-  };
+  const { upstreams, ceilings, permissionOf, toolsOf, findTool } = await connectorAccess(agent, ownerEmail, restricted);
   const splitProxied = (name: string) => {
     const [slug, ...rest] = name.split(PROXY_SEPARATOR);
     return { upstream: upstreams.find((u) => u.slug === slug), toolName: rest.join(PROXY_SEPARATOR) };
@@ -525,4 +536,51 @@ export async function handleGatekeeper(hub: Hub, req: IncomingMessage, res: Serv
   });
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
+}
+
+type ComputerAgent = NonNullable<Awaited<ReturnType<typeof authenticateComputer>>>;
+
+const GIT_READ_TOOL = "get_file_contents";
+const GIT_PUSH_TOOL = "push_files";
+
+async function githubConnection(agent: ComputerAgent) {
+  const access = await connectorAccess(agent, agent.ownerEmail);
+  const upstream = access.upstreams.find((server) => usesGithubApp(server));
+  if (!upstream) return null;
+  const [read, push] = await Promise.all([access.findTool(upstream, GIT_READ_TOOL), access.findTool(upstream, GIT_PUSH_TOOL)]);
+  return { upstream, read: read ? access.permissionOf(upstream, read) : "never", push: push ? access.permissionOf(upstream, push) : "never" } as const;
+}
+
+export async function githubGitAccess(agent: ComputerAgent): Promise<GitAccess> {
+  if (outsiderTurn(agent.id)) return { connected: true, read: false, push: "never", refusal: brainText.outsiderTool };
+  const github = await githubConnection(agent);
+  if (!github) return { connected: false, read: false, push: "never" };
+  return { connected: true, read: github.read !== "never", push: github.push };
+}
+
+export async function gateGitPush(hub: Hub, agent: ComputerAgent, push: GitPush, onAsk: () => void, signal: AbortSignal): Promise<PushGate> {
+  if (outsiderTurn(agent.id)) return { ok: false, reason: brainText.outsiderTool };
+  const github = await githubConnection(agent);
+  if (!github || github.push === "never") return { ok: false, reason: "your owner turned off pushing to GitHub for you" };
+  const run = await runningRun(agent.id);
+  const runId = run?.id ?? null;
+  const t = messages.toolAccess;
+  const { ask, fields } = gitPushApproval(push, github.push, run?.trigger === "handoff", github.upstream.name, {
+    connector: t.fieldConnector,
+    action: t.fieldAction,
+    repository: t.fieldRepository,
+    branches: t.fieldBranches,
+    warning: t.fieldWarning,
+    defaultBranchWarning: t.defaultBranchWarning,
+  });
+  const args = { repository: push.repository, refs: push.refs };
+  const name = `${github.upstream.slug}${PROXY_SEPARATOR}git_push`;
+  if (ask) onAsk();
+  const extra: Extra = { signal, sendNotification: async () => undefined };
+  const allowed = await guardOutward(hub, agent, `${github.upstream.id}:git_push`, t.approvalSummary(github.upstream.name, "git push"), fields, args, ask, outcomeWaiter(hub, agent.id), extra, { runId });
+  if (!allowed.ok) {
+    await logCall(agent.id, name, args, allowed.text, false, allowed.asked ? "denied" : "blocked", runId);
+    return { ok: false, reason: allowed.text.replace(/^not done: /, "") };
+  }
+  return { ok: true, finish: (ok, note) => logCall(agent.id, name, args, note, ok, ask ? "approved" : "allowed", runId) };
 }

@@ -12,3 +12,7 @@ export function gatekeeperUrl(serverUrl: string): string {
 export function restrictedGatekeeperUrl(serverUrl: string): string {
   return `${serverUrl.replace(/\/+$/, "")}${PATHS.gatekeeperMcpRestricted}`;
 }
+
+export function gitProxyUrl(serverUrl: string): string {
+  return `${serverUrl.replace(/\/+$/, "")}${PATHS.gitProxy}`;
+}
