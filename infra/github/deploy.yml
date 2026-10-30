@@ -98,14 +98,6 @@ jobs:
         run: bash infra/host/deploy.sh "${{ steps.target.outputs.tag }}"
 
       - if: steps.live.outputs.skip == 'false'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_EKS_ROLE }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-duration-seconds: 1800
-          role-chaining: true
-
-      - if: steps.live.outputs.skip == 'false'
         env:
           K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
           PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
@@ -116,12 +108,6 @@ jobs:
         run: |
           aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region "${{ vars.AWS_REGION }}"
           bash infra/k8s/apply.sh
-
-      - if: steps.live.outputs.skip == 'false'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
-          aws-region: ${{ vars.AWS_REGION }}
 
       - if: steps.live.outputs.skip == 'false'
         env:

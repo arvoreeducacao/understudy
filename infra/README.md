@@ -39,12 +39,11 @@ Copy `config.example.env` to `config.env` (gitignored) and fill it in. Every scr
 | `HOST_INSTANCE_TYPE`, `HOST_VOLUME_GB` | VM size |
 | `EKS_CLUSTER`, `EKS_VPC_ID`, `EKS_NODE_SG` | Cluster that runs the panel and the security group its nodes use |
 | `DB_SUBNET_IDS`, `DB_INSTANCE_CLASS` | Private subnets of the EKS VPC for the database |
-| `EKS_DEPLOY_ROLE_ARN` | Role mapped to Kubernetes write access that CI chains into |
 | `INGRESS_SOURCE_CIDRS`, `DB_CIDRS`, `EXTRA_BLOCKED_CIDRS` | NetworkPolicy for the panel: who may connect (the load balancer subnets), where the database lives, and extra ranges to block on top of the private ones. Needs a CNI that enforces NetworkPolicy |
 | `INBOUND_EMAIL_DOMAIN`, `INBOUND_EMAIL_RETENTION_DAYS`, `CLOUDFLARE_ZONE_NAME`, `WEB_ROLE_ARN` | Inbound email: receiving domain, days mail is kept, the Cloudflare zone for its records, and the role annotated on the panel's service account |
-| `DEPLOY_K8S_GROUP` | Kubernetes group of that role; `k8s/apply.sh`, run by an admin, grants it deploy rights in the namespace |
+| `DEPLOY_K8S_GROUP` | Kubernetes group the deploy role enters the cluster as; `aws/05-github.sh` creates the EKS access entry and `k8s/apply.sh`, run by an admin, grants the group deploy rights in the namespace and nothing else |
 
-The cluster must already run the AWS Load Balancer Controller and external-dns, and the account must have the GitHub OIDC provider.
+The cluster must already run the AWS Load Balancer Controller and external-dns, accept EKS access entries (authentication mode `API` or `API_AND_CONFIG_MAP`), and the account must have the GitHub OIDC provider.
 
 ## Run, in order
 
@@ -69,8 +68,8 @@ Every script is idempotent: it finds what already exists by name and tag and cre
 | `aws/03-host.sh` | Instance role (SSM, pull from the three registries, read `/<prefix>/host/*`), Ubuntu 24.04 VM with Docker (`host-user-data.sh`) |
 | `aws/04-rds.sh` | Postgres 16, encrypted, private, password kept by RDS in Secrets Manager, reachable only from `EKS_NODE_SG` |
 | `aws/06-inbound-email.sh` | SES receiving for `INBOUND_EMAIL_DOMAIN`: encrypted S3 bucket with `INBOUND_EMAIL_RETENTION_DAYS` expiry, SNS topic subscribed to the panel, receipt rule set, MX and DKIM records (created in Cloudflare when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_NAME` are set, printed otherwise), and the `<prefix>-web` role the panel's service account assumes to read mail. Run it again after the panel is deployed so the SNS subscription is confirmed |
-| `aws/05-github.sh` | `github-actions-<prefix>-deploy` role and the variables and secrets the deploy workflow reads, set on your private deploy repository |
-| `k8s/apply.sh` | Namespace, deploy role, ConfigMap with the RDS CA bundle (the panel verifies the database certificate), Service, Ingress, and a placeholder that answers `/api/health` until the first web image; with `IMAGE` set it deploys the web image and removes the placeholder |
+| `aws/05-github.sh` | `github-actions-<prefix>-deploy` role, its EKS access entry as `DEPLOY_K8S_GROUP` (no access policy), and the variables and secrets the deploy workflow reads, set on your private deploy repository. The workflow talks to the cluster with this role directly; it never chains into a shared write role |
+| `k8s/apply.sh` | Namespace, deploy permissions for `DEPLOY_K8S_GROUP` (`k8s/rbac.yaml`: what `k8s/apply.sh` itself applies, inside the namespace, plus reading and patching the namespace object; no Secrets, `exec`, port-forward or NetworkPolicies), ConfigMap with the RDS CA bundle (the panel verifies the database certificate), Service, Ingress, and a placeholder that answers `/api/health` until the first web image; with `IMAGE` set it deploys the web image and removes the placeholder |
 | `k8s/secret.sh` | Secret `<prefix>-env` (database URL, random auth secret and host token, public URL, email rules); copies the host token to SSM `/<prefix>/host/token` |
 | `host/deploy.sh [tag]` | Through SSM: pulls the computer and host images on the VM and (re)starts the host container with the Docker socket |
 
