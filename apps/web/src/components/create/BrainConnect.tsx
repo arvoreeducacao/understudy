@@ -41,12 +41,16 @@ export function BrainConnect({
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
+  const [switching, setSwitching] = useState<{ brain: Brain; from?: string; before: LiveState["loginResult"] } | null>(null);
+  const [dismissed, setDismissed] = useState<LiveState["loginPrompt"]>(null);
   const [removing, startRemoving] = useTransition();
-  const prompt = live.loginPrompt;
+  const prompt = live.loginPrompt && live.loginPrompt !== dismissed ? live.loginPrompt : null;
   const safeUrl = prompt?.url && /^https:\/\//i.test(prompt.url) ? prompt.url : null;
   const result = live.loginResult;
 
-  function connect(brain: Brain) {
+  function connect(brain: Brain, from?: { account?: string }) {
+    setSwitching(from ? { brain, from: from.account, before: live.loginResult } : null);
+    setDismissed(null);
     setConnecting(brain);
     setCode("");
     setCopied(false);
@@ -57,6 +61,12 @@ export function BrainConnect({
     if (!code.trim()) return;
     send({ type: "login_code", brain, code: code.trim() });
     setCode("");
+  }
+
+  function keepCurrent() {
+    setDismissed(live.loginPrompt);
+    setConnecting(null);
+    setSwitching(null);
   }
 
   function dropKey() {
@@ -78,6 +88,8 @@ export function BrainConnect({
           const loggedIn = Boolean(savedKey) || Boolean(status?.loggedIn);
           const selected = current === brain;
           const isConnecting = connecting === brain && !result;
+          const isSwitching = switching?.brain === brain && result === switching.before;
+          const canSwitch = loggedIn && !savedKey && Boolean(status?.loggedIn) && status?.account !== "api-key";
           const plan = savedKey
             ? k.summary(keyHost(savedKey.url), savedKey.last4, savedKey.maxUsdPerTurn)
             : offersKey && !status?.loggedIn
@@ -133,6 +145,17 @@ export function BrainConnect({
                       </button>
                     )}
                     {loggedIn && (selected ? <span className="pill">{t.inUse}</span> : useThis)}
+                    {canSwitch && (
+                      <button
+                        type="button"
+                        className="pill cursor-pointer"
+                        aria-pressed={isSwitching}
+                        disabled={!live.online || isSwitching}
+                        onClick={() => connect(brain, { account: status?.account })}
+                      >
+                        {isSwitching && !prompt ? t.switchOpening : t.switchAccount}
+                      </button>
+                    )}
                     {offersKey && (
                       <button type="button" className="pill cursor-pointer" aria-pressed={formOpen} onClick={() => setKeyOpen(!keyOpen)}>
                         {loggedIn ? k.useKeyInstead : k.useKey}
@@ -161,6 +184,13 @@ export function BrainConnect({
       {!live.online && !claudeKey?.saved && <div className="text-[12px] text-smoke">{t.waitComputer}</div>}
       {prompt && (
         <div className="bg-graphite rounded-[10px] px-3.5 py-3 flex flex-col gap-2.5 text-[13px]">
+          {switching?.brain === prompt.brain && (
+            <div className="flex flex-col gap-1 pb-2.5 border-b border-line">
+              <b className="font-semibold">{t.switchTitle}</b>
+              <span className="text-smoke text-[12px]">{switching.from ? t.switchKeeps(switching.from) : t.switchKeepsUnknown}</span>
+              <span className="text-smoke text-[12px]">{t.switchBrowser}</span>
+            </div>
+          )}
           <div className="flex justify-between items-center gap-3 flex-wrap">
             {safeUrl ? (
               <div className="flex gap-2 flex-wrap">
@@ -202,9 +232,19 @@ export function BrainConnect({
               </button>
             </div>
           )}
+          {switching?.brain === prompt.brain && (
+            <button type="button" className="btn sec sm self-start" onClick={keepCurrent}>
+              {t.keepCurrent}
+            </button>
+          )}
         </div>
       )}
-      {result && !result.ok && <div className="err">{result.message || t.loginFailed}</div>}
+      {result && !result.ok && result !== switching?.before && <div className="err">{result.message || t.loginFailed}</div>}
+      {result?.ok && switching?.brain === result.brain && result !== switching.before && (
+        <div className="text-[12.5px] text-green" role="status">
+          {result.account && result.account !== "api-key" ? t.switched(result.account) : t.switchedUnknown}
+        </div>
+      )}
     </div>
   );
 }

@@ -206,8 +206,8 @@ export const computerHandlers: Handlers = {
   async login_done(hub, agentId, message) {
     const db = getDb();
     const [agent] = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId));
-    if (agent) {
-      const brains = [...agent.brains.filter((b) => b.brain !== message.brain), { brain: message.brain, loggedIn: message.ok, account: message.account }];
+    if (agent && message.ok) {
+      const brains = [...agent.brains.filter((b) => b.brain !== message.brain), { brain: message.brain, loggedIn: true, account: message.account }];
       await db.update(schema.agents).set({ brains, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
       hub.broadcast(agentId, { type: "brains", brains });
     }

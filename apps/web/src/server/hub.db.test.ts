@@ -254,3 +254,25 @@ test("a slow screen gets fewer frames and its chat never waits behind them", { s
   confirming.emit("message", Buffer.from(JSON.stringify({ type: "frame_ack" })));
   assert.equal(frames(confirming).length, 3);
 });
+
+test("a sign-in that fails keeps the account the computer was already using, and one that succeeds replaces it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { Hub } = await import("./hub");
+  const { handleComputerMessage } = await import("./hub/computer-handlers");
+  const before = [{ brain: "claude" as const, loggedIn: true, account: "old@example.com" }];
+  await getDb().update(schema.agents).set({ brains: before }).where(eq(schema.agents.id, ids.agentA));
+  const hub = new Hub();
+  const told: unknown[] = [];
+  hub.broadcast = ((_: string, message: unknown) => told.push(message)) as typeof hub.broadcast;
+  hub.sendToOwners = ((_: string, message: unknown) => told.push(message)) as typeof hub.sendToOwners;
+  const brains = async () => (await getDb().select().from(schema.agents).where(eq(schema.agents.id, ids.agentA)))[0]?.brains;
+  try {
+    await handleComputerMessage(hub, ids.agentA, { type: "login_done", brain: "claude", ok: false, message: "Claude refused the code." });
+    assert.deepEqual(await brains(), before);
+    assert.ok(told.some((m) => JSON.stringify(m).includes("Claude refused the code.")));
+    await handleComputerMessage(hub, ids.agentA, { type: "login_done", brain: "claude", ok: true, account: "new@example.com" });
+    assert.deepEqual(await brains(), [{ brain: "claude", loggedIn: true, account: "new@example.com" }]);
+  } finally {
+    await getDb().update(schema.agents).set({ brains: [] }).where(eq(schema.agents.id, ids.agentA));
+  }
+});
