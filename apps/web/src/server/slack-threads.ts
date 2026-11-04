@@ -106,11 +106,14 @@ export function streamDelta(agentId: string, streamId: string, text: string) {
         return;
       }
       current.channel = thread.channel;
+      const agent = await agentInfo(agentId);
+      const as = agent ? agentIdentity(agent) : null;
       const result = (await slackCall("chat.startStream", {
         channel: thread.channel,
         thread_ts: thread.threadTs,
         ...(thread.slackUser ? { recipient_user_id: thread.slackUser } : {}),
         ...(thread.slackTeam ? { recipient_team_id: thread.slackTeam } : {}),
+        ...(as ? { username: as.username, icon_url: as.iconUrl } : {}),
       })) as { ok: boolean; ts?: string; error?: string };
       if (!result.ok || !result.ts) {
         current.failed = true;

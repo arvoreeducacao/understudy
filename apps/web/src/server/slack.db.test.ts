@@ -385,7 +385,7 @@ test("the slash command lists the person's agents", { skip }, async () => {
   assert.match(body.text, /Bruno/);
 });
 
-test("a streamed answer is written live in the thread and finished with the final text, without a second post", { skip }, async () => {
+test("a streamed answer is written live in the thread as the agent and finished with the final text, without a second post", { skip }, async () => {
   const { streamDelta, relayAgentChat } = await import("./slack-threads");
   const before = slackCalls.length;
   slackPostTs = "777.1";
@@ -397,6 +397,8 @@ test("a streamed answer is written live in the thread and finished with the fina
   assert.deepEqual(calls.map((c) => c.method), ["chat.startStream", "chat.appendStream", "chat.appendStream", "chat.stopStream"]);
   assert.equal(calls[0].body.thread_ts, "100.2");
   assert.equal(calls[0].body.recipient_user_id, "UOWNER");
+  assert.equal(calls[0].body.username, "Ana");
+  assert.equal(calls[0].body.icon_url, `https://panel.example.com/api/agents/${ids.ana}/avatar.png`);
   assert.deepEqual(calls.slice(1, 3).map((c) => c.body.markdown_text), ["Checking", " the invoices"]);
   assert.equal(calls[3].body.markdown_text, " now.");
   assert.ok(!calls.some((c) => c.method === "chat.postMessage"));
