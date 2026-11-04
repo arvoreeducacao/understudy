@@ -1074,6 +1074,15 @@ button.ac-out { width: 100%; text-align: left; cursor: pointer; font: inherit; f
 .art-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .art-filter { font-size: 12.5px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); color: #b9b9ba; background: transparent; cursor: pointer; }
 .art-filter.is-on { background: rgb(255 255 255 / .12); color: #fff; border-color: transparent; }
+.art-filter-count { margin-left: 4px; font-size: 11px; color: var(--smoke); }
+.art-filter.is-on .art-filter-count { color: #d6d6d7; }
+.art-search { margin-bottom: 12px; }
+.art-shelf { margin-bottom: 22px; }
+.art-shelf-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; }
+.art-shelf-head h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--mist); }
+.art-shelf-head > span { font-size: 12px; color: var(--smoke); }
+.art-shelf-head .art-link-btn { margin-left: auto; }
+.art-none { margin: 16px 0; font-size: 13px; color: var(--ash); }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choice { font-size: 12.5px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); color: #b9b9ba; background: transparent; cursor: pointer; }
 .choice.is-on { background: rgb(255 255 255 / .12); color: #fff; border-color: transparent; }

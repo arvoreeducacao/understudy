@@ -37,3 +37,42 @@ export function artifactSearch(current: string, address: ArtifactAddress | null)
 }
 
 export const ARTIFACT_EVENT = "understudy:artifact";
+
+const SHELF_SEPARATOR = /\s+[·—|]\s+/;
+
+export function foldText(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function splitTitle(title: string): { shelf: string | null; rest: string } {
+  const match = SHELF_SEPARATOR.exec(title);
+  if (!match || match.index === 0) return { shelf: null, rest: title };
+  const shelf = title.slice(0, match.index).trim();
+  const rest = title.slice(match.index + match[0].length).trim();
+  if (!rest || shelf.length > 40) return { shelf: null, rest: title };
+  return { shelf, rest };
+}
+
+export function matchesQuery(title: string, query: string): boolean {
+  const words = foldText(query).split(" ").filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = foldText(title);
+  return words.every((word) => haystack.includes(word));
+}
+
+export type Shelf<T> = { key: string; name: string; items: T[] };
+
+export function shelvesOf<T extends { title: string }>(items: T[]): { shelves: Shelf<T>[]; loose: T[] } {
+  const byKey = new Map<string, Shelf<T>>();
+  for (const item of items) {
+    const { shelf } = splitTitle(item.title);
+    if (!shelf) continue;
+    const key = foldText(shelf);
+    const found = byKey.get(key);
+    if (found) found.items.push(item);
+    else byKey.set(key, { key, name: shelf, items: [item] });
+  }
+  const shelves = [...byKey.values()].filter((shelf) => shelf.items.length > 1);
+  const shelved = new Set(shelves.flatMap((shelf) => shelf.items));
+  return { shelves, loose: items.filter((item) => !shelved.has(item)) };
+}

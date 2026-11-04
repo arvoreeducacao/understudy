@@ -1,14 +1,15 @@
-import { Code2, FileText, Image as ImageIcon, LoaderCircle, Presentation } from "lucide-react";
+import { Code2, FileText, Image as ImageIcon, LoaderCircle, Presentation, Search } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { ArtifactKind } from "@understudy/protocol";
 import { agentArtifacts, artifactView } from "@/app/actions/artifacts";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
 import { currentLocale, messages } from "@/lib/messages";
 import type { ArtifactSummary, ArtifactView } from "@/server/artifacts/service";
 import type { ViewerToServer } from "@/server/hub-types";
-import { ARTIFACT_EVENT, artifactSearch, formatLabel, readArtifactAddress, type ArtifactAddress } from "./artifact-ui";
+import { ARTIFACT_EVENT, artifactSearch, formatLabel, matchesQuery, readArtifactAddress, shelvesOf, splitTitle, type ArtifactAddress } from "./artifact-ui";
 import { ArtifactViewer } from "./ArtifactViewer";
 
 const t = messages.artifacts;
@@ -16,6 +17,10 @@ const t = messages.artifacts;
 const KIND_ICON: Record<ArtifactKind, typeof FileText> = { html: Code2, markdown: FileText, pages: Presentation, image: ImageIcon };
 
 const FILTERS: (ArtifactKind | "all")[] = ["all", "pages", "markdown", "html", "image"];
+
+const SHELF_PREVIEW = 4;
+
+const SEARCH_FROM = 5;
 
 export function KindIcon({ kind, size = 16 }: { kind: ArtifactKind; size?: number }) {
   const Icon = KIND_ICON[kind] ?? FileText;
@@ -31,7 +36,7 @@ export function openArtifact(address: ArtifactAddress) {
   window.history.pushState(null, "", next);
 }
 
-function ArtifactTile({ item, onOpen }: { item: ArtifactSummary; onOpen: () => void }) {
+function ArtifactTile({ item, label, onOpen }: { item: ArtifactSummary; label?: string; onOpen: () => void }) {
   return (
     <button type="button" className="art-tile" onClick={onOpen} aria-label={t.open(item.title)}>
       <span className="art-tile-preview">
@@ -43,7 +48,9 @@ function ArtifactTile({ item, onOpen }: { item: ArtifactSummary; onOpen: () => v
       </span>
       <span className="art-tile-meta">
         <span className="min-w-0 flex-1">
-          <span className="art-tile-title">{item.title}</span>
+          <span className="art-tile-title" title={item.title}>
+            {label ?? item.title}
+          </span>
           <span className="art-tile-line" suppressHydrationWarning>
             {dayOf(item.updatedAt)}
           </span>
@@ -115,6 +122,8 @@ export function ArtifactsPanel({
   const { items, failed } = useArtifactList(agentId);
   const opened = useArtifactView(agentId, address);
   const [filter, setFilter] = useState<ArtifactKind | "all">("all");
+  const [shelfKey, setShelfKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const go = (next: ArtifactAddress | null) => window.history.pushState(null, "", `${pathname}${artifactSearch(params.toString(), next)}`);
 
@@ -160,12 +169,75 @@ export function ArtifactsPanel({
   if (items.length === 0) return <EmptyState look={look} mood="happy" title={t.empty} body={t.emptyBody(agentName)} />;
 
   const kinds = new Set(items.map((item) => item.kind));
-  const shown = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  const ofKind = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  const searching = query.trim().length > 0;
+  const found = searching ? ofKind.filter((item) => matchesQuery(item.title, query)) : ofKind;
+  const { shelves, loose } = shelvesOf(ofKind);
+  const allShelves = shelvesOf(items).shelves;
+  const openShelf = shelfKey ? shelves.find((shelf) => shelf.key === shelfKey) : undefined;
+  const tile = (item: ArtifactSummary, label?: string) => <ArtifactTile key={item.id} item={item} label={label} onOpen={() => go({ artifactId: item.id, version: null })} />;
+  const shortTitle = (item: ArtifactSummary) => splitTitle(item.title).rest;
+
+  let body;
+  if (searching) {
+    body = found.length === 0 ? <p className="art-none">{t.noMatch(query.trim())}</p> : <div className="art-grid">{found.map((item) => tile(item))}</div>;
+  } else if (openShelf) {
+    body = <div className="art-grid">{openShelf.items.map((item) => tile(item, shortTitle(item)))}</div>;
+  } else if (shelves.length > 0) {
+    body = (
+      <>
+        {shelves.map((shelf) => (
+          <section key={shelf.key} className="art-shelf" aria-label={shelf.name}>
+            <div className="art-shelf-head">
+              <h3>{shelf.name}</h3>
+              <span>{t.shelfCount(shelf.items.length)}</span>
+              {shelf.items.length > SHELF_PREVIEW && (
+                <button type="button" className="art-link-btn" onClick={() => setShelfKey(shelf.key)}>
+                  {t.seeAll}
+                </button>
+              )}
+            </div>
+            <div className="art-grid">{shelf.items.slice(0, SHELF_PREVIEW).map((item) => tile(item, shortTitle(item)))}</div>
+          </section>
+        ))}
+        {loose.length > 0 && (
+          <section className="art-shelf" aria-label={t.others}>
+            <div className="art-shelf-head">
+              <h3>{t.others}</h3>
+              <span>{t.shelfCount(loose.length)}</span>
+            </div>
+            <div className="art-grid">{loose.map((item) => tile(item))}</div>
+          </section>
+        )}
+      </>
+    );
+  } else {
+    body = ofKind.length === 0 ? <p className="art-none">{t.nothingOfKind}</p> : <div className="art-grid">{ofKind.map((item) => tile(item))}</div>;
+  }
+
   return (
     <div className="art-list">
       <p className="art-lead">{t.lead(agentName)}</p>
+      {items.length >= SEARCH_FROM && (
+        <div className="conn-search art-search">
+          <Search size={15} aria-hidden />
+          <Input type="search" value={query} placeholder={t.searchPlaceholder} aria-label={t.searchLabel} autoComplete="off" maxLength={80} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+      )}
+      {allShelves.length > 0 && !searching && (
+        <div className="art-filters" role="group" aria-label={t.shelvesLabel}>
+          <button type="button" className={`art-filter ${!openShelf ? "is-on" : ""}`} aria-pressed={!openShelf} onClick={() => setShelfKey(null)}>
+            {t.allShelves}
+          </button>
+          {allShelves.map((shelf) => (
+            <button key={shelf.key} type="button" className={`art-filter ${openShelf?.key === shelf.key ? "is-on" : ""}`} aria-pressed={openShelf?.key === shelf.key} onClick={() => setShelfKey(shelf.key)}>
+              {shelf.name} <span className="art-filter-count">{shelf.items.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {kinds.size > 1 && (
-        <div className="art-filters" role="group" aria-label={t.title}>
+        <div className="art-filters" role="group" aria-label={t.kindsLabel}>
           {FILTERS.filter((f) => f === "all" || kinds.has(f)).map((f) => (
             <button key={f} type="button" className={`art-filter ${filter === f ? "is-on" : ""}`} aria-pressed={filter === f} onClick={() => setFilter(f)}>
               {f === "all" ? t.all : t.kinds[f]}
@@ -173,11 +245,7 @@ export function ArtifactsPanel({
           ))}
         </div>
       )}
-      <div className="art-grid">
-        {shown.map((item) => (
-          <ArtifactTile key={item.id} item={item} onOpen={() => go({ artifactId: item.id, version: null })} />
-        ))}
-      </div>
+      {body}
     </div>
   );
 }

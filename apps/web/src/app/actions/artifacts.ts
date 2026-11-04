@@ -30,7 +30,7 @@ function checkId(artifactId: string) {
 
 export async function agentArtifacts(agentId: string): Promise<ArtifactSummary[]> {
   const user = await readable(agentId);
-  return listArtifacts(agentId, 200, user.id);
+  return listArtifacts(agentId, 1000, user.id);
 }
 
 export async function artifactView(agentId: string, artifactId: string, version?: number): Promise<ArtifactView | null> {
