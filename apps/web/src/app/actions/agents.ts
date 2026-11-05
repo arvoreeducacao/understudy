@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import type { Brain } from "@understudy/protocol";
+import { accessibleAgentIds } from "@/lib/access";
+import { AGENT_ORDER_LIMIT, mergeAgentOrder } from "@/lib/agent-order";
 import { getDb, schema } from "@/lib/db";
 import { hashToken, newComputerToken, newId } from "@/lib/ids";
 import { messages } from "@/lib/messages";
@@ -151,4 +153,18 @@ export async function setAgentRules(agentId: string, input: unknown) {
   getHub()?.sendToComputer(agent.id, { type: "set_rules", rules });
   revalidatePath(`/agents/${agent.id}`, "layout");
   return { ok: true as const, rules };
+}
+
+export async function saveAgentOrder(ids: string[]) {
+  const user = await requireUser();
+  if (!Array.isArray(ids) || ids.length > AGENT_ORDER_LIMIT) return { ok: false };
+  const db = getDb();
+  const [allowed, [row]] = await Promise.all([
+    accessibleAgentIds(user.id),
+    db.select({ agentOrder: schema.user.agentOrder }).from(schema.user).where(eq(schema.user.id, user.id)),
+  ]);
+  const agentOrder = mergeAgentOrder(row?.agentOrder, ids, new Set(allowed));
+  await db.update(schema.user).set({ agentOrder, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
