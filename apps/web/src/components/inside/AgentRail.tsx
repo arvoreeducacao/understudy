@@ -1,9 +1,12 @@
+"use client";
+
 import { Clock3, Plus, Settings } from "lucide-react";
 import Link from "next/link";
 import type { AgentState } from "@understudy/protocol";
 import { AgentFigure } from "@/components/AgentFigure";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
+import { useAgentReorder } from "./useAgentReorder";
 
 export type RailAgent = { id: string; name: string; look: Look; state: AgentState; note: string | null; waiting: number; group?: "mine" | "shared" | "other" };
 
@@ -33,6 +36,8 @@ export function railLine(agent: Pick<RailAgent, "state" | "note" | "waiting">) {
 
 export function AgentRail({ data, currentId, current, slim }: { data: RailData; currentId: string; current: { state: AgentState; note: string | null }; slim: boolean }) {
   const r = messages.agentPage;
+  const reorder = useAgentReorder(data.agents);
+  const agents = reorder.agents;
   return (
     <nav className={`ar ${slim ? "is-slim" : ""}`} aria-label={r.railLabel}>
       <Link href="/" className="ar-brand" title={r.allAgents}>
@@ -44,15 +49,25 @@ export function AgentRail({ data, currentId, current, slim }: { data: RailData; 
         <span className="ar-text">{r.newAgent}</span>
       </Link>
       <div className="ar-label ar-text">{messages.nav.agents}</div>
-      <ul className="ar-agents scroll-thin">
-        {data.agents.map((agent, index) => {
+      <p id="ar-reorder-hint" className="sr-only">
+        {r.reorderHint}
+      </p>
+      <ul className="ar-agents scroll-thin" data-reorder-list>
+        {agents.map((agent, index) => {
           const on = agent.id === currentId;
           const live = on ? { ...agent, ...current } : agent;
-          const heading = index > 0 && agent.group !== data.agents[index - 1]?.group ? GROUP_LABEL[agent.group ?? "mine"]() : null;
+          const heading = index > 0 && agent.group !== agents[index - 1]?.group ? GROUP_LABEL[agent.group ?? "mine"]() : null;
           return (
             <li key={agent.id}>
               {heading && <div className="ar-label ar-text">{heading}</div>}
-              <Link href={`/agents/${agent.id}`} className={`ar-agent ${on ? "is-on" : ""}`} aria-current={on ? "page" : undefined} title={agent.name}>
+              <Link
+                href={`/agents/${agent.id}`}
+                className={`ar-agent ${on ? "is-on" : ""}`}
+                aria-current={on ? "page" : undefined}
+                aria-describedby="ar-reorder-hint"
+                title={agent.name}
+                {...reorder.itemProps(agent.id)}
+              >
                 <span className="ar-fig">
                   <AgentFigure size={30} look={agent.look} state={live.state} live={on} />
                   {agent.waiting > 0 && <span className="ar-badge">{agent.waiting}</span>}

@@ -7,10 +7,12 @@ import type { AgentState } from "@understudy/protocol";
 import { AgentFigure } from "@/components/AgentFigure";
 import { messages } from "@/lib/messages";
 import { railLine, type RailData } from "./AgentRail";
+import { useAgentReorder } from "./useAgentReorder";
 
 export function AgentSwitcher({ open, onClose, data, currentId, current }: { open: boolean; onClose: () => void; data: RailData; currentId: string; current: { state: AgentState; note: string | null } }) {
   const ref = useRef<HTMLDialogElement | null>(null);
   const r = messages.agentPage;
+  const reorder = useAgentReorder(data.agents);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -36,13 +38,23 @@ export function AgentSwitcher({ open, onClose, data, currentId, current }: { ope
             <X size={17} aria-hidden />
           </button>
         </div>
-        <ul className="sw-list scroll-thin">
-          {data.agents.map((agent) => {
+        <p id="sw-reorder-hint" className="m-0 text-[12px] text-smoke">
+          {r.reorderHintTouch}
+        </p>
+        <ul className="sw-list scroll-thin" data-reorder-list>
+          {reorder.agents.map((agent) => {
             const on = agent.id === currentId;
             const live = on ? { ...agent, ...current } : agent;
             return (
               <li key={agent.id}>
-                <Link href={`/agents/${agent.id}`} className={`sw-agent ${on ? "is-on" : ""}`} aria-current={on ? "page" : undefined} onClick={on ? onClose : undefined}>
+                <Link
+                  href={`/agents/${agent.id}`}
+                  className={`sw-agent ${on ? "is-on" : ""}`}
+                  aria-current={on ? "page" : undefined}
+                  aria-describedby="sw-reorder-hint"
+                  onClick={on ? onClose : undefined}
+                  {...reorder.itemProps(agent.id)}
+                >
                   <span className="ar-fig">
                     <AgentFigure size={34} look={agent.look} state={live.state} live={on} />
                     {agent.waiting > 0 && <span className="ar-badge">{agent.waiting}</span>}

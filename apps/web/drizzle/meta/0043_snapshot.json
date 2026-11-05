@@ -1,5 +1,5 @@
 {
-  "id": "d174b039-19c4-45fe-8f3a-f9c39829ad04",
+  "id": "c7c4a789-4bef-4588-98f9-c1a112172d11",
   "prevId": "77763167-0802-4ff4-8992-acf0824d95c3",
   "version": "7",
   "dialect": "postgresql",
@@ -4974,9 +4974,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "locale": {
-          "name": "locale",
-          "type": "text",
+        "agent_order": {
+          "name": "agent_order",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

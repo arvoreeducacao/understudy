@@ -880,6 +880,8 @@ export const en = {
   },
   agentPage: {
     railLabel: "Understudies",
+    reorderHint: "Drag to change the order. On a phone, touch and hold first. With the keyboard, press Alt and an arrow key.",
+    reorderHintTouch: "Touch and hold an understudy, then drag it to change the order.",
     switchAgent: "Switch understudy",
     readOnly: (owner: string, name: string) => `Only ${owner} can talk to ${name}. You can follow along here.`,
     allAgents: "All understudies",

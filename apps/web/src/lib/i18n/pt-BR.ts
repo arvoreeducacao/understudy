@@ -891,6 +891,8 @@ export const ptBR: Messages = {
   },
   agentPage: {
     railLabel: "Agentes",
+    reorderHint: "Arraste para mudar a ordem. No celular, toque e segure antes. No teclado, aperte Alt e uma seta.",
+    reorderHintTouch: "Toque e segure um understudy, depois arraste para mudar a ordem.",
     switchAgent: "Trocar de agente",
     readOnly: (owner: string, name: string) => `Só ${owner} conversa com ${name}. Aqui você acompanha.`,
     allAgents: "Todos os agentes",
