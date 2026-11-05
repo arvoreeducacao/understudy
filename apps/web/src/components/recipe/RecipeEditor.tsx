@@ -7,6 +7,7 @@ import type { Recipe } from "@understudy/protocol";
 import { runRecipeNow, saveRecipe, setRecipeActive, testRecipe } from "@/app/actions/recipes";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AskCard } from "@/components/recipe/AskCard";
+import { DeleteRecipe } from "@/components/recipe/DeleteRecipe";
 import { GroupCard } from "@/components/recipe/GroupCard";
 import { QuestionCards } from "@/components/recipe/QuestionCards";
 import { RecentRuns, type RecentRun } from "@/components/recipe/RecentRuns";
@@ -196,6 +197,13 @@ export function RecipeEditor({
           beforeShare={async () => !dirty || (await persist())}
         />
       </div>
+
+      <section className="card rp-card" aria-labelledby="rp-delete">
+        <h2 id="rp-delete" className="rp-h2">
+          {t.deleteTitle}
+        </h2>
+        <DeleteRecipe recipeId={recipeId} title={recipe.title} />
+      </section>
 
       <div className="rp-bar">
         {noting && (
