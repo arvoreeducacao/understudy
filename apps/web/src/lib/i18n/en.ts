@@ -27,6 +27,8 @@ export const en = {
   settings: {
     title: "Settings",
     subtitle: "How your understudies reach you, on each device you use.",
+    languageTitle: "Language",
+    languageBody: "The language the panel shows to you. Everyone else keeps their own.",
     pushTitle: "Notifications",
     pushBody: "Get a heads-up on this phone or computer when an understudy needs your OK or gets stuck. Turn it on in each device you use.",
     pushSwitch: "Notify me on this device",

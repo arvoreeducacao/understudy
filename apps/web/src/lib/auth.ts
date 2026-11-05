@@ -52,6 +52,7 @@ function createAuth() {
         admin: { type: "boolean", defaultValue: false, input: false },
         source: { type: "string", required: false, input: false },
         adminGrantedAt: { type: "date", required: false, input: false },
+        locale: { type: "string", required: false, input: false },
       },
     },
     session: {
@@ -136,4 +137,10 @@ export async function sessionFromHeaders(headers: Headers): Promise<SessionUser 
     googleOnly: isGoogleOnlyEmail(u.email),
     admin: isAdmin(u.email, Boolean(u.admin), u.source, u.adminGrantedAt),
   };
+}
+
+export async function localeFromHeaders(headers: Headers): Promise<string | null> {
+  const result = await getAuth().api.getSession({ headers, query: { disableRefresh: true } });
+  const locale = (result?.user as { locale?: unknown } | undefined)?.locale;
+  return typeof locale === "string" ? locale : null;
 }

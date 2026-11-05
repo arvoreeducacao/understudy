@@ -17,6 +17,7 @@ export const user = pgTable("user", {
   adminGrantedAt: timestamp("admin_granted_at", { withTimezone: true }),
   source: text("source"),
   agentOrder: jsonb("agent_order").$type<string[]>(),
+  locale: text("locale"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
