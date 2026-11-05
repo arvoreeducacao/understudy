@@ -55,7 +55,7 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `UNDERSTUDY_ARTIFACT_MAX_BYTES` | Largest file one artifact version can hold (25 MB by default) |
 | `UNDERSTUDY_ARTIFACT_AGENT_MAX_BYTES` | Total size of every artifact version one understudy can keep (1 GB by default) |
 | `UNDERSTUDY_ARTIFACT_ORIGIN` | Optional separate origin (another registrable domain) that serves artifact content; without it content is served from the panel host, already sandboxed with an opaque origin |
-| `UNDERSTUDY_LOCALE` | `en` (default) or `pt-BR` |
+| `UNDERSTUDY_LOCALE` | Default language, `en` (default) or `pt-BR`. Each person can pick their own in Settings. Team groups without a language, and messages the panel sends on its own (scheduled runs, briefings), use this one |
 | `UNDERSTUDY_TIMEZONE` | Default time zone for dates and new schedules, default `UTC` |
 | `UNDERSTUDY_BRIEFING_CRON` | When the daily Slack briefing goes out, default `0 8 * * 1-5`; `off` disables it |
 | `SLACK_BOT_TOKEN` | Optional. Enables approval DMs (`users.lookupByEmail`, `chat.postMessage`) and the `slack_post` tool |

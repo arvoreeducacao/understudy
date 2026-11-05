@@ -7,11 +7,12 @@ import next from "next";
 import { WebSocketServer, type WebSocket } from "ws";
 import { panelFramePolicy, PATHS } from "@understudy/protocol";
 import { agentAccess } from "@/lib/access";
-import { sessionFromHeaders } from "@/lib/auth";
+import { localeFromHeaders, sessionFromHeaders } from "@/lib/auth";
 import { sameSecret } from "@/lib/secret-compare";
 import { getDb, getPool, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { authenticateComputer, handleGatekeeper } from "@/server/gatekeeper";
+import { needsLocale, requestLocales } from "@/server/request-locale";
 import { createHub } from "@/server/hub";
 import { roomFor } from "@/server/hub/rooms";
 import { ROOM_SOCKET } from "@/lib/rooms";
@@ -221,7 +222,8 @@ async function main() {
       return;
     }
     res.setHeader("Content-Security-Policy", panelFramePolicy(`${env.artifactOrigin ?? env.publicUrl}${ARTIFACT_CONTENT_PREFIX}`));
-    handle(req, res);
+    const locale = needsLocale(url.pathname, req.headers.cookie) ? localeFromHeaders(headersOf(req)).catch(() => null) : Promise.resolve(null);
+    locale.then((wanted) => requestLocales.run(wanted, () => handle(req, res)));
   });
 
   server.requestTimeout = 60 * 60 * 1000;

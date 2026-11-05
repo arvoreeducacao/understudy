@@ -13,12 +13,14 @@ const t = messages.rules;
 
 type Kind = OwnerRule["kind"];
 
-const KINDS: { kind: Kind; label: string; hint: string; inputMode?: "decimal" }[] = [
-  { kind: "max_amount", label: t.maxAmount, hint: "1000", inputMode: "decimal" },
-  { kind: "allowed_email_domains", label: t.emailDomains, hint: t.emailDomainsHint },
-  { kind: "blocked_site", label: t.blockedSite, hint: t.blockedSiteHint },
-  { kind: "custom", label: t.custom, hint: t.customHint },
-];
+function ruleKinds(): { kind: Kind; label: string; hint: string; inputMode?: "decimal" }[] {
+  return [
+    { kind: "max_amount", label: t.maxAmount, hint: "1000", inputMode: "decimal" },
+    { kind: "allowed_email_domains", label: t.emailDomains, hint: t.emailDomainsHint },
+    { kind: "blocked_site", label: t.blockedSite, hint: t.blockedSiteHint },
+    { kind: "custom", label: t.custom, hint: t.customHint },
+  ];
+}
 
 function draftRule(kind: Kind, value: string): Record<string, unknown> {
   if (kind === "max_amount") return { kind, amount: Number(value.replace(/[^\d.]/g, "")) };
@@ -28,13 +30,14 @@ function draftRule(kind: Kind, value: string): Record<string, unknown> {
 }
 
 export function RulesEditor({ agentId, initial }: { agentId: string; initial: OwnerRule[] }) {
+  const kinds = ruleKinds();
   const [rules, setRules] = useState<OwnerRule[]>(initial);
   const [kind, setKind] = useState<Kind>("max_amount");
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<"idle" | "saved" | "invalid">("idle");
   const [adding, setAdding] = useState(false);
   const [pending, start] = useTransition();
-  const current = KINDS.find((entry) => entry.kind === kind) ?? KINDS[0];
+  const current = kinds.find((entry) => entry.kind === kind) ?? kinds[0];
 
   const save = (next: unknown[], after?: () => void) => {
     setStatus("idle");
@@ -102,7 +105,7 @@ export function RulesEditor({ agentId, initial }: { agentId: string; initial: Ow
                 disabled={pending}
                 onChange={(next) => setKind(next as Kind)}
                 aria-label={t.title}
-                options={KINDS.map((entry) => ({ value: entry.kind, label: entry.label }))}
+                options={kinds.map((entry) => ({ value: entry.kind, label: entry.label }))}
               />
               <Input
                 className="flex-1 min-w-0"

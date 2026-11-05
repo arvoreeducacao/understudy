@@ -23,7 +23,7 @@ Everything is configured through `.env` at the repository root (copy `example.en
 | `UNDERSTUDY_ARTIFACT_MAX_BYTES` | Largest file one artifact version can hold (25 MB by default) |
 | `UNDERSTUDY_ARTIFACT_AGENT_MAX_BYTES` | Total size of every artifact version one understudy can keep (1 GB by default) |
 | `UNDERSTUDY_ARTIFACT_ORIGIN` | Optional separate origin (another registrable domain) that serves artifact content; without it content is served from the panel host, already sandboxed with an opaque origin |
-| `UNDERSTUDY_LOCALE` | `en` (default) or `pt-BR` |
+| `UNDERSTUDY_LOCALE` | Default language, `en` (default) or `pt-BR`. Each person can pick their own in Settings. Team groups without a language, and messages the panel sends on its own (scheduled runs, briefings), use this one |
 | `UNDERSTUDY_TIMEZONE` | Time zone for dates and new schedules; default `UTC` |
 | `UNDERSTUDY_FOLLOWUP_MAX_CHAIN_WAKES` | Most times one chain of follow-ups can wake an understudy before it stops and the owner is told; default `30` |
 | `UNDERSTUDY_FOLLOWUP_MAX_DAILY_WAKES` | Most follow-up wakes per understudy in 24 hours; default `48` |

@@ -1,8 +1,9 @@
 import { connectSlackAccount } from "@/app/actions/slack";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { PushToggle } from "@/components/PushToggle";
 import { SlackDisconnect } from "@/components/SlackDisconnect";
 import { SettingsSection } from "@/components/ui/Section";
-import { messages } from "@/lib/messages";
+import { messages, serverLocale } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { vapidKeys } from "@/server/push";
 import { slackEnabled, slackUserName } from "@/server/slack";
@@ -36,6 +37,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </div>
       </div>
       <div className="page-body set-page">
+        <SettingsSection id="language" title={t.languageTitle} hint={t.languageBody}>
+          <LanguagePicker current={serverLocale()} />
+        </SettingsSection>
         <SettingsSection id="push" title={t.pushTitle} hint={t.pushBody}>
           <PushToggle publicKey={publicKey} />
         </SettingsSection>

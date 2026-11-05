@@ -302,6 +302,13 @@
       "when": 1793112018013,
       "tag": "0042_agent_brain_account",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793885227583,
+      "tag": "0043_user_locale",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ export const user = pgTable("user", {
   admin: boolean("admin").notNull().default(false),
   adminGrantedAt: timestamp("admin_granted_at", { withTimezone: true }),
   source: text("source"),
+  locale: text("locale"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
