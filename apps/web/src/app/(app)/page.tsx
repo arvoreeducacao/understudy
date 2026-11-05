@@ -3,12 +3,14 @@ import Link from "next/link";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
 import { accessibleAgentIds, approvalScope, involvedAgentIds } from "@/lib/access";
+import { applyAgentOrder } from "@/lib/agent-order";
 import { getDb, schema } from "@/lib/db";
 import { formatWhen } from "@/lib/format";
 import { cleanLook } from "@/lib/look";
 import { messages } from "@/lib/messages";
 import { requireUser } from "@/lib/session";
 import { STATE_PILL } from "@/lib/state-pill";
+import { loadAgentOrder } from "@/server/agent-order";
 import { nextRunAt } from "@/server/scheduler";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -20,7 +22,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const { view } = await searchParams;
   const user = await requireUser();
   const db = getDb();
-  const [everyone, involved, answerable] = await Promise.all([accessibleAgentIds(user.id), involvedAgentIds(user.id), approvalScope(user.id)]);
+  const [everyone, involved, answerable, order] = await Promise.all([accessibleAgentIds(user.id), involvedAgentIds(user.id), approvalScope(user.id), loadAgentOrder(user.id)]);
   const canSeeAll = everyone.length > involved.length;
   const showAll = canSeeAll && (view === "all" || involved.length === 0);
   const visible = showAll ? everyone : involved;
@@ -74,7 +76,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   }
 
   const rank = (agentId: string, state: string) => ((pendingBy.get(agentId) ?? 0) > 0 ? 0 : (ATTENTION[state] ?? 3));
-  const sorted = [...agents].sort((a, b) => rank(a.id, a.state) - rank(b.id, b.state));
+  const sorted = order.length ? applyAgentOrder(agents, order) : [...agents].sort((a, b) => rank(a.id, a.state) - rank(b.id, b.state));
   const sections = [
     { key: "mine", title: t.sectionMine, agents: sorted.filter((a) => a.ownerId === user.id) },
     { key: "shared", title: t.sectionShared, agents: sorted.filter((a) => a.ownerId !== user.id && involvedSet.has(a.id)) },

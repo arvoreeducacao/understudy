@@ -5,6 +5,7 @@ import { AgentInside } from "@/components/inside/AgentInside";
 import type { OwnerData } from "@/components/workspace/AgentWorkspace";
 import type { RailData } from "@/components/inside/AgentRail";
 import { approvalScope, canManage, involvedAgentIds } from "@/lib/access";
+import { applyAgentOrder } from "@/lib/agent-order";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { CHAT_WIDTH_COOKIE, WORKSPACE_HIDDEN_COOKIE, parseStoredWidth } from "@/lib/chat-layout";
@@ -14,6 +15,7 @@ import { defaultModel } from "@/lib/models";
 import { serverOptions } from "@/lib/server-options";
 import { requireAgentAccess } from "@/lib/session";
 import { loadChat, loadPendingApprovals, loadRuns } from "@/lib/views";
+import { loadAgentOrder } from "@/server/agent-order";
 import { channelSettings } from "@/server/channels/settings";
 import { pendingFollowups, toSummaries } from "@/server/followups";
 import { slackEnabled } from "@/server/slack";
@@ -87,7 +89,7 @@ const RAIL_GROUPS = ["mine", "shared", "other"] as const;
 
 async function loadRail(userId: string, userName: string, currentId: string): Promise<RailData> {
   const db = getDb();
-  const [involved, answerable] = await Promise.all([involvedAgentIds(userId), approvalScope(userId)]);
+  const [involved, answerable, order] = await Promise.all([involvedAgentIds(userId), approvalScope(userId), loadAgentOrder(userId)]);
   const visible = involved.includes(currentId) ? involved : [...involved, currentId];
   const [agents, pending] = await Promise.all([
     visible.length
@@ -105,7 +107,7 @@ async function loadRail(userId: string, userName: string, currentId: string): Pr
   const waitingBy = new Map<string, number>();
   for (const row of pending) waitingBy.set(row.agentId, (waitingBy.get(row.agentId) ?? 0) + 1);
   return {
-    agents: agents
+    agents: applyAgentOrder(agents, order)
       .map(({ ownerId, ...agent }) => ({
         ...agent,
         group: ownerId === userId ? ("mine" as const) : involved.includes(agent.id) ? ("shared" as const) : ("other" as const),
