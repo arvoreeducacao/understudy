@@ -65,7 +65,9 @@ export async function testRecipe(recipeId: string) {
 export async function deleteRecipe(recipeId: string) {
   const { agent } = await ownRecipe(recipeId);
   await getDb().delete(schema.recipes).where(eq(schema.recipes.id, recipeId));
-  return { redirectTo: `/agents/${agent.id}` };
+  revalidatePath(`/agents/${agent.id}`, "layout");
+  revalidatePath("/", "layout");
+  return { redirectTo: "/recipes" };
 }
 
 export async function runRecipeNow(recipeId: string, input: string) {
