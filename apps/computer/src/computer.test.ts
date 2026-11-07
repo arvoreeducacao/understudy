@@ -796,6 +796,103 @@ test("a script request that sends binary data shows a short note instead of the 
   assert.ok(verdict.fields.every((field) => !field.value.includes("\u0000")));
 });
 
+test("usage logs a page sends in the background are blocked without asking, in chat too", async () => {
+  const { isUsageLog, scriptRequestVerdict, droppedNotes, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
+  const logs = [
+    "https://play.google.com/log?format=json&hasfast=true&authuser=1",
+    "https://www.google-analytics.com/g/collect?v=2&tid=G-TEST",
+    "https://analytics.google.com/g/collect?v=2",
+    "https://stats.g.doubleclick.net/g/collect",
+    "https://www.google.com/ccm/collect",
+    "https://r.clarity.ms/collect",
+    "https://claude.ai/api/v2/rum",
+    "https://claude.ai/api/event_logging/v2/batch",
+    "https://logs.mezmo.com/logs/ingest",
+    "https://chat.google.com/u/1/_/DynamiteWebUi/jserror",
+    "https://otlp.example.com/v1/traces",
+    "https://exp.notion.com/v1/rgstr",
+    "https://amp.granola.ai/2/httpapi",
+    "https://smetrics.aa.com/b/ss/prod/1",
+    "https://o42.ingest.us.sentry.io/api/7/envelope/",
+    "https://browser-intake-datadoghq.com/api/v2/logs",
+  ];
+  for (const url of logs) assert.equal(isUsageLog({ url }), true, url);
+  const work = [
+    "https://play.google.com/store/apps/details",
+    "https://mail.google.com/sync/u/1/i/s",
+    "https://chat.google.com/u/1/api/create_message",
+    "https://app.notion.com/api/v3/saveTransactions",
+    "https://app.amplitude.com/api/charts",
+    "https://sentry.io/api/0/projects/",
+    "https://docs.google.com/spreadsheets/d/1/save",
+    "https://www.sunpass.com/vector/account/transponders/addmultiplevehicle.do",
+    "not a url",
+  ];
+  for (const url of work) assert.equal(isUsageLog({ url }), false, url);
+  assert.equal(isUsageLog({ url: "https://shop.example.com/anything", resourceType: "Ping" }), true);
+  assert.equal(isUsageLog({ url: "https://shop.example.com/report", resourceType: "CSPViolationReport" }), true);
+  const log = { method: "POST", url: "https://play.google.com/log?format=json&authuser=1", body: "\u001f�\b\u0000", pageUrl: "https://docs.google.com/spreadsheets/d/1/edit?gid=2" };
+  assert.deepEqual(scriptRequestVerdict({ mode: "chat" }, [], log), { kind: "drop", request: "POST play.google.com/log", pageUrl: "docs.google.com/spreadsheets/d/1/edit", usageLog: true });
+  assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true, askSteps: [{ id: "s1", text: "Update the sheet" }] }, [], log, "update the sheet").kind, "drop");
+  assert.equal(scriptRequestVerdict({ mode: "chat" }, [{ id: "site", kind: "blocked_site" as const, site: "play.google.com" }], log).kind, "rule");
+  assert.equal(scriptRequestVerdict({ mode: "recipe" }, [], log).kind, "block");
+  assert.deepEqual(scriptRequestVerdict({ mode: "run", approvalsRequired: false }, [], log), { kind: "pass" });
+  const approval = { runId: "r1", stepId: "s1", summary: "Update the sheet", until: Date.now() + STEP_APPROVAL_MS };
+  assert.equal(scriptRequestVerdict({ mode: "run", runId: "r1", approvalsRequired: true }, [], log, "", approval).kind, "pass");
+  assert.equal(scriptRequestVerdict({ mode: "chat" }, [], { ...log, url: "https://mail.google.com/sync/u/1/i/s" }).kind, "ask");
+  assert.deepEqual(
+    droppedNotes([
+      { request: "POST play.google.com/log", pageUrl: "docs.google.com/d", usageLog: true },
+      { request: "POST play.google.com/log", pageUrl: "docs.google.com/d", usageLog: true },
+      { request: "POST video.example.com/token", pageUrl: "video.example.com/embed" },
+    ]),
+    [
+      "blocked without asking: POST play.google.com/log ×2 are usage logs the page sends in the background (analytics, error reports). Pages work without them.",
+      "blocked without asking: POST video.example.com/token is not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.",
+    ],
+  );
+  assert.deepEqual(droppedNotes([]), []);
+});
+
+test("inside one script the owner is asked once per address, and a no stops everything after it", async () => {
+  const { scriptAsks } = await import("./browser-guard.ts");
+  const verdict = (host: string) => ({ kind: "ask" as const, summary: `Script sent a POST to ${host}`, fields: [] });
+  const asked: string[] = [];
+  let release!: () => void;
+  const firstAnswer = new Promise<void>((resolve) => (release = resolve));
+  const notes: string[] = [];
+  const asks = scriptAsks(async (ask) => {
+    asked.push(ask.summary);
+    if (asked.length === 1) await firstAnswer;
+    return { approved: true, text: "ok", requestId: `req${asked.length}` };
+  }, notes);
+  const burst = [asks.request(verdict("chat.google.com"), "POST chat.google.com/u/1/api/list_topics"), asks.request(verdict("chat.google.com"), "POST chat.google.com/u/1/api/list_topics"), asks.request(verdict("chat.google.com"), "POST chat.google.com/u/1/api/list_members")];
+  release();
+  assert.deepEqual(await Promise.all(burst), [true, true, true]);
+  assert.equal(await asks.request(verdict("chat.google.com"), "POST chat.google.com/u/1/api/list_topics"), true);
+  assert.deepEqual(asked, ["Script sent a POST to chat.google.com", "Script sent a POST to chat.google.com"]);
+  assert.deepEqual(notes, ["Script sent a POST to chat.google.com (approved by the owner [requestId: req1])", "Script sent a POST to chat.google.com (approved by the owner [requestId: req2])"]);
+  assert.equal(asks.repeatNote(), "sent without asking again: POST chat.google.com/u/1/api/list_topics ×2. The owner approved the same address earlier in this script.");
+
+  const denyNotes: string[] = [];
+  let calls = 0;
+  const strict = scriptAsks(async () => {
+    calls++;
+    return calls === 1 ? { approved: true, text: "ok" } : { approved: false, text: "denied by owner" };
+  }, denyNotes);
+  assert.equal(await strict.request(verdict("mail.google.com"), "POST mail.google.com/sync/u/1/i/s"), true);
+  assert.equal(await strict.request(verdict("mail.google.com"), "POST mail.google.com/sync/u/1/i/fd"), false);
+  assert.equal(await strict.request(verdict("mail.google.com"), "POST mail.google.com/sync/u/1/i/s"), false);
+  assert.equal(calls, 2);
+  assert.match(denyNotes[1], /^blocked: needs approval\. The owner did not approve "Script sent a POST to mail\.google\.com" \(denied by owner\)/);
+  assert.equal(strict.repeatNote(), null);
+
+  const broken = scriptAsks(async () => {
+    throw new Error("gatekeeper offline");
+  }, []);
+  assert.equal(await broken.request(verdict("x.example.com"), "POST x.example.com/a"), false);
+});
+
 test("an ask-first step asks the owner for the exact item, and the approval covers only that run for a while", async () => {
   const { askFirstPlan, bareUrl, coveringApproval, decide, droppedSummary, scriptRequestVerdict, pendingDialog, dialogReason, ASK_FIRST_TOOL_SPEC, COMMIT_TOOLS, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
   const { isApprovalTool } = await import("./agent.ts");
