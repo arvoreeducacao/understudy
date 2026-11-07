@@ -82,6 +82,10 @@ export function markSignedOut(configDir: string): void {
   } catch {}
 }
 
+export function forgetSignedOut(configDir: string): void {
+  rmSync(join(configDir, SIGNED_OUT_MARK), { force: true });
+}
+
 export function stillSignedOut(configDir: string): boolean {
   const mark = join(configDir, SIGNED_OUT_MARK);
   let stamp: string;
@@ -91,7 +95,7 @@ export function stillSignedOut(configDir: string): boolean {
     return false;
   }
   if (stamp === credentialsStamp(configDir)) return true;
-  rmSync(mark, { force: true });
+  forgetSignedOut(configDir);
   return false;
 }
 

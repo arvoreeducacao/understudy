@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
-import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, markSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
+import { brainLock, claudeConfigDir, clearStaleRefreshLock, forgetSignedOut, isRefreshRace, isSignedOut, markSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
 import { brainAccount, withBrainAccount } from "./brain-account.ts";
 import { gatekeeperUrl, restrictedGatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
@@ -320,6 +320,7 @@ export type TurnOptions = {
   retryDelaysMs?: number[];
   clearStaleLock?: () => boolean;
   markSignedOut?: () => void;
+  forgetSignedOut?: () => void;
 };
 
 export function startTurn(config: BrainConfig, request: TurnRequest, options: TurnOptions = {}): Turn {
@@ -330,6 +331,7 @@ export function startTurn(config: BrainConfig, request: TurnRequest, options: Tu
   const delays = options.retryDelaysMs ?? REFRESH_RETRY_DELAYS_MS;
   const clearStale = options.clearStaleLock ?? (() => request.brain === "claude" && clearStaleRefreshLock(credentialsDir));
   const rememberSignedOut = options.markSignedOut ?? (() => request.brain === "claude" && markSignedOut(credentialsDir));
+  const signedInAgain = options.forgetSignedOut ?? (() => request.brain === "claude" && forgetSignedOut(credentialsDir));
   let cancelled = false;
   let active: Turn | null = null;
   let wake: (() => void) | null = null;
@@ -371,6 +373,7 @@ export function startTurn(config: BrainConfig, request: TurnRequest, options: Tu
       }
       const signedOut = !result.ok && !cancelled && (race || result.authFailed === true || isSignedOut(result.error));
       if (signedOut) rememberSignedOut();
+      if (result.ok) signedInAgain();
       return { ...result, ...(usage ? { usage } : {}), ...(signedOut ? { needsLogin: true, error: signInAgainMessage(request.brain) } : {}) };
     }
   });

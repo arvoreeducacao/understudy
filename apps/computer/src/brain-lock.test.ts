@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ComputerToServer } from "@understudy/protocol";
 import { createAgent } from "./agent.ts";
-import { clearStaleRefreshLock, createBrainLock, isRefreshRace, isSignedOut, markSignedOut, REFRESH_LOCK_NAME, SIGNED_OUT_MARK, stillSignedOut } from "./brain-lock.ts";
+import { clearStaleRefreshLock, createBrainLock, forgetSignedOut, isRefreshRace, isSignedOut, markSignedOut, REFRESH_LOCK_NAME, SIGNED_OUT_MARK, stillSignedOut } from "./brain-lock.ts";
 import { claudeAuthFailed, parseClaudeLine, startTurn, type BrainEvent, type Turn, type TurnRequest, type TurnResult } from "./brain.ts";
 import { claudeStatusFromFiles, readClaudeStatus } from "./login.ts";
 import { createMemory } from "./memory.ts";
@@ -248,10 +248,20 @@ test("a turn Claude marks as a sign-in failure asks for a new sign-in whatever t
 
 test("a turn that fails for another reason does not mark the brain as signed out", async () => {
   let marked = 0;
+  let forgotten = 0;
   const { spawnTurn } = scripted([{ result: { error: "the page timed out" } }]);
-  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [], clearStaleLock: () => false, markSignedOut: () => marked++ }).done;
+  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [], clearStaleLock: () => false, markSignedOut: () => marked++, forgetSignedOut: () => forgotten++ }).done;
   assert.equal(result.needsLogin, undefined);
   assert.equal(marked, 0);
+  assert.equal(forgotten, 0);
+});
+
+test("a turn that works clears an earlier sign-in failure", async () => {
+  let forgotten = 0;
+  const { spawnTurn } = scripted([{ result: { ok: true, text: "done", sessionId: "s1" } }]);
+  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [], clearStaleLock: () => false, markSignedOut: () => assert.fail("marked"), forgetSignedOut: () => forgotten++ }).done;
+  assert.equal(result.ok, true);
+  assert.equal(forgotten, 1);
 });
 
 test("after a sign-in failure the saved login reads as signed out until Claude saves a new one", () => {
@@ -269,6 +279,9 @@ test("after a sign-in failure the saved login reads as signed out until Claude s
   utimesSync(credentials, later, later);
   assert.deepEqual(claudeStatusFromFiles(home, { HOME: home }), { brain: "claude", loggedIn: true });
   assert.equal(existsSync(join(configDir, SIGNED_OUT_MARK)), false);
+  markSignedOut(configDir);
+  forgetSignedOut(configDir);
+  assert.equal(stillSignedOut(configDir), false);
   markSignedOut(join(home, "missing"));
   assert.equal(stillSignedOut(join(home, "missing")), false);
 });
