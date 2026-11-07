@@ -783,6 +783,19 @@ test("the browser guard asks the owner before committing actions, and never whil
   assert.equal(HIDDEN_TOOLS.size, 0);
 });
 
+test("a script request that sends binary data shows a short note instead of the raw bytes", async () => {
+  const { bodyPreview, scriptRequestVerdict } = await import("./browser-guard.ts");
+  const gzip = "\u001f\ufffd\b\u0000\u0000\u0000\u0000\u0000\u0000\u0003" + "x".repeat(500);
+  assert.equal(bodyPreview(gzip), "(binary data, 510 characters)");
+  assert.equal(bodyPreview('{"a":1}'), '{"a":1}');
+  assert.equal(bodyPreview("line one\nline two\tok"), "line one\nline two\tok");
+  assert.equal(bodyPreview("ab\uD83D\uDE00", 3), "ab");
+  const verdict = scriptRequestVerdict({ mode: "chat" }, [], { method: "POST", url: "https://telemetry.example.com/log?format=proto", body: gzip, pageUrl: "https://docs.example.com/d/1" });
+  assert.ok(verdict.kind === "ask");
+  assert.deepEqual(verdict.fields.at(-1), { label: "Body", value: "(binary data, 510 characters)" });
+  assert.ok(verdict.fields.every((field) => !field.value.includes("\u0000")));
+});
+
 test("an ask-first step asks the owner for the exact item, and the approval covers only that run for a while", async () => {
   const { askFirstPlan, bareUrl, coveringApproval, decide, droppedSummary, scriptRequestVerdict, pendingDialog, dialogReason, ASK_FIRST_TOOL_SPEC, COMMIT_TOOLS, STEP_APPROVAL_MS } = await import("./browser-guard.ts");
   const { isApprovalTool } = await import("./agent.ts");

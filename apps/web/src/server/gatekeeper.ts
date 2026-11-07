@@ -6,6 +6,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
+import { storableJson } from "@/lib/db/storable";
 import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
 import { messages } from "@/lib/messages";
 import { canAlwaysAllow, effectivePermission, hintsRecordedFor, isDestructive, isReadOnly, oneLine, recordedHints, seenHintsFor, trustedHints, type ConnectorCeiling, type ToolPermission, type ToolVerdict } from "@/lib/tool-policy";
@@ -102,8 +103,14 @@ async function unapprovedAsk(agentId: string, tool: string) {
 async function logCall(agentId: string, tool: string, args: unknown, result: unknown, ok: boolean, verdict?: ToolVerdict, runId?: string | null) {
   await getDb()
     .insert(schema.toolCalls)
-    .values({ id: newId("tc"), agentId, tool, args, result, ok, verdict: verdict ?? null, runId: runId ?? null });
+    .values({ id: newId("tc"), agentId, tool, args: storableJson(args), result: storableJson(result), ok, verdict: verdict ?? null, runId: runId ?? null })
+    .catch((error) => console.error(JSON.stringify({ event: "tool_call_log_error", agentId, tool, error: errorLine(error) })));
   console.log(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call", agentId, tool, ok, ...(verdict ? { verdict } : {}) }));
+}
+
+function errorLine(error: unknown) {
+  const cause = error instanceof Error && error.cause ? `: ${String(error.cause)}` : "";
+  return `${String(error).split("\n")[0]}${cause}`.slice(0, 500);
 }
 
 export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, serverId: string, tools: Pick<UpstreamTool, "name" | "annotations">[]) {
@@ -397,6 +404,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       await logCall(agent.id, name, args, shown.content[0]?.text?.slice(0, 4000), !shown.isError, verdict, runId);
       return shown;
     } catch (error) {
+      console.error(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call_error", agentId: agent.id, tool: name, error: errorLine(error) }));
       await logCall(agent.id, name, args, String(error), false, undefined, runId);
       return text(String(error), true);
     }

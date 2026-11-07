@@ -2,6 +2,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or } from "drizz
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
+import { storableJson, storableText } from "@/lib/db/storable";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
@@ -42,8 +43,8 @@ export class Approvals {
       agentId,
       runId: request.runId || null,
       stepId: request.stepId ?? null,
-      summary: request.summary,
-      fields: request.fields ?? [],
+      summary: storableText(request.summary),
+      fields: storableJson(request.fields ?? []),
       source,
       requestId,
       payloadHash: payloadHash ?? null,
