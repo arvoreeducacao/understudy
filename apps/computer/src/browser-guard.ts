@@ -187,7 +187,60 @@ export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export const SCRIPT_GRACE_MS = 1500;
 
-export type ScriptVerdict = Verdict | { kind: "rule"; violation: RuleViolation } | { kind: "drop"; request: string; pageUrl: string };
+export type ScriptVerdict = Verdict | { kind: "rule"; violation: RuleViolation } | { kind: "drop"; request: string; pageUrl: string; usageLog?: boolean };
+
+export type ScriptRequest = Pick<GatedRequest, "method" | "url" | "body" | "pageUrl"> & { resourceType?: string };
+
+const USAGE_LOG_TYPES = new Set(["Ping", "CSPViolationReport"]);
+
+const USAGE_LOG_HOSTS = [
+  /(^|\.)google-analytics\.com$/,
+  /(^|\.)googletagmanager\.com$/,
+  /(^|\.)doubleclick\.net$/,
+  /(^|\.)clarity\.ms$/,
+  /(^|\.)akstat\.io$/,
+  /(^|\.)omtrdc\.net$/,
+  /(^|\.)demdex\.net$/,
+  /(^|\.)nr-data\.net$/,
+  /(^|\.)hotjar\.io$/,
+  /\.ingest(\.[a-z]{2})?\.sentry\.io$/,
+  /^browser-intake-/,
+  /^api\d?(\.eu)?\.amplitude\.com$/,
+  /^api\.segment\.io$/,
+  /^api-js\.mixpanel\.com$/,
+  /^rs\.fullstory\.com$/,
+  /^logs\.mezmo\.com$/,
+  /^csp\.withgoogle\.com$/,
+  /^bat\.bing\.com$/,
+  /^px\.ads\.linkedin\.com$/,
+  /^smetrics\./,
+];
+
+const USAGE_LOG_ADDRESSES = [
+  /^play\.google\.com\/log$/,
+  /^analytics\.google\.com\/g\/collect$/,
+  /^www\.google\.com\/(ccm\/collect|gen_204)$/,
+  /\/jserror$/,
+  /\/event_logging\//,
+  /\/api\/v2\/(rum|logs|replay)$/,
+  /\/v1\/(traces|metrics|logs)$/,
+  /\/v1\/(rgstr|log_event)$/,
+  /\/2\/httpapi$/,
+];
+
+export function isUsageLog(request: Pick<ScriptRequest, "url" | "resourceType">): boolean {
+  if (request.resourceType && USAGE_LOG_TYPES.has(request.resourceType)) return true;
+  let host: string;
+  let address: string;
+  try {
+    const parsed = new URL(request.url);
+    host = parsed.hostname.toLowerCase();
+    address = `${host}${parsed.pathname}`;
+  } catch {
+    return false;
+  }
+  return USAGE_LOG_HOSTS.some((pattern) => pattern.test(host)) || USAGE_LOG_ADDRESSES.some((pattern) => pattern.test(address));
+}
 
 export function scriptRequestSubject(request: Pick<GatedRequest, "url" | "body" | "pageUrl">): { urls: string[]; texts: string[]; amounts: string[] } {
   const urls = [request.url, request.pageUrl].filter(Boolean);
@@ -212,13 +265,57 @@ export function bareUrl(url: string): string {
   }
 }
 
-export function droppedSummary(drops: { request: string; pageUrl: string }[]): { request: string; pageUrl: string } {
+export function countedList(items: string[]): string {
   const counts = new Map<string, number>();
-  for (const drop of drops) counts.set(drop.request, (counts.get(drop.request) ?? 0) + 1);
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+  return [...counts].map(([item, times]) => (times > 1 ? `${item} ×${times}` : item)).join(", ").slice(0, 300);
+}
+
+export function droppedSummary(drops: { request: string; pageUrl: string }[]): { request: string; pageUrl: string } {
   return {
-    request: [...counts].map(([request, times]) => (times > 1 ? `${request} ×${times}` : request)).join(", ").slice(0, 300),
+    request: countedList(drops.map((drop) => drop.request)),
     pageUrl: [...new Set(drops.map((drop) => drop.pageUrl))].join(", ").slice(0, 300),
   };
+}
+
+export function droppedNotes(drops: { request: string; pageUrl: string; usageLog?: boolean }[]): string[] {
+  const usageLogs = drops.filter((drop) => drop.usageLog);
+  const strays = drops.filter((drop) => !drop.usageLog);
+  return [
+    ...(usageLogs.length ? [`blocked without asking: ${droppedSummary(usageLogs).request} ${usageLogs.length === 1 ? "is a usage log" : "are usage logs"} the page sends in the background (analytics, error reports). Pages work without them.`] : []),
+    ...(strays.length ? [`blocked without asking: ${droppedSummary(strays).request} ${strays.length === 1 ? "is" : "are"} not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.`] : []),
+  ];
+}
+
+export type OwnerAnswer = { approved: boolean; text: string; requestId?: string };
+
+export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => Promise<OwnerAnswer>, notes: string[]) {
+  const approvedAddresses = new Set<string>();
+  const repeats: string[] = [];
+  let denied = false;
+  let queue: Promise<unknown> = Promise.resolve();
+  const request = (verdict: Extract<Verdict, { kind: "ask" }>, address: string): Promise<boolean> => {
+    const turn = queue.then(async () => {
+      if (denied) return false;
+      if (approvedAddresses.has(address)) {
+        repeats.push(address);
+        return true;
+      }
+      const answer = await ask(verdict).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
+      if (!answer.approved) {
+        denied = true;
+        notes.push(`blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
+        return false;
+      }
+      approvedAddresses.add(address);
+      notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+      return true;
+    });
+    queue = turn.catch(() => {});
+    return turn;
+  };
+  const repeatNote = () => (repeats.length ? `sent without asking again: ${countedList(repeats)}. The owner approved the same address earlier in this script.` : null);
+  return { request, repeatNote };
 }
 
 const BINARY_MARKS = /[\u0000-\u0008\u000e-\u001f\ufffd]/;
@@ -229,7 +326,7 @@ export function bodyPreview(body: string, limit = 300): string {
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
 
-export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
+export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: ScriptRequest, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return { kind: "pass" };
   const violation = rules.length ? findViolation(rules, scriptRequestSubject(request)) : null;
@@ -242,8 +339,10 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
   try {
     host = new URL(request.url).host;
   } catch {}
+  const dropped = { kind: "drop" as const, request: `${method} ${bareUrl(request.url)}`, pageUrl: request.pageUrl ? bareUrl(request.pageUrl) : "unknown" };
+  if (isUsageLog(request)) return { ...dropped, usageLog: true };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
-  if (state.mode === "run" && !step) return { kind: "drop", request: `${method} ${bareUrl(request.url)}`, pageUrl: request.pageUrl ? bareUrl(request.pageUrl) : "unknown" };
+  if (state.mode === "run" && !step) return dropped;
   return {
     kind: "ask",
     summary: `Script sent a ${method} to ${host}`.slice(0, 480),
@@ -391,12 +490,11 @@ async function serve() {
   const gatedScript = async (message: Rpc, args: Record<string, unknown>, rules: OwnerRule[]) => {
     const state = readTurnState(stateFile);
     const notes: string[] = [];
-    const drops: { request: string; pageUrl: string }[] = [];
+    const drops: { request: string; pageUrl: string; usageLog?: boolean }[] = [];
     const pending = new Set<Promise<boolean>>();
     let blocked = false;
-    let denied = false;
     let seen = 0;
-    let asking: Promise<unknown> = Promise.resolve();
+    const asks = scriptAsks((verdict) => askOwner(verdict, state), notes);
     const stepHint = String(args.element ?? "");
     const judge = async (request: GatedRequest): Promise<boolean> => {
       const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
@@ -417,22 +515,10 @@ async function serve() {
         return false;
       }
       if (verdict.kind === "drop") {
-        drops.push({ request: verdict.request, pageUrl: verdict.pageUrl });
+        drops.push({ request: verdict.request, pageUrl: verdict.pageUrl, usageLog: verdict.usageLog });
         return false;
       }
-      const turn = asking.then(async () => {
-        if (denied) return false;
-        const answer = await askOwner(verdict, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
-        if (!answer.approved) {
-          denied = true;
-          notes.push(`blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
-          return false;
-        }
-        notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
-        return true;
-      });
-      asking = turn.catch(() => {});
-      const approved = await turn;
+      const approved = await asks.request(verdict, `${request.method.toUpperCase()} ${bareUrl(request.url)}`);
       if (!approved) blocked = true;
       return approved;
     };
@@ -459,10 +545,11 @@ async function serve() {
       }
       await gate.close();
       if (drops.length) {
-        const dropped = droppedSummary(drops);
-        await notifyMain({ event: "request_blocked", ...dropped });
-        notes.push(`blocked without asking: ${dropped.request} ${drops.length === 1 ? "is" : "are"} not a step of the recipe (pages often send these in the background, like video players or trackers). If your script needed it, stop and report.`);
+        await notifyMain({ event: "request_blocked", ...droppedSummary(drops) });
+        notes.push(...droppedNotes(drops));
       }
+      const repeated = asks.repeatNote();
+      if (repeated) notes.push(repeated);
       if (!notes.length) return reply;
       const text = `Requests this script tried to send:\n${notes.join("\n")}`;
       if (!reply.result?.content) return textResult(reply.id, text);
