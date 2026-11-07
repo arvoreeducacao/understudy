@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ComputerToServer } from "@understudy/protocol";
 import { createAgent } from "./agent.ts";
-import { clearStaleRefreshLock, createBrainLock, isRefreshRace, isSignedOut, REFRESH_LOCK_NAME } from "./brain-lock.ts";
-import { startTurn, type BrainEvent, type Turn, type TurnRequest, type TurnResult } from "./brain.ts";
-import { readClaudeStatus } from "./login.ts";
+import { clearStaleRefreshLock, createBrainLock, forgetSignedOut, isRefreshRace, isSignedOut, markSignedOut, REFRESH_LOCK_NAME, SIGNED_OUT_MARK, stillSignedOut } from "./brain-lock.ts";
+import { claudeAuthFailed, parseClaudeLine, startTurn, type BrainEvent, type Turn, type TurnRequest, type TurnResult } from "./brain.ts";
+import { claudeStatusFromFiles, readClaudeStatus } from "./login.ts";
 import { createMemory } from "./memory.ts";
 
 const RACE = "Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute";
@@ -81,6 +81,7 @@ test("refresh races and signed-out errors are told apart", () => {
   assert.equal(isSignedOut("Not logged in · Please run /login"), true);
   assert.equal(isSignedOut("OAuth token revoked · Please run /login"), true);
   assert.equal(isSignedOut("Login expired · Please run /login"), true);
+  assert.equal(isSignedOut("Failed to authenticate: OAuth session expired and could not be refreshed"), true);
   assert.equal(isRefreshRace("the page timed out"), false);
   assert.equal(isSignedOut("the page timed out"), false);
 });
@@ -186,7 +187,7 @@ test("a run that needs a new sign-in tells the owner instead of showing the raw 
   });
   agent.enqueue({ kind: "run", runId: "r1", recipe: { title: "Weekly check", trigger: "x", steps: [{ id: "s1", text: "Check", mode: "auto" }], questions: [], askFirstRuns: 0 }, approvalsRequired: false });
   await settle();
-  assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "login_done"), { type: "login_done", brain: "claude", ok: false, message });
+  assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "login_done"), { type: "login_done", brain: "claude", ok: false, message, signedOut: true });
   assert.deepEqual(sent.find((sentMessage) => sentMessage.type === "run_finished"), { type: "run_finished", runId: "r1", ok: false, summary: message, outcome: "signed_out" });
   assert.deepEqual(sent.filter((sentMessage) => sentMessage.type === "state").at(-1), { type: "state", state: "stuck", note: message });
 });
@@ -215,4 +216,72 @@ test("the sign-in status comes from the saved login without starting the brain",
   });
   assert.deepEqual(status, { brain: "claude", loggedIn: true, account: "owner@example.com" });
   assert.equal(started, 0);
+});
+
+const SIGNED_OUT_LINE = JSON.stringify({
+  type: "assistant",
+  error: "authentication_failed",
+  message: { model: "<synthetic>", role: "assistant", content: [{ type: "text", text: "Failed to authenticate: a wording the computer has never seen" }] },
+});
+
+test("a sign-in failure from Claude shows the owner how to connect again instead of the raw text", () => {
+  assert.equal(claudeAuthFailed(SIGNED_OUT_LINE), true);
+  assert.equal(claudeAuthFailed(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I am not logged in to the store yet" }] } })), false);
+  assert.equal(claudeAuthFailed("not json"), false);
+  const events = parseClaudeLine(SIGNED_OUT_LINE, new Map());
+  assert.deepEqual(events, [{ kind: "text", text: "Claude is signed out on this computer. Open the agent's settings and connect Claude again, then run it again." }]);
+  const race = JSON.stringify({ type: "assistant", error: "authentication_failed", message: { content: [{ type: "text", text: RACE }] } });
+  assert.deepEqual(parseClaudeLine(race, new Map()), [{ kind: "text", text: RACE }]);
+  const plain = parseClaudeLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I am not logged in to the store yet" }] } }), new Map());
+  assert.deepEqual(plain, [{ kind: "text", text: "I am not logged in to the store yet" }]);
+});
+
+test("a turn Claude marks as a sign-in failure asks for a new sign-in whatever the wording, once", async () => {
+  let marked = 0;
+  const { spawned, spawnTurn } = scripted([{ result: { error: "Failed to authenticate: a wording the computer has never seen", authFailed: true } }]);
+  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [1, 1], clearStaleLock: () => false, markSignedOut: () => marked++ }).done;
+  assert.equal(spawned.length, 1);
+  assert.equal(result.needsLogin, true);
+  assert.match(result.error ?? "", /connect Claude again/);
+  assert.equal(marked, 1);
+});
+
+test("a turn that fails for another reason does not mark the brain as signed out", async () => {
+  let marked = 0;
+  let forgotten = 0;
+  const { spawnTurn } = scripted([{ result: { error: "the page timed out" } }]);
+  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [], clearStaleLock: () => false, markSignedOut: () => marked++, forgetSignedOut: () => forgotten++ }).done;
+  assert.equal(result.needsLogin, undefined);
+  assert.equal(marked, 0);
+  assert.equal(forgotten, 0);
+});
+
+test("a turn that works clears an earlier sign-in failure", async () => {
+  let forgotten = 0;
+  const { spawnTurn } = scripted([{ result: { ok: true, text: "done", sessionId: "s1" } }]);
+  const result = await startTurn(config, request(), { spawnTurn, lock: createBrainLock(), retryDelaysMs: [], clearStaleLock: () => false, markSignedOut: () => assert.fail("marked"), forgetSignedOut: () => forgotten++ }).done;
+  assert.equal(result.ok, true);
+  assert.equal(forgotten, 1);
+});
+
+test("after a sign-in failure the saved login reads as signed out until Claude saves a new one", () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-home-"));
+  const configDir = join(home, ".claude");
+  const credentials = join(configDir, ".credentials.json");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "a", refreshToken: "dead", expiresAt: 1 } }));
+  assert.deepEqual(claudeStatusFromFiles(home, { HOME: home }), { brain: "claude", loggedIn: true });
+  markSignedOut(configDir);
+  assert.equal(stillSignedOut(configDir), true);
+  assert.deepEqual(claudeStatusFromFiles(home, { HOME: home }), { brain: "claude", loggedIn: false });
+  writeFileSync(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "b", refreshToken: "fresh", expiresAt: 2 } }));
+  const later = new Date(Date.now() + 5000);
+  utimesSync(credentials, later, later);
+  assert.deepEqual(claudeStatusFromFiles(home, { HOME: home }), { brain: "claude", loggedIn: true });
+  assert.equal(existsSync(join(configDir, SIGNED_OUT_MARK)), false);
+  markSignedOut(configDir);
+  forgetSignedOut(configDir);
+  assert.equal(stillSignedOut(configDir), false);
+  markSignedOut(join(home, "missing"));
+  assert.equal(stillSignedOut(join(home, "missing")), false);
 });

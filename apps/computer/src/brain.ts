@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Brain, Usage } from "@understudy/protocol";
-import { brainLock, claudeConfigDir, clearStaleRefreshLock, isRefreshRace, isSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
+import { brainLock, claudeConfigDir, clearStaleRefreshLock, forgetSignedOut, isRefreshRace, isSignedOut, markSignedOut, REFRESH_RETRY_DELAYS_MS, signInAgainMessage, type BrainLock } from "./brain-lock.ts";
 import { brainAccount, withBrainAccount } from "./brain-account.ts";
 import { gatekeeperUrl, restrictedGatekeeperUrl } from "./endpoints.ts";
 import { fakeBrainEnabled, startFakeTurn } from "./fake-brain.ts";
@@ -18,7 +18,7 @@ export type BrainEvent =
   | { kind: "tool"; name: string; input: Record<string, unknown> }
   | { kind: "tool_result"; name: string; isError: boolean; text: string };
 
-export type TurnResult = { ok: boolean; sessionId: string | null; text: string; error?: string; usage?: Usage; needsLogin?: boolean };
+export type TurnResult = { ok: boolean; sessionId: string | null; text: string; error?: string; usage?: Usage; needsLogin?: boolean; authFailed?: boolean };
 
 export function addUsage(total: Usage | undefined, more: Usage | undefined): Usage | undefined {
   if (!more) return total;
@@ -229,8 +229,9 @@ export function parseClaudeLine(line: string, tools: Map<string, string>): Brain
     if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && typeof event.delta.text === "string") events.push({ kind: "text_delta", text: event.delta.text });
   }
   if (message.type === "assistant") {
+    const authFailed = isAuthFailure(message);
     for (const block of message.message?.content ?? []) {
-      if (block.type === "text" && block.text?.trim()) events.push({ kind: "text", text: block.text });
+      if (block.type === "text" && block.text?.trim()) events.push({ kind: "text", text: authFailed && !isRefreshRace(block.text) ? signInAgainMessage("claude") : block.text });
       if (block.type === "thinking") events.push({ kind: "thinking" });
       if (block.type === "tool_use") {
         tools.set(block.id, block.name);
@@ -276,6 +277,18 @@ export function parseCodexLine(line: string): BrainEvent[] {
   return [];
 }
 
+function isAuthFailure(message: Record<string, any>): boolean {
+  return message.type === "assistant" && message.error === "authentication_failed";
+}
+
+export function claudeAuthFailed(line: string): boolean {
+  try {
+    return isAuthFailure(JSON.parse(line));
+  } catch {
+    return false;
+  }
+}
+
 export function claudeResult(line: string): { ok: boolean; text: string; sessionId?: string } | null {
   try {
     const message = JSON.parse(line);
@@ -306,6 +319,8 @@ export type TurnOptions = {
   lock?: BrainLock;
   retryDelaysMs?: number[];
   clearStaleLock?: () => boolean;
+  markSignedOut?: () => void;
+  forgetSignedOut?: () => void;
 };
 
 export function startTurn(config: BrainConfig, request: TurnRequest, options: TurnOptions = {}): Turn {
@@ -315,6 +330,8 @@ export function startTurn(config: BrainConfig, request: TurnRequest, options: Tu
   const lock = options.lock ?? brainLock(credentialsDir);
   const delays = options.retryDelaysMs ?? REFRESH_RETRY_DELAYS_MS;
   const clearStale = options.clearStaleLock ?? (() => request.brain === "claude" && clearStaleRefreshLock(credentialsDir));
+  const rememberSignedOut = options.markSignedOut ?? (() => request.brain === "claude" && markSignedOut(credentialsDir));
+  const signedInAgain = options.forgetSignedOut ?? (() => request.brain === "claude" && forgetSignedOut(credentialsDir));
   let cancelled = false;
   let active: Turn | null = null;
   let wake: (() => void) | null = null;
@@ -354,7 +371,9 @@ export function startTurn(config: BrainConfig, request: TurnRequest, options: Tu
         await pause(delays[attempt]);
         continue;
       }
-      const signedOut = !result.ok && !cancelled && (race || isSignedOut(result.error));
+      const signedOut = !result.ok && !cancelled && (race || result.authFailed === true || isSignedOut(result.error));
+      if (signedOut) rememberSignedOut();
+      if (result.ok) signedInAgain();
       return { ...result, ...(usage ? { usage } : {}), ...(signedOut ? { needsLogin: true, error: signInAgainMessage(request.brain) } : {}) };
     }
   });
@@ -394,6 +413,7 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
   let lastText = "";
   let failure: string | undefined;
   let resultOk: boolean | null = null;
+  let authFailed = false;
   let stderr = "";
   let usage: Usage | undefined;
 
@@ -411,6 +431,7 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
       request.onEvent(event);
     }
     if (request.brain === "claude") {
+      if (claudeAuthFailed(line)) authFailed = true;
       const result = claudeResult(line);
       if (result) {
         resultOk = result.ok;
@@ -437,6 +458,7 @@ export function spawnTurn(config: BrainConfig, request: TurnRequest): Turn {
         text: finalText || lastText,
         error: ok ? undefined : failure ?? (stderr.trim().split("\n").slice(-3).join(" ") || `exit ${code}`),
         ...(usage ? { usage } : {}),
+        ...(!ok && authFailed ? { authFailed: true } : {}),
       });
     });
   });
