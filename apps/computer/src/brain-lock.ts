@@ -1,4 +1,4 @@
-import { rmSync, statSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type BrainLock = {
@@ -63,7 +63,36 @@ export function isRefreshRace(error: string | undefined): boolean {
 
 export function isSignedOut(error: string | undefined): boolean {
   if (isRefreshRace(error)) return false;
-  return /not logged in|run \/login|login expired|oauth token (?:has expired|revoked)|invalid_grant|invalid authentication credentials/i.test(error ?? "");
+  return /not logged in|run \/login|login expired|oauth token (?:has expired|revoked)|oauth session expired|invalid_grant|invalid authentication credentials/i.test(error ?? "");
+}
+
+export const SIGNED_OUT_MARK = ".understudy-signed-out";
+
+function credentialsStamp(configDir: string): string {
+  try {
+    return String(statSync(join(configDir, ".credentials.json")).mtimeMs);
+  } catch {
+    return "missing";
+  }
+}
+
+export function markSignedOut(configDir: string): void {
+  try {
+    writeFileSync(join(configDir, SIGNED_OUT_MARK), credentialsStamp(configDir));
+  } catch {}
+}
+
+export function stillSignedOut(configDir: string): boolean {
+  const mark = join(configDir, SIGNED_OUT_MARK);
+  let stamp: string;
+  try {
+    stamp = readFileSync(mark, "utf8");
+  } catch {
+    return false;
+  }
+  if (stamp === credentialsStamp(configDir)) return true;
+  rmSync(mark, { force: true });
+  return false;
 }
 
 export function signInAgainMessage(brain: string): string {

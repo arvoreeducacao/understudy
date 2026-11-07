@@ -88,7 +88,7 @@ export const ComputerToServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("run_finished"), runId: id, ok: z.boolean(), summary: text, usage: UsageSchema.optional(), outcome: z.enum(["stopped", "signed_out"]).optional() }),
   z.object({ type: z.literal("run_record"), runId: id, steps: z.array(RunStepSchema), unusual: z.array(text).optional() }),
   z.object({ type: z.literal("login_prompt"), brain: BrainSchema, url: optionalText, code: optionalText, message: text }),
-  z.object({ type: z.literal("login_done"), brain: BrainSchema, ok: z.boolean(), account: optionalText, message: optionalText }),
+  z.object({ type: z.literal("login_done"), brain: BrainSchema, ok: z.boolean(), account: optionalText, message: optionalText, signedOut: z.boolean().optional() }),
   z.object({ type: z.literal("memory"), files: z.array(MemoryFileSchema) }),
   z.object({ type: z.literal("files"), files: z.array(FileEntrySchema) }),
   z.object({ type: z.literal("file_content"), requestId: id, path: text, base64: optionalText, error: optionalText }),

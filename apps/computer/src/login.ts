@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Brain, ComputerToServer } from "@understudy/protocol";
 import { brainAccount } from "./brain-account.ts";
-import { brainLock, claudeConfigDir, clearStaleRefreshLock } from "./brain-lock.ts";
+import { brainLock, claudeConfigDir, clearStaleRefreshLock, stillSignedOut } from "./brain-lock.ts";
 import { fakeBrainEnabled } from "./fake-brain.ts";
 import { log } from "@understudy/runtime";
 
@@ -86,6 +86,7 @@ export const CLAUDE_STATUS_TIMEOUT_MS = 60 * 1000;
 
 export function claudeStatusFromFiles(home: string, env: NodeJS.ProcessEnv): BrainStatus | null {
   const configDir = claudeConfigDir(home, env);
+  if (stillSignedOut(configDir)) return { brain: "claude", loggedIn: false };
   let refreshToken: unknown;
   try {
     refreshToken = JSON.parse(readFileSync(join(configDir, ".credentials.json"), "utf8"))?.claudeAiOauth?.refreshToken;

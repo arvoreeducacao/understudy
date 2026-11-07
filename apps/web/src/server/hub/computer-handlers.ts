@@ -211,6 +211,11 @@ export const computerHandlers: Handlers = {
       await db.update(schema.agents).set({ brains, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
       hub.broadcast(agentId, { type: "brains", brains });
     }
+    if (agent && !message.ok && message.signedOut && agent.brains.some((b) => b.brain === message.brain && b.loggedIn)) {
+      const brains = agent.brains.map((b) => (b.brain === message.brain ? { ...b, loggedIn: false } : b));
+      await db.update(schema.agents).set({ brains, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+      hub.broadcast(agentId, { type: "brains", brains });
+    }
     hub.sendToOwners(agentId, { type: "login_done", brain: message.brain, ok: message.ok, account: message.account, message: message.message });
   },
 

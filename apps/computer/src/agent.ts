@@ -341,7 +341,7 @@ export function createAgent(options: {
       if (current.cancelled) started.cancel();
     }
     return started.done.then((result) => {
-      if (result.needsLogin) options.send({ type: "login_done", brain: persisted.brain, ok: false, message: result.error });
+      if (result.needsLogin) options.send({ type: "login_done", brain: persisted.brain, ok: false, message: result.error, signedOut: true });
       return result;
     });
   };
