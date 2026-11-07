@@ -221,6 +221,14 @@ export function droppedSummary(drops: { request: string; pageUrl: string }[]): {
   };
 }
 
+const BINARY_MARKS = /[\u0000-\u0008\u000e-\u001f\ufffd]/;
+
+export function bodyPreview(body: string, limit = 300): string {
+  if (BINARY_MARKS.test(body.slice(0, limit))) return `(binary data, ${body.length} characters)`;
+  const cut = body.slice(0, limit);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
 export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: Pick<GatedRequest, "method" | "url" | "body" | "pageUrl">, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return { kind: "pass" };
@@ -244,7 +252,7 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
       { label: "Step", value: step ? step.text : "Asked in chat" },
       { label: "Page", value: (request.pageUrl || "unknown").slice(0, 300) },
       { label: "Request", value: `${method} ${request.url}`.slice(0, 300) },
-      ...(request.body ? [{ label: "Body", value: request.body.slice(0, 300) }] : []),
+      ...(request.body ? [{ label: "Body", value: bodyPreview(request.body) }] : []),
     ],
   };
 }
