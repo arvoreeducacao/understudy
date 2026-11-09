@@ -473,6 +473,57 @@ test("while another run of the same understudy is open, a call in the running tu
   }
 });
 
+test("an owner's yes in one open run is used only by that run's turn, never by the same call from another open run or a turn without a run", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const { noteTurn, forgetTurnWake } = await import("./followups");
+  const db = getDb();
+  const hub = createHub();
+  const owned = "run_gk_yes_owner";
+  const hooked = "run_gk_yes_hook";
+  const args = { to: "client@example.com", body: "Weekly report" };
+  const refused = { to: "client@example.com", body: "Refused once" };
+  const row = async (id: string) => (await db.select().from(schema.approvals).where(eq(schema.approvals.id, id)))[0];
+  const asksAndIsDenied = async (call: Record<string, unknown>, runId: string | null) => {
+    const reply = rpc("mail__send", call);
+    const asked = await pendingApproval();
+    assert.equal(asked.runId, runId);
+    await hub.answerApproval(asked.id, false, undefined, ids.owner);
+    assert.match(await reply, /^not called/);
+    assert.doesNotMatch(await reply, /already said no/);
+  };
+  try {
+    await db.delete(schema.runs).where(inArray(schema.runs.id, [owned, hooked]));
+    await db.insert(schema.runs).values([
+      { id: owned, agentId: ids.agent, trigger: "schedule", status: "running", startedAt: new Date(Date.now() - 20 * 60_000) },
+      { id: hooked, agentId: ids.agent, trigger: "webhook", status: "running", startedAt: new Date() },
+    ]);
+    noteTurn(ids.agent, { runId: owned });
+    const asked = rpc("request_approval", { summary: "Send the weekly report", runId: owned, action: { tool: "mail__send", args } });
+    const yes = await pendingApproval();
+    await hub.answerApproval(yes.id, true, undefined, ids.owner);
+    assert.match(await asked, /^approved/);
+    await asksAndIsDenied(refused, owned);
+    const before = calls.length;
+
+    noteTurn(ids.agent, { runId: hooked });
+    await asksAndIsDenied(args, hooked);
+    await asksAndIsDenied(refused, hooked);
+    noteTurn(ids.agent, {});
+    await asksAndIsDenied(args, null);
+    assert.equal(calls.length, before);
+    assert.equal((await row(yes.id)).usedAt, null);
+
+    noteTurn(ids.agent, { runId: owned });
+    assert.equal(await rpc("mail__send", args), "sent to client@example.com");
+    assert.equal(calls.length, before + 1);
+    assert.ok((await row(yes.id)).usedAt);
+  } finally {
+    forgetTurnWake(ids.agent);
+    await db.delete(schema.runs).where(inArray(schema.runs.id, [owned, hooked]));
+  }
+});
+
 async function cancelRequest(requestId: number) {
   await fetch(`${panelUrl}/api/mcp`, {
     method: "POST",
