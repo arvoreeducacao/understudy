@@ -1364,6 +1364,9 @@ export const en = {
     waitingTitle: "Paused until you answer",
     waitingSince: (since: string, until: string) => `Waiting for your answer since ${since}. The request is valid until ${until}; the task goes on as soon as you answer.`,
     waitingAnswer: "Answer now",
+    waitingOwner: "waiting for the owner",
+    waitingOwnerTitle: "Paused until the owner answers",
+    waitingOwnerSince: (since: string, until: string) => `Waiting for an answer since ${since}. The request is valid until ${until}; the task goes on as soon as it is answered.`,
   },
   approvals: {
     emptyValue: "empty",
@@ -1391,8 +1394,10 @@ export const en = {
     finishedOk: (summary: string) => `Done: ${summary}`,
     finishedFail: (summary: string) => `Did not finish: ${summary}`,
     computerOffline: "The computer was off.",
-    stalled: (minutes: number, since: string, last: string | null) =>
-      `It stopped showing any activity at ${since}${last ? ` (last thing it did: ${last})` : ""} and was not waiting for your approval, so the panel closed it after ${minutes} minutes without activity.`,
+    stalled: (minutes: number, since: string, last: string | null, late: { summary: string; at: string } | null) =>
+      `Nothing came from its computer after ${since}${last ? ` (last thing it did: ${last})` : ""}, so the panel closed the run after ${minutes} minutes without activity.${late ? ` Your answer to "${late.summary}" at ${late.at} came after that and was not used.` : ""}`,
+    neverStarted: (minutes: number, since: string) => `Its computer never started this run: nothing came from it for ${minutes} minutes after ${since}, so the panel closed the run.`,
+    skipped: (title: string, since: string) => `Skipped a scheduled run of ${title}: the run from ${since} is still open.`,
   },
   approvalReminder: {
     slack: (agent: string, summary: string, runUrl: string, waitingUrl: string) =>

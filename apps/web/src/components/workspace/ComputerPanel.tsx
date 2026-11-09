@@ -119,7 +119,7 @@ export function ComputerPanel({
               <span>
                 <strong>{agent.name}</strong> {a.hasControl}
               </span>
-              {state === "working" && (
+              {(state === "working" || state === "waiting_you") && (
                 <button type="button" className="btn sec" onClick={() => send({ type: "stop" })}>
                   {a.stop}
                 </button>

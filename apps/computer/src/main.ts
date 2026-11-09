@@ -7,6 +7,7 @@ import { createAgent } from "./agent.ts";
 import { brainAccountState, setBrainAccount } from "./brain-account.ts";
 import { computerSocketUrl } from "./endpoints.ts";
 import { listRunApprovals, openGatekeeper } from "./gatekeeper-client.ts";
+import { openRunsFile } from "./open-runs.ts";
 import { launchBrowser } from "./browser.ts";
 import { applyInput } from "./input.ts";
 import { desktopEnabled, startDesktop } from "./desktop.ts";
@@ -147,6 +148,7 @@ async function main() {
     approvalPolicyFile: approvalPolicyFile(home),
     send: outbox,
     runApprovals: async (runId, wait, signal) => listRunApprovals(await openGatekeeper(serverUrl, token, signal), runId, wait),
+    openRunsFile: openRunsFile(home),
   });
 
   if (agent.brain() === "codex" && !codexAvailable) agent.setBrain("claude");
@@ -162,6 +164,7 @@ async function main() {
     sendCredentials();
     lastJobs = "";
     bench.send({ op: "job_list", id: "main" });
+    agent.resumeOpenRuns();
   };
 
   let watchQueue: Promise<void> = Promise.resolve();

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { describeRule, type OwnerRule } from "@understudy/protocol";
+import { pendingText } from "./approval-asks.ts";
 import { redactSecrets, ruleBlockText, scriptRequestVerdict } from "./browser-guard.ts";
 import { uniqueTarget } from "./files.ts";
 import type { ApprovalRequest } from "./gatekeeper-client.ts";
@@ -40,7 +41,7 @@ export type ApiCallDeps = {
   filesDir: string;
   state: () => TurnState;
   rules: () => OwnerRule[];
-  approve: (request: ApprovalRequest) => Promise<{ approved: boolean; text: string }>;
+  approve: (request: ApprovalRequest) => Promise<{ approved: boolean; pending?: boolean; text: string; requestId?: string }>;
   notify?: (event: Record<string, unknown>) => Promise<void>;
   fetch?: typeof fetch;
 };
@@ -230,8 +231,9 @@ export async function callApi(vault: Vault, args: ApiCallArgs, deps: ApiCallDeps
   if (verdict.kind === "block") return verdict.reason;
   if (verdict.kind === "ask") {
     const step = verdict.fields.find((field) => field.label === "Step");
+    const summary = `Call the ${name} API: ${method} ${url.host}${url.pathname}`.slice(0, 480);
     const answer = await deps.approve({
-      summary: `Call the ${name} API: ${method} ${url.host}${url.pathname}`.slice(0, 480),
+      summary,
       runId: state.runId,
       stepId: verdict.stepId,
       fields: [
@@ -241,6 +243,7 @@ export async function callApi(vault: Vault, args: ApiCallArgs, deps: ApiCallDeps
         ...(shownBody ? [{ label: "Body", value: shownBody.slice(0, 4000) }] : []),
       ],
     });
+    if (answer.pending) return `Not sent: ${pendingText(summary, state.mode === "run" ? "make exactly the same call again" : null, { ...answer, text: clean(answer.text) }).replace(/^pending: /, "")}`;
     if (!answer.approved) return `Not sent: your owner did not approve this call. ${clean(answer.text).slice(0, 300)}`;
   }
 

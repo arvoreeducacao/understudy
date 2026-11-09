@@ -4,9 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ComputerToServer } from "@understudy/protocol";
-import { createAgent, waitForOwnerAnswers, type RunApprovalsLookup } from "./agent.ts";
-import { askStoreFile, openAskStore } from "./approval-asks.ts";
-import { askInRun, pendingText } from "./browser-guard.ts";
+import { createAgent, PANEL_CLOSED_SUMMARY, RESTARTED_SUMMARY, waitForOwnerAnswers, type RunApprovalsLookup } from "./agent.ts";
+import { askInRun, askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
 import type { BrainEvent, TurnRequest } from "./brain.ts";
 import { listRunApprovals, type McpSession, type RunApprovalList } from "./gatekeeper-client.ts";
 import { createMemory } from "./memory.ts";
@@ -27,8 +26,7 @@ const gaveUp: Planned = {
   result: { ok: true, text: 'RESULT {"ok": false, "summary": "Approval request for step s2 got no answer and timed out after 1800s"}', sessionId: "session-1" },
 };
 
-function harness(script: (request: TurnRequest, index: number) => Planned | Promise<Planned>, runApprovals?: RunApprovalsLookup) {
-  const home = mkdtempSync(join(tmpdir(), "understudy-wait-"));
+function harness(script: (request: TurnRequest, index: number) => Planned | Promise<Planned>, runApprovals?: RunApprovalsLookup, home = mkdtempSync(join(tmpdir(), "understudy-wait-"))) {
   const requests: TurnRequest[] = [];
   const sent: ComputerToServer[] = [];
   const runTurn = (_config: unknown, request: TurnRequest) => {
@@ -49,8 +47,9 @@ function harness(script: (request: TurnRequest, index: number) => Planned | Prom
     runTurn: runTurn as never,
     runApprovals,
     ownerWaitRetryMs: 5,
+    openRunsFile: join(home, ".understudy", "open-runs.json"),
   });
-  return { agent, requests, sent };
+  return { agent, requests, sent, home };
 }
 
 async function until(check: () => boolean, label: string) {
@@ -166,28 +165,96 @@ test("the panel can stop a run while it waits for the owner", async () => {
   assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_board", ok: false, summary: "Stopped by the owner.", outcome: "stopped" });
 });
 
-test("waiting for the owner survives a panel that cannot be reached for a while", async () => {
+test("waiting for the owner survives a panel that cannot be reached for a while, even right when the turn ends", async () => {
   let looks = 0;
   const pending = { requestId: "apr_1", summary: "Pay the invoice", stepId: "s2" };
-  const answers = await waitForOwnerAnswers(
+  const waited = await waitForOwnerAnswers(
     async (wait) => {
       looks += 1;
+      if (looks <= 3) throw new Error("gatekeeper answered HTTP 502");
       if (!wait) return { pending: [pending], answered: [] };
-      if (looks < 4) throw new Error("fetch failed");
+      if (looks < 7) throw new Error("fetch failed");
       return { pending: [], answered: [{ ...pending, status: "approved" }] };
     },
     { stopped: () => false, pause: async () => {}, onWaiting: () => {} },
   );
-  assert.deepEqual(answers, [{ ...pending, status: "approved" }]);
-  assert.equal(looks, 4);
+  assert.deepEqual(waited, { answers: [{ ...pending, status: "approved" }], closed: false });
+  assert.equal(looks, 7);
 
   const olderPanel = { call: async () => "unknown tool run_approvals" };
   assert.deepEqual(await listRunApprovals(olderPanel, "run_board", false), { pending: [], answered: [] });
+  assert.deepEqual(await listRunApprovals({ call: async () => JSON.stringify({ runId: "run_board", pending: [], answered: [], open: false }) }, "run_board", false), { pending: [], answered: [], open: false });
   await assert.rejects(listRunApprovals({ call: async () => "<html>bad gateway</html>" }, "run_board", true), /did not list the run's approvals/);
 
   let clock = 0;
   const forever = await waitForOwnerAnswers(async () => ({ pending: [pending], answered: [] }), { stopped: () => false, pause: async () => {}, onWaiting: () => {}, now: () => (clock += 1000), maxMs: 5000 });
-  assert.deepEqual(forever, []);
+  assert.deepEqual(forever, { answers: [], closed: false });
+  clock = 0;
+  const pauses: number[] = [];
+  const unreachable = await waitForOwnerAnswers(
+    async () => {
+      throw new Error("down");
+    },
+    { stopped: () => false, pause: async (ms) => void pauses.push(ms), onWaiting: () => assert.fail("nothing is known to wait"), now: () => (clock += 1000), maxMs: 10_000, retryMs: 30_000 },
+  );
+  assert.deepEqual(unreachable, { answers: [], closed: false });
+  assert.ok(pauses.length >= 4 && pauses.every((ms) => ms === 30_000));
+  assert.deepEqual(await waitForOwnerAnswers(async () => ({ pending: [pending], answered: [], open: false }), { stopped: () => false, pause: async () => {}, onWaiting: () => {} }), { answers: [], closed: true });
+});
+
+test("a computer that restarts while its run waits for the owner picks the wait up again and resumes the same session", async () => {
+  const desk = ownerDesk();
+  desk.ask("apr_board", "Send the board update", "s2");
+  const before = harness((request) => {
+    request.onEvent({ kind: "session", sessionId: "session-before" });
+    return new Promise<Planned>(() => {});
+  }, desk.lookup);
+  before.agent.enqueue({ kind: "run", runId: "run_board", recipe, approvalsRequired: true });
+  await until(() => before.requests.length === 1, "the first turn");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const after = harness(() => ({ events: [], result: { ok: true, text: 'RESULT {"ok": true, "summary": "Sent the board update"}', sessionId: "session-before" } }), desk.lookup, before.home);
+  after.agent.resumeOpenRuns();
+  after.agent.resumeOpenRuns();
+  await until(() => after.agent.state() === "waiting_you", "the restarted computer to wait");
+  assert.equal(after.requests.length, 0);
+  assert.ok(after.sent.some((message) => message.type === "activity" && /computer restarted/.test((message as { text: string }).text)));
+  desk.answer("apr_board", "approved");
+  await until(() => after.sent.some((message) => message.type === "run_finished"), "the run to finish");
+  assert.equal(after.requests.length, 1);
+  assert.equal(after.requests[0].resume, "session-before");
+  assert.match(after.requests[0].prompt, /\[requestId: apr_board\]: approved/);
+  assert.deepEqual(after.sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_board", ok: true, summary: "Sent the board update" });
+
+  const again = harness(() => assert.fail("no turn"), desk.lookup, before.home);
+  again.agent.resumeOpenRuns();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(again.sent.length, 0);
+});
+
+test("a computer that restarts in the middle of a run with nothing waiting for the owner closes the run and says so", async () => {
+  const desk = ownerDesk();
+  const before = harness((request) => {
+    request.onEvent({ kind: "session", sessionId: "session-before" });
+    return new Promise<Planned>(() => {});
+  }, desk.lookup);
+  before.agent.enqueue({ kind: "run", runId: "run_feed", recipe, approvalsRequired: false });
+  await until(() => before.requests.length === 1, "the first turn");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const after = harness(() => assert.fail("no turn"), desk.lookup, before.home);
+  after.agent.resumeOpenRuns();
+  await until(() => after.sent.some((message) => message.type === "run_finished"), "the run to close");
+  assert.deepEqual(after.sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_feed", ok: false, summary: RESTARTED_SUMMARY });
+  assert.match(RESTARTED_SUMMARY, /restarted while this run was in progress, and nothing in it was waiting for your answer/);
+  assert.equal(after.agent.state(), "stuck");
+});
+
+test("a run the panel already closed stops waiting at once", async () => {
+  const lookup: RunApprovalsLookup = async () => ({ pending: [], answered: [], open: false });
+  const { agent, sent } = harness(() => gaveUp, lookup);
+  agent.enqueue({ kind: "run", runId: "run_board", recipe, approvalsRequired: true });
+  await until(() => sent.some((message) => message.type === "run_finished"), "the run to end");
+  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_board", ok: false, summary: PANEL_CLOSED_SUMMARY, outcome: "stopped" });
 });
 
 test("the run prompt tells the model a pending answer means keep waiting, never end or skip", () => {
@@ -264,4 +331,35 @@ test("a panel that cannot be reached while waiting is a pending answer, not a no
   assert.deepEqual({ approved: answer.approved, pending: answer.pending, requestId: answer.requestId }, { approved: false, pending: true, requestId: "apr_board" });
   assert.match(pendingText(request.summary, "do the same action again", answer), /yet \(the panel could not be reached \(fetch failed\)/);
   assert.equal(store.asked(request), "apr_board");
+});
+
+test("outside a run, one ask waits once and a pending answer does nothing and says so", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-asks-"));
+  const { session, calls } = fakeGatekeeper({ request_approval: () => pendingReply, wait_for_approval: () => assert.fail("no second wait") });
+  const answer = await askOwnerFor(async () => session, openAskStore(askStoreFile(home)), { summary: "Click Send on mail.example.com", fields: [] });
+  assert.deepEqual({ approved: answer.approved, pending: answer.pending }, { approved: false, pending: true });
+  assert.deepEqual(calls.map((call) => call.name), ["request_approval"]);
+  assert.match(pendingText("Click Send on mail.example.com", null, answer), /^pending: [\s\S]*nothing was done\. Tell your owner it waits for their answer/);
+});
+
+test("a no that arrives while the run waits is not handed to the main model to ask again", async () => {
+  const before = process.env.UNDERSTUDY_RUN_MODEL;
+  process.env.UNDERSTUDY_RUN_MODEL = "haiku";
+  try {
+    const desk = ownerDesk();
+    desk.ask("apr_board", "Send the board update", "s2");
+    const { agent, requests, sent } = harness((_request, index) =>
+      index === 0 ? gaveUp : { events: [], result: { ok: true, text: 'RESULT {"ok": false, "summary": "Skipped the board update: the owner said no"}', sessionId: "session-1" } },
+    desk.lookup);
+    agent.setModel("opus");
+    agent.enqueue({ kind: "run", runId: "run_board", recipe, approvalsRequired: true });
+    await until(() => desk.calls.some((call) => call.wait), "the wait");
+    desk.answer("apr_board", "denied", "not this week");
+    await until(() => sent.some((message) => message.type === "run_finished"), "the run to finish");
+    assert.deepEqual(requests.map((request) => request.model ?? null), ["haiku", "haiku"]);
+    assert.match(requests[1].prompt, /: denied, with the note "not this week"/);
+  } finally {
+    if (before === undefined) delete process.env.UNDERSTUDY_RUN_MODEL;
+    else process.env.UNDERSTUDY_RUN_MODEL = before;
+  }
 });
