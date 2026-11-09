@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -350,6 +350,45 @@ test("an approved action does not cover other arguments, a finished run, a stale
 
   assert.match(await rpc("request_approval", { summary: "x", runId, action: { tool: "nope__send", args: {} } }), /^not asked: nope__send is not one of your gatekeeper tools/);
   assert.match(await rpc("request_approval", { summary: "x", runId, action: { tool: "request_approval", args: {} } }), /^not asked/);
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
+
+test("asking again for a step of a run that is still waiting joins the open request, and run_approvals waits for the owner's answer", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const hub = createHub();
+  const runId = "run_gk_waits";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  const ask = { summary: "Send the board update", runId, stepId: "s2", fields: [{ label: "Board", value: "Weekly" }] };
+  const pendingRows = async () => db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, ids.agent), eq(schema.approvals.status, "pending")));
+
+  const first = rpc("request_approval", ask);
+  const approval = await pendingApproval();
+  const second = rpc("request_approval", ask);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual((await pendingRows()).map((row) => row.id), [approval.id]);
+
+  const listed = JSON.parse(await rpc("run_approvals", { runId }));
+  assert.deepEqual(listed, { runId, pending: [{ requestId: approval.id, stepId: "s2", summary: "Send the board update", expiresAt: approval.expiresAt!.toISOString() }], answered: [] });
+  let answered = false;
+  const waiting = rpc("run_approvals", { runId, wait: true }).then((text) => ((answered = true), JSON.parse(text)));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(answered, false);
+
+  await hub.answerApproval(approval.id, true, undefined, ids.owner);
+  assert.match(await first, /^approved/);
+  assert.match(await second, /^approved/);
+  assert.deepEqual(await waiting, { runId, pending: [], answered: [{ requestId: approval.id, stepId: "s2", summary: "Send the board update", status: "approved" }] });
+  assert.match(await rpc("wait_for_approval", { requestId: approval.id }), /^approved/);
+
+  const otherStep = rpc("request_approval", { ...ask, stepId: "s3" });
+  const another = await pendingApproval();
+  assert.notEqual(another.id, approval.id);
+  await hub.answerApproval(another.id, false, undefined, ids.owner);
+  assert.match(await otherStep, /^denied/);
+  assert.deepEqual(JSON.parse(await rpc("run_approvals", { runId: "run_gk_someone_else" })), { runId: "run_gk_someone_else", pending: [], answered: [] });
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
 });
 

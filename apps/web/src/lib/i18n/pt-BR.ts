@@ -1340,6 +1340,9 @@ export const ptBR: Messages = {
     finished: "Terminou",
     open: "Detalhes",
     monthUsage: (usd: string) => `neste mês ${usd}`,
+    waitingTitle: "Pausada até você responder",
+    waitingSince: (since: string, until: string) => `Esperando sua resposta desde ${since}. O pedido vale até ${until}; a tarefa segue assim que você responder.`,
+    waitingAnswer: "Responder agora",
   },
   approvals: {
     emptyValue: "vazio",
@@ -1367,6 +1370,12 @@ export const ptBR: Messages = {
     finishedOk: (summary: string) => `Terminou: ${summary}`,
     finishedFail: (summary: string) => `Não terminou: ${summary}`,
     computerOffline: "O computador estava desligado.",
+    stalled: (minutes: number, since: string, last: string | null) =>
+      `Parou de dar sinal às ${since}${last ? ` (a última coisa que fez: ${last})` : ""} e não estava esperando sua aprovação, então o painel encerrou a rodada depois de ${minutes} minutos sem atividade.`,
+  },
+  approvalReminder: {
+    slack: (agent: string, summary: string, runUrl: string, waitingUrl: string) =>
+      `${agent} ainda espera sua resposta, e a tarefa fica pausada até você responder: "${summary}"\n<${waitingUrl}|Responder agora> · <${runUrl}|Ver a tarefa>`,
   },
   followups: {
     title: "Retornos",

@@ -1,6 +1,7 @@
-import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
+import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
 import { storableJson, storableText } from "@/lib/db/storable";
 import { newId } from "@/lib/ids";
@@ -18,8 +19,13 @@ import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
 
+const RUN_APPROVALS_LIMIT = 100;
+const REMIND_AFTER_MS = 60 * 60 * 1000;
+const REMIND_WINDOW_MS = 10 * 60 * 1000;
+
 export class Approvals {
   private waiters = new Map<string, Set<(answer: Answer) => void>>();
+  private reminded = new Set<string>();
 
   constructor(private hub: Hub) {}
 
@@ -77,6 +83,70 @@ export class Approvals {
     if (askedBy && roomId) this.hub.rooms.approvalRaised(agentId, roomId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
     this.notify(agentId, view, askedBy, guest).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
+  }
+
+  async openAsk(agentId: string, request: { runId: string; stepId?: string; summary: string; fields: ApprovalRequest["fields"]; payloadHash?: string }) {
+    const [row] = await getDb()
+      .select({ id: schema.approvals.id })
+      .from(schema.approvals)
+      .where(
+        and(
+          eq(schema.approvals.agentId, agentId),
+          eq(schema.approvals.runId, request.runId),
+          eq(schema.approvals.status, "pending"),
+          or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date())),
+          request.stepId ? eq(schema.approvals.stepId, request.stepId) : isNull(schema.approvals.stepId),
+          eq(schema.approvals.summary, storableText(request.summary)),
+          sql`${schema.approvals.fields} = ${JSON.stringify(storableJson(request.fields))}::jsonb`,
+          request.payloadHash ? eq(schema.approvals.payloadHash, request.payloadHash) : isNull(schema.approvals.payloadHash),
+        ),
+      )
+      .orderBy(desc(schema.approvals.createdAt))
+      .limit(1);
+    if (row) log("approval_joined", { agentId, approvalId: row.id, runId: request.runId });
+    return row?.id ?? null;
+  }
+
+  forRun(agentId: string, runId: string) {
+    return getDb()
+      .select({
+        id: schema.approvals.id,
+        stepId: schema.approvals.stepId,
+        summary: schema.approvals.summary,
+        status: schema.approvals.status,
+        note: schema.approvals.note,
+        expiresAt: schema.approvals.expiresAt,
+      })
+      .from(schema.approvals)
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId)))
+      .orderBy(asc(schema.approvals.createdAt))
+      .limit(RUN_APPROVALS_LIMIT);
+  }
+
+  async remind(now = Date.now(), send: typeof sendDirectMessage = sendDirectMessage) {
+    const due = await getDb()
+      .select({ approval: schema.approvals, owner: { id: schema.user.id, email: schema.user.email }, agentName: schema.agents.name })
+      .from(schema.approvals)
+      .innerJoin(schema.agents, eq(schema.agents.id, schema.approvals.agentId))
+      .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
+      .where(
+        and(
+          eq(schema.approvals.status, "pending"),
+          isNotNull(schema.approvals.runId),
+          lte(schema.approvals.createdAt, new Date(now - REMIND_AFTER_MS)),
+          gte(schema.approvals.createdAt, new Date(now - REMIND_AFTER_MS - REMIND_WINDOW_MS)),
+          or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date(now))),
+        ),
+      )
+      .limit(100);
+    for (const { approval, owner, agentName } of due) {
+      if (this.reminded.has(approval.id)) continue;
+      this.reminded.add(approval.id);
+      const text = copy.approvalReminder.slack(escapeSlack(agentName), escapeSlack(approval.summary), `${env.publicUrl}/runs/${approval.runId}`, `${env.publicUrl}/waiting`);
+      const sent = await send(owner, text, undefined, agentIdentity({ id: approval.agentId, name: agentName })).catch((error) => ({ ok: false, error: String(error) }));
+      log("approval_reminded", { approvalId: approval.id, agentId: approval.agentId, slack: sent.ok });
+    }
+    for (const id of this.reminded) if (!due.some((row) => row.approval.id === id)) this.reminded.delete(id);
   }
 
   async payloadHash(id: string, agentId: string) {

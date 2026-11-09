@@ -1329,6 +1329,9 @@ export const en = {
     finished: "Finished",
     open: "Details",
     monthUsage: (usd: string) => `this month ${usd}`,
+    waitingTitle: "Paused until you answer",
+    waitingSince: (since: string, until: string) => `Waiting for your answer since ${since}. The request is valid until ${until}; the task goes on as soon as you answer.`,
+    waitingAnswer: "Answer now",
   },
   approvals: {
     emptyValue: "empty",
@@ -1356,6 +1359,12 @@ export const en = {
     finishedOk: (summary: string) => `Done: ${summary}`,
     finishedFail: (summary: string) => `Did not finish: ${summary}`,
     computerOffline: "The computer was off.",
+    stalled: (minutes: number, since: string, last: string | null) =>
+      `It stopped showing any activity at ${since}${last ? ` (last thing it did: ${last})` : ""} and was not waiting for your approval, so the panel closed it after ${minutes} minutes without activity.`,
+  },
+  approvalReminder: {
+    slack: (agent: string, summary: string, runUrl: string, waitingUrl: string) =>
+      `${agent} is still waiting for your answer, and the task stays paused until you answer: "${summary}"\n<${waitingUrl}|Answer now> · <${runUrl}|See the task>`,
   },
   followups: {
     title: "Follow-ups",

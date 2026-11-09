@@ -59,9 +59,42 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
 
 export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string };
 
-export async function requestOwnerApproval(session: McpSession, request: ApprovalRequest): Promise<{ approved: boolean; text: string; requestId?: string }> {
-  let answer = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}) });
-  const requestId = answer.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1];
-  while (/status\W{1,8}pending/i.test(answer) && requestId) answer = await session.call("wait_for_approval", { requestId });
-  return { approved: /^\s*approved/i.test(answer), text: answer, requestId };
+export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string };
+
+export function readOwnerAnswer(text: string, knownRequestId?: string): OwnerAnswer {
+  const requestId = text.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1] ?? knownRequestId;
+  return { approved: /^\s*approved/i.test(text), pending: /status\W{1,8}pending/i.test(text), text, ...(requestId ? { requestId } : {}) };
+}
+
+export async function askOwnerOnce(session: McpSession, request: ApprovalRequest, knownRequestId?: string): Promise<OwnerAnswer> {
+  if (knownRequestId) {
+    const text = await session.call("wait_for_approval", { requestId: knownRequestId });
+    if (!/unknown request/i.test(text)) return readOwnerAnswer(text, knownRequestId);
+  }
+  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}) });
+  return readOwnerAnswer(text);
+}
+
+export async function requestOwnerApproval(session: McpSession, request: ApprovalRequest): Promise<OwnerAnswer> {
+  let answer = await askOwnerOnce(session, request);
+  while (answer.pending && answer.requestId) answer = await askOwnerOnce(session, request, answer.requestId);
+  return answer;
+}
+
+export type RunApproval = { requestId: string; stepId?: string | null; summary: string; status?: string; note?: string; expiresAt?: string | null };
+
+export type RunApprovalList = { pending: RunApproval[]; answered: RunApproval[] };
+
+export async function listRunApprovals(session: McpSession, runId: string, wait: boolean): Promise<RunApprovalList> {
+  const text = await session.call("run_approvals", { runId, ...(wait ? { wait: true } : {}) });
+  if (/^unknown tool/i.test(text)) return { pending: [], answered: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`the panel did not list the run's approvals: ${text.slice(0, 200)}`);
+  }
+  const list = parsed as Partial<RunApprovalList>;
+  if (!Array.isArray(list.pending) || !Array.isArray(list.answered)) throw new Error("the panel sent an unexpected list of approvals");
+  return { pending: list.pending, answered: list.answered };
 }

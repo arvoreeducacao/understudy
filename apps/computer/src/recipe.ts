@@ -123,7 +123,8 @@ export function runPrompt(input: { runId: string; recipe: Recipe; approvalsRequi
 - With one call to a gatekeeper tool (a Slack message, a post in another system): call request_approval with runId "${input.runId}", the stepId, and the call as action: the tool name and the exact arguments you will call it with, calling wait_for_approval while it says pending. Once approved, call that tool once with exactly those arguments; it will not ask the owner a second time. Any other call, or different arguments, asks again.
 - With call_api: just make the call; it asks your owner by itself.
 - Anything else irreversible outside the browser: call request_approval with runId "${input.runId}" and the stepId first, and wait for the answer.
-If an answer is denied, expired, still pending or never came back (a cut-off call is not a yes), or a browser action comes back "blocked: needs approval", the owner did not say yes: do not try another way, skip that item and everything that depends on it, and report it. The browser can also ask your owner by itself when you submit or send something outside an approved step. Never say your owner approved something unless a tool answered approved for it.`
+If an answer is pending, or a call that asks or waits is cut off before it answers, your owner has not answered yet, and that is not a yes: never do the item meanwhile. Keep waiting instead: call wait_for_approval with the requestId, or call browser_ask_first again with the same stepId, summary and fields, or repeat the browser action that said pending; none of these asks your owner a second time. The run stays open and paused until your owner answers, for as long as the request is valid, so never end the run, report it as failed or skip the item because an answer is pending or slow.
+If an answer is denied or expired, or a browser action comes back "blocked: needs approval", the owner did not say yes: do not try another way, skip that item and everything that depends on it, and report it. The browser can also ask your owner by itself when you submit or send something outside an approved step. Never say your owner approved something unless a tool answered approved for it.`
     : "The owner allowed this run to go without approvals; still never do anything the recipe does not ask for.";
   const context = !input.context
     ? ""
@@ -145,6 +146,18 @@ While you work, watch for anything unusual compared with how this task normally 
 When you finish, end your answer with a last line exactly like:
 RESULT {"ok": true, "summary": "<one sentence for the owner about what was done>", "anomalies": ["<one short line per unusual thing>"]}
 (use "ok": false and say what is missing if you could not finish; use "anomalies": [] when nothing was unusual).`;
+}
+
+export type OwnerAnswer = { requestId: string; stepId?: string | null; summary: string; status?: string; note?: string };
+
+export function ownerAnsweredPrompt(answers: OwnerAnswer[]): string {
+  const lines = answers
+    .map((answer) => `- ${JSON.stringify(answer.summary)}${answer.stepId ? ` (step ${answer.stepId})` : ""} [requestId: ${answer.requestId}]: ${answer.status ?? "answered"}${answer.note ? `, with the note ${JSON.stringify(answer.note)}` : ""}`)
+    .join("\n");
+  return `This task run is still open. It was paused waiting for your owner, and your owner has now answered:
+${lines}
+Carry on from where you stopped. For an approved item, first get the yes again without asking your owner a second time: call wait_for_approval with its requestId, or call browser_ask_first again with the same stepId, summary and fields, or repeat the browser action that was waiting. Then do exactly that item. Denied, expired or cancelled is not a yes: skip that item and everything that depends on it, and report it. Never redo a step that already submitted, sent, saved or paid for something.
+End your answer with the RESULT line exactly as described before.`;
 }
 
 export function withoutResultLine(text: string): string {

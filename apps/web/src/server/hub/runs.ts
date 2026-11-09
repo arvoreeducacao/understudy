@@ -6,11 +6,18 @@ import { brainText } from "@/lib/brain-text";
 import { getDb, schema } from "@/lib/db";
 import type { RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
+import { formatWhen } from "@/lib/format";
 import { messages as copy } from "@/lib/messages";
 import type { Hub } from "../hub";
 import { notifyRunFailure, type RunOutcome } from "../run-alerts";
 import { relayRunFinished, relayRunStarted } from "../channels/relay";
 import { log } from "./shared";
+
+export const STALL_MS = 20 * 60 * 1000;
+const STALL_NOTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const STALL_SCAN_LIMIT = 500;
+
+export type StalledRun = { id: string; agentId: string; startedAt: Date; lastSeen: Date; ranAt: Date; waiting: boolean; undelivered: boolean; lastActivity: string | null };
 
 export class Runs {
   constructor(private hub: Hub) {}
@@ -59,7 +66,7 @@ export class Runs {
     return { ok: true as const, runId };
   }
 
-  async finish(agentId: string, runId: string, ok: boolean, summary: string, usage?: Usage, outcome?: RunOutcome) {
+  private async close(agentId: string, runId: string, ok: boolean, summary: string, usage?: Usage) {
     const db = getDb();
     const [run] = await db
       .update(schema.runs)
@@ -69,8 +76,23 @@ export class Runs {
         finishedAt: new Date(),
         ...(usage ? { usage: { inputTokens: Number(usage.inputTokens) || 0, outputTokens: Number(usage.outputTokens) || 0, costUsd: usage.costUsd } } : {}),
       })
-      .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId)))
+      .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
       .returning();
+    if (!run) {
+      log("run_finish_ignored", { runId, agentId });
+      return null;
+    }
+    await db
+      .update(schema.approvals)
+      .set({ status: "expired", answeredAt: new Date() })
+      .where(and(eq(schema.approvals.runId, runId), eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending")));
+    this.hub.broadcast(agentId, { type: "run_finished", runId, ok, summary });
+    return run;
+  }
+
+  async finish(agentId: string, runId: string, ok: boolean, summary: string, usage?: Usage, outcome?: RunOutcome) {
+    const db = getDb();
+    const run = await this.close(agentId, runId, ok, summary, usage);
     if (!run) return;
     if (run.recipeId && ok && run.trigger !== "test") {
       await db
@@ -78,13 +100,8 @@ export class Runs {
         .set({ runsDone: sql`${schema.recipes.runsDone} + 1` })
         .where(eq(schema.recipes.id, run.recipeId));
     }
-    await db
-      .update(schema.approvals)
-      .set({ status: "expired", answeredAt: new Date() })
-      .where(and(eq(schema.approvals.runId, runId), eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "pending")));
     const state = ok ? "done" : "stuck";
     await db.update(schema.agents).set({ state, stateNote: summary, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
-    this.hub.broadcast(agentId, { type: "run_finished", runId, ok, summary });
     this.hub.broadcast(agentId, { type: "state", state, note: summary });
     await this.hub.addMessage(agentId, "system", ok ? copy.runs.finishedOk(summary) : copy.runs.finishedFail(summary), runId);
     if (!ok) notifyRunFailure(agentId, runId, outcome).catch((error) => log("run_notice_error", { error: String(error) }));
@@ -96,6 +113,42 @@ export class Runs {
       if (recipe) {
         await relayRunFinished(agentId, runId, recipe.recipe.title, recipe.recipe.steps.map((step) => step.text), ok, summary).catch((error) => log("slack_progress_error", { error: String(error) }));
       }
+    }
+  }
+
+  async stalled(now = Date.now(), quietMs = STALL_MS): Promise<StalledRun[]> {
+    const rows = await getDb()
+      .select({
+        id: schema.runs.id,
+        agentId: schema.runs.agentId,
+        startedAt: schema.runs.startedAt,
+        lastSeen: sql<Date | string>`greatest(
+          "runs"."started_at",
+          (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.role <> 'user'),
+          (select max(t.created_at) from tool_calls t where t.agent_id = "runs"."agent_id" and t.created_at >= "runs"."started_at"),
+          (select max(coalesce(a.answered_at, a.created_at)) from approvals a where a.agent_id = "runs"."agent_id" and coalesce(a.answered_at, a.created_at) >= "runs"."started_at")
+        )`,
+        ranAt: sql<Date | string>`greatest("runs"."started_at", (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id"))`,
+        waiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.status = 'pending' and (a.expires_at is null or a.expires_at > now()))`,
+        undelivered: sql<boolean>`exists (select 1 from inbound_queue q where q.agent_id = "runs"."agent_id" and q.run_id = "runs"."id")`,
+        lastActivity: sql<string | null>`(select m.text from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id" and m.role in ('activity', 'agent') order by m.created_at desc limit 1)`,
+      })
+      .from(schema.runs)
+      .where(eq(schema.runs.status, "running"))
+      .limit(STALL_SCAN_LIMIT);
+    return rows
+      .map((row) => ({ ...row, lastSeen: new Date(row.lastSeen), ranAt: new Date(row.ranAt) }))
+      .filter((row) => !row.waiting && !row.undelivered && now - row.lastSeen.getTime() >= quietMs);
+  }
+
+  async failStalled(now = Date.now()) {
+    for (const run of await this.stalled(now)) {
+      const summary = copy.runs.stalled(Math.round(STALL_MS / 60_000), formatWhen(run.ranAt), run.lastActivity?.replace(/\s+/g, " ").slice(0, 200) ?? null);
+      const recent = now - run.ranAt.getTime() < STALL_NOTICE_MAX_AGE_MS;
+      if (recent) await this.finish(run.agentId, run.id, false, summary);
+      else await this.close(run.agentId, run.id, false, summary);
+      const stopped = this.hub.sendToComputer(run.agentId, { type: "run_stop", runId: run.id, reason: summary });
+      log("run_stalled", { runId: run.id, agentId: run.agentId, lastSeen: run.lastSeen.toISOString(), ranAt: run.ranAt.toISOString(), notified: recent, stopped });
     }
   }
 

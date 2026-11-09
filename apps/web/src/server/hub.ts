@@ -94,6 +94,8 @@ export class Hub {
     this.hosts.ping();
     for (const set of this.viewers.values()) for (const v of set) if (v.ws.readyState === v.ws.OPEN) v.ws.ping();
     this.approvals.expire().catch((error) => log("approval_expire_error", { error: String(error) }));
+    this.approvals.remind().catch((error) => log("approval_remind_error", { error: String(error) }));
+    this.runs.failStalled().catch((error) => log("run_stall_error", { error: String(error) }));
     this.inbound.expire().catch((error) => log("inbound_expire_error", { error: String(error) }));
     this.rooms.expireStale().catch((error) => log("room_expire_error", { error: String(error) }));
     flushStale(this).catch((error) => log("channel_flush_error", { error: String(error) }));
@@ -448,6 +450,14 @@ export class Hub {
     grant?: ApprovalGrant,
   ) {
     return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant);
+  }
+
+  openApprovalAsk(agentId: string, request: Parameters<Approvals["openAsk"]>[1]) {
+    return this.approvals.openAsk(agentId, request);
+  }
+
+  runApprovals(agentId: string, runId: string) {
+    return this.approvals.forRun(agentId, runId);
   }
 
   approvalPayloadHash(id: string, agentId: string) {

@@ -159,14 +159,22 @@ function jsonSchemaOf(schema: z.ZodType) {
   return rest as { type: "object"; [key: string]: unknown };
 }
 
+async function withHeartbeat<T>(extra: Extra, work: () => Promise<T>): Promise<T> {
+  const heartbeat = setInterval(() => {
+    extra
+      .sendNotification({ method: "notifications/message", params: { level: "info", data: "waiting for owner" } })
+      .catch(() => undefined);
+  }, HEARTBEAT_MS);
+  try {
+    return await work();
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
 function outcomeWaiter(hub: Hub, agentId: string) {
-  return async (id: string, extra: Extra): Promise<Outcome> => {
-    const heartbeat = setInterval(() => {
-      extra
-        .sendNotification({ method: "notifications/message", params: { level: "info", data: "waiting for owner" } })
-        .catch(() => undefined);
-    }, HEARTBEAT_MS);
-    try {
+  return (id: string, extra: Extra): Promise<Outcome> =>
+    withHeartbeat(extra, async () => {
       const existing = await hub.approvalOutcome(id, agentId);
       if (!existing) return { kind: "unknown" };
       if (existing.status === "expired") return { kind: "decided", approved: false, note: brainText.expiredNote };
@@ -175,10 +183,34 @@ function outcomeWaiter(hub: Hub, agentId: string) {
       const answer = await hub.waitForApproval(id, APPROVAL_CALL_CAP_MS);
       if (!answer) return { kind: "pending" };
       return { kind: "decided", approved: answer.approved, note: answer.note, stopped: answer.status === "cancelled" };
-    } finally {
-      clearInterval(heartbeat);
-    }
+    });
+}
+
+type RunApprovalRow = Awaited<ReturnType<Hub["runApprovals"]>>[number];
+
+export function runApprovalsView(runId: string, rows: RunApprovalRow[]) {
+  const pending = rows.filter((row) => row.status === "pending");
+  const answered = rows.filter((row) => row.status !== "pending");
+  return {
+    runId,
+    pending: pending.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, expiresAt: row.expiresAt?.toISOString() ?? null })),
+    answered: answered.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, status: row.status, ...(row.note ? { note: row.note } : {}) })),
   };
+}
+
+export async function waitForRunAnswer(hub: Hub, agentId: string, runId: string, signal: AbortSignal | undefined, capMs = APPROVAL_CALL_CAP_MS) {
+  const before = await hub.runApprovals(agentId, runId);
+  const waiting = before.filter((row) => row.status === "pending");
+  if (waiting.length === 0) return before;
+  const answers = waiting.map((row) => hub.waitForApproval(row.id, capMs));
+  const now = await hub.runApprovals(agentId, runId);
+  if (!now.some((row) => row.status === "pending" && waiting.some((open) => open.id === row.id))) return now;
+  const aborted = new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    signal?.addEventListener("abort", () => resolve(), { once: true });
+  });
+  await Promise.race([...answers, aborted]);
+  return hub.runApprovals(agentId, runId);
 }
 
 async function connectorAccess(agent: AgentRow, ownerEmail: string, restricted = false) {
@@ -240,13 +272,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
         }
-        const id = await hub.createApproval(
-          agent.id,
-          { summary: label ? `${label}${args.summary}`.slice(0, 500) : args.summary, fields, runId: args.runId || undefined, stepId: args.stepId },
-          "mcp",
-          APPROVAL_LIFETIME_SECONDS,
-          hash,
-        );
+        const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
+        const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -255,6 +283,16 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       description: "Keep waiting for an approval that came back pending. Returns approved, denied, or pending again.",
       schema: z.object({ requestId: z.string().min(1) }),
       run: (async (args: { requestId: string }, extra: Extra) => waitWithHeartbeat(args.requestId, extra)) as Builtin["run"],
+    },
+    {
+      name: "run_approvals",
+      description:
+        "List the approvals asked during a task run: the ones your owner has not answered yet, and the answers to the others. With wait: true, first wait (up to 30 minutes) until one of the unanswered ones gets an answer.",
+      schema: z.object({ runId: z.string().min(1).max(200), wait: z.boolean().optional() }),
+      run: (async (args: { runId: string; wait?: boolean }, extra: Extra) => {
+        const rows = args.wait ? await withHeartbeat(extra, () => waitForRunAnswer(hub, agent.id, args.runId, extra.signal)) : await hub.runApprovals(agent.id, args.runId);
+        return text(runApprovalsView(args.runId, rows));
+      }) as Builtin["run"],
     },
   ];
 
@@ -338,7 +376,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     return { upstream: upstreams.find((u) => u.slug === slug), toolName: rest.join(PROXY_SEPARATOR) };
   };
   const actionAllowed = async (tool: string) => {
-    if (tool === "request_approval" || tool === "wait_for_approval") return false;
+    if (tool === "request_approval" || tool === "wait_for_approval" || tool === "run_approvals") return false;
     if (builtins.some((b) => b.name === tool)) return true;
     const { upstream, toolName } = splitProxied(tool);
     const found = upstream && toolName ? await findTool(upstream, toolName) : undefined;
@@ -438,7 +476,8 @@ async function guardOutward(
   }
   if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
-  const id = await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant);
+  const joined = approval.runId ? await hub.openApprovalAsk(agent.id, { runId: approval.runId, summary, fields, payloadHash: hash }) : null;
+  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant));
   let outcome = await waitOutcome(id, extra);
   while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };

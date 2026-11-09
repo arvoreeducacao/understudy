@@ -3,10 +3,11 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path";
 import { artifactEditBriefing, attachmentsBriefing, rulesBriefing, type AgentState, type ArtifactEditContext, type Attachment, type Brain, type ComputerToServer, type OwnerRule, type Recipe, type RecordedEvent } from "@understudy/protocol";
 import { addUsage, startTurn, validModel, type BrainConfig, type BrainEvent, type Turn, type TurnResult } from "./brain.ts";
+import type { RunApproval, RunApprovalList } from "./gatekeeper-client.ts";
 import { log } from "@understudy/runtime";
 import { isRefreshRace, isSignedOut } from "./brain-lock.ts";
 import { dayOf, type Memory } from "./memory.ts";
-import { DEFAULT_ASK_FIRST_RUNS, extractJson, normalizeRecipe, parseRunResult, recipePrompt, recipePromptFromText, runPrompt, withAnomalies, withoutResultLine } from "./recipe.ts";
+import { DEFAULT_ASK_FIRST_RUNS, extractJson, normalizeRecipe, ownerAnsweredPrompt, parseRunResult, recipePrompt, recipePromptFromText, runPrompt, withAnomalies, withoutResultLine } from "./recipe.ts";
 import { readRules } from "./rules-store.ts";
 import { createRunRecord, type Screenshot } from "./run-record.ts";
 import { writeTurnState, type TurnState } from "./turn-state.ts";
@@ -60,6 +61,7 @@ export const OUTSIDER_UNSUPPORTED = "I can only take messages from people other 
 export type Agent = {
   enqueue: (job: Job) => void;
   stop: () => void;
+  stopRun: (runId: string, reason: string) => void;
   setBrain: (brain: Brain) => void;
   brain: () => Brain;
   setModel: (model: string) => void;
@@ -260,6 +262,48 @@ export function approvalPending(text: string): boolean {
   return /status\W{1,8}pending/i.test(text) || /^\s*pending\b/i.test(text);
 }
 
+export const OWNER_WAIT_MAX_MS = 25 * 60 * 60 * 1000;
+
+export const OWNER_WAIT_RETRY_MS = 30_000;
+
+export const OWNER_LOOK_TRIES = 3;
+
+export const OWNER_WAIT_MIN_CALL_MS = 1000;
+
+export const MAX_OWNER_RESUMES = 20;
+
+export type RunApprovalsLookup = (runId: string, wait: boolean, signal: AbortSignal) => Promise<RunApprovalList>;
+
+export async function waitForOwnerAnswers(
+  list: (wait: boolean) => Promise<RunApprovalList>,
+  options: { stopped: () => boolean; pause: (ms: number) => Promise<void>; onWaiting: (pending: RunApproval[]) => void; now?: () => number; retryMs?: number; maxMs?: number },
+): Promise<RunApproval[]> {
+  const now = options.now ?? Date.now;
+  const retryMs = options.retryMs ?? OWNER_WAIT_RETRY_MS;
+  let first: RunApprovalList | null = null;
+  for (let attempt = 0; attempt < OWNER_LOOK_TRIES && !first && !options.stopped(); attempt++) {
+    if (attempt > 0) await options.pause(retryMs);
+    first = await list(false).catch((error: Error) => {
+      log("agent", `could not check the run's approvals: ${error.message}`);
+      return null;
+    });
+  }
+  if (!first?.pending.length) return [];
+  const watched = new Set(first.pending.map((ask) => ask.requestId));
+  options.onWaiting(first.pending);
+  const until = now() + (options.maxMs ?? OWNER_WAIT_MAX_MS);
+  while (!options.stopped() && now() < until) {
+    const asked = now();
+    const current = await list(true).catch((error: Error) => {
+      log("agent", `waiting for the owner's answer failed, trying again: ${error.message}`);
+      return null;
+    });
+    if (current && !current.pending.some((ask) => watched.has(ask.requestId))) return current.answered.filter((ask) => watched.has(ask.requestId));
+    if (!current || now() - asked < OWNER_WAIT_MIN_CALL_MS) await options.pause(retryMs);
+  }
+  return [];
+}
+
 export function createAgent(options: {
   config: BrainConfig;
   memory: Memory;
@@ -270,13 +314,15 @@ export function createAgent(options: {
   screenshot?: Screenshot;
   turnFile?: string;
   rulesFile?: string;
+  runApprovals?: RunApprovalsLookup;
+  ownerWaitRetryMs?: number;
 }): Agent {
   const run = options.runTurn ?? startTurn;
   const today = options.today ?? (() => dayOf());
   const { memory } = options;
   const persisted = load(options.settingsFile);
   const queue: Job[] = [];
-  let current: { job: Job; turn: Turn | null; cancelled: boolean } | null = null;
+  let current: { job: Job; turn: Turn | null; cancelled: boolean; abort: AbortController; reason?: string } | null = null;
   let state: AgentState = "calm";
 
   const setState = (next: AgentState, note?: string) => {
@@ -291,6 +337,19 @@ export function createAgent(options: {
   };
 
   const cancelled = () => current?.cancelled === true;
+
+  const pause = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const signal = current?.abort.signal;
+      if (signal?.aborted) return resolve();
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      }
+      signal?.addEventListener("abort", done, { once: true });
+    });
 
   const markTurn = (turnState: TurnState) => {
     if (options.turnFile) writeTurnState(options.turnFile, turnState);
@@ -493,6 +552,7 @@ export function createAgent(options: {
       approvalsRequired: job.approvalsRequired,
       askSteps: job.recipe.steps.filter((step) => step.mode === "ask").map((step) => ({ id: step.id, text: step.text })),
     });
+    options.send({ type: "activity", runId: job.runId, text: "Starting the task" });
     const prompt = `${memory.briefing({ recipe: job.recipe, input: job.webhook ? undefined : job.context })}\n\n${runPrompt(job)}`;
     const record = createRunRecord({ describe: describeTool, screenshot: options.screenshot });
     const transcript = join(dir, "transcript.jsonl");
@@ -504,7 +564,32 @@ export function createAgent(options: {
       if (isApprovalTool(event.name) && !approvalPending(event.text) && !/^\s*approved\b/i.test(event.text)) ownerBlocked = true;
     };
     const fast = runModelFor(persisted.brain, validModel(job.model) ?? persisted.model);
-    let result = await turn({ job, prompt, resume: null, runId: job.runId, transcript, observe, ...(fast ? { model: fast } : {}) });
+    const lookup = options.runApprovals;
+    const signal = current?.abort.signal ?? new AbortController().signal;
+    const afterOwner = async (ended: TurnResult, model?: string): Promise<TurnResult> => {
+      let latest = ended;
+      for (let round = 0; lookup && round < MAX_OWNER_RESUMES && latest.sessionId && !latest.needsLogin && !cancelled(); round++) {
+        const answers = await waitForOwnerAnswers((wait) => lookup(job.runId, wait, signal), {
+          stopped: cancelled,
+          pause,
+          retryMs: options.ownerWaitRetryMs,
+          onWaiting: (pending) => {
+            const waitingText = `Waiting for your answer: ${pending.map((ask) => ask.summary).join("; ")}`.slice(0, 300);
+            log("agent", `run ${job.runId}: the turn ended while ${pending.length} approval(s) wait for the owner; keeping the run open`);
+            options.send({ type: "activity", runId: job.runId, text: waitingText });
+            setState("waiting_you", waitingText);
+          },
+        });
+        if (!answers.length || cancelled()) break;
+        options.send({ type: "activity", runId: job.runId, text: "Your owner answered; carrying on with the task" });
+        setState("working");
+        const next = await turn({ job, prompt: ownerAnsweredPrompt(answers), resume: latest.sessionId, runId: job.runId, transcript, observe, ...(model ? { model } : {}) });
+        const usage = addUsage(latest.usage, next.usage);
+        latest = usage ? { ...next, usage } : next;
+      }
+      return latest;
+    };
+    let result = await afterOwner(await turn({ job, prompt, resume: null, runId: job.runId, transcript, observe, ...(fast ? { model: fast } : {}) }), fast);
     let handedOver = false;
     if (fast && !cancelled()) {
       const first = parseRunResult(result.text);
@@ -513,16 +598,18 @@ export function createAgent(options: {
         log("agent", `run ${job.runId}: ${fast} stopped, handing over to the main model`);
         options.send({ type: "activity", runId: job.runId, text: "Handing the task to the main model" });
         const stopped = first?.summary || result.error || result.text.trim().split("\n").slice(-1)[0] || "no reason given";
-        const second = await turn({ job, prompt: result.sessionId ? handoverPrompt(stopped) : prompt, resume: result.sessionId, runId: job.runId, transcript, observe });
+        const second = await afterOwner(await turn({ job, prompt: result.sessionId ? handoverPrompt(stopped) : prompt, resume: result.sessionId, runId: job.runId, transcript, observe }));
         const usage = addUsage(result.usage, second.usage);
         result = usage ? { ...second, usage } : second;
       }
     }
     const steps = await record.finish();
     if (cancelled()) {
+      const reason = current?.reason;
       options.send({ type: "run_record", runId: job.runId, steps });
-      options.send({ type: "run_finished", runId: job.runId, ok: false, summary: "Stopped by the owner.", outcome: "stopped", ...(result.usage ? { usage: result.usage } : {}) });
-      memory.appendJournal(`run ${job.runId} "${job.recipe.title}": stopped by the owner`);
+      options.send({ type: "run_finished", runId: job.runId, ok: false, summary: reason ?? "Stopped by the owner.", outcome: "stopped", ...(result.usage ? { usage: result.usage } : {}) });
+      memory.appendJournal(`run ${job.runId} "${job.recipe.title}": ${reason ? `stopped by the panel: ${reason}` : "stopped by the owner"}`);
+      if (reason) setState("stuck", reason.slice(0, 300));
       return;
     }
     const parsed = parseRunResult(result.text);
@@ -550,7 +637,7 @@ export function createAgent(options: {
   const pump = async () => {
     if (current || !queue.length) return;
     const job = queue.shift()!;
-    current = { job, turn: null, cancelled: false };
+    current = { job, turn: null, cancelled: false, abort: new AbortController() };
     try {
       setState("thinking");
       options.send({ type: "turn", ...turnContext(job) });
@@ -582,10 +669,21 @@ export function createAgent(options: {
       }
       if (current) {
         current.cancelled = true;
+        current.abort.abort();
         current.turn?.cancel();
       }
       state = "calm";
       options.send({ type: "state", state: "calm" });
+    },
+    stopRun(runId, reason) {
+      const queued = queue.findIndex((job) => job.kind === "run" && job.runId === runId);
+      if (queued >= 0) queue.splice(queued, 1);
+      if (!current || current.job.kind !== "run" || current.job.runId !== runId || current.cancelled) return;
+      log("agent", `run ${runId}: stopped by the panel: ${reason}`);
+      current.cancelled = true;
+      current.reason = reason;
+      current.abort.abort();
+      current.turn?.cancel();
     },
     setBrain(brain) {
       persisted.brain = brain;
