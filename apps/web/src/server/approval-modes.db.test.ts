@@ -153,13 +153,13 @@ test("a browser approval offers always allow on its site, and the owner's yes ad
   const { loadPendingApprovals } = await import("@/lib/views");
   const pending = call("request_approval", scriptAsk);
   const approval = await pendingApproval();
-  assert.deepEqual(approval.grant, { host: "social.test" });
+  assert.deepEqual(approval.grant, { host: "www.social.test" });
   const [view] = await loadPendingApprovals(ids.agent, ids.owner);
-  assert.deepEqual(view.alwaysAllow, { host: "social.test" });
+  assert.deepEqual(view.alwaysAllow, { host: "www.social.test" });
   await createHub().answerApproval(approval.id, true, undefined, ids.owner, true);
   assert.match(await pending, /^approved/);
-  assert.deepEqual((await savedPolicy())?.allow, [{ kind: "host", value: "social.test" }]);
-  assert.deepEqual(sent.find((entry) => entry.message.type === "set_approval_policy")?.message, { type: "set_approval_policy", policy: { mode: "on-miss", hosts: ["social.test"], ownerId: ids.owner } });
+  assert.deepEqual((await savedPolicy())?.allow, [{ kind: "host", value: "www.social.test" }]);
+  assert.deepEqual(sent.find((entry) => entry.message.type === "set_approval_policy")?.message, { type: "set_approval_policy", policy: { mode: "on-miss", hosts: ["www.social.test"], ownerId: ids.owner } });
 });
 
 test("only the owner turns an approval into always allow on a site", { skip }, async () => {
@@ -254,6 +254,29 @@ test("when nobody answers in 30 minutes, the owner's choice decides: wait, count
   const notes = await db.select().from(schema.messages).where(eq(schema.messages.agentId, ids.agent));
   assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_go"') && note.text.includes("went ahead")));
   assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_wait"') && note.text.includes("counted as a no")));
+});
+
+test("an ask the computer marks as every time needs a person: going ahead after 30 minutes never settles it", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
+  await db.insert(schema.runs).values({ id: "run_am_every", agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId: "run_am_every" });
+  try {
+    const pending = call("request_approval", { summary: 'Click "Send" on mail.test', fields: [{ label: "Step", value: "Send the report" }, { label: "Page", value: "https://mail.test/inbox" }], runId: "run_am_every", everyTime: true });
+    const asked = await pendingApproval();
+    assert.equal(asked.needsAnswer, true);
+    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
+    await createHub().approvals.settleUnanswered();
+    const [still] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
+    assert.equal(still.status, "pending");
+    await createHub().answerApproval(asked.id, false, undefined, ids.owner);
+    assert.match(await pending, /^denied/);
+  } finally {
+    noteTurn(ids.agent, {});
+  }
 });
 
 test("only a person answers a request from someone else's turn, a forced ask or a stale run, and going ahead never settles one", { skip }, async () => {

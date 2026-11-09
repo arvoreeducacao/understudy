@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
-import { allowedHost, AMOUNT_LABEL, argsSubject, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
+import { allowedHost, AMOUNT_LABEL, argsSubject, asksEveryTime, confirmsAlways, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn } from "./approval-policy-store.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
@@ -45,21 +45,7 @@ export function guardMode(state: TurnState, policy: ComputerApprovalPolicy): Eff
   return mode;
 }
 
-const ASKS_EVERY_TIME = /(log_?in|sign_?in|auth|token|otp|2fa|mfa|verif|password|passwd|senha|checkout|payment|\/pay|purchase|order|delete|remove|transfer|invite|share|publish|comment|send)/;
-
-const CONFIRMS_ALWAYS = /\b(buy|purchase|checkout|check out|place order|pay|payment|delete|remove|permissions?|roles?|grant access|make admin|sign up|create (an |a new )?account|register|comprar|compra|pagar|pagamento|finalizar|excluir|apagar|remover|permiss\w*|criar conta|cadastr\w*)\b/i;
-
-export function confirmsAlways(text: string): boolean {
-  return CONFIRMS_ALWAYS.test(text);
-}
-
-export function asksEveryTime(url: string): boolean {
-  try {
-    return ASKS_EVERY_TIME.test(new URL(url).pathname.toLowerCase());
-  } catch {
-    return true;
-  }
-}
+export { asksEveryTime, confirmsAlways };
 
 function siteOf(url: string): string | null {
   try {
@@ -205,7 +191,8 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   if (cover) return { kind: "pass", coveredBy: cover };
   const mode = guardMode(state, policy);
   if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
-  const site = listCoversActions(mode) && !confirmsAlways(`${reason} ${info.name}`) ? siteOf(info.url) : null;
+  const everyTime = confirmsAlways(`${reason} ${info.name}`);
+  const site = listCoversActions(mode) && !everyTime ? siteOf(info.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   let host = info.url;
@@ -223,6 +210,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
       ...info.fields.filter((field) => field.label),
     ].slice(0, 14),
     ...(site ? { site } : {}),
+    ...(everyTime ? { everyTime: true as const } : {}),
   };
 }
 
@@ -413,7 +401,7 @@ export function scriptRequestVerdict(
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
-  const everyTime = asksEveryTime(request.url);
+  const everyTime = asksEveryTime(request.url, request.body);
   const site = listCoversActions(mode) && !everyTime ? siteOf(request.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
@@ -551,11 +539,11 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string }, state: TurnState): Promise<OwnerAnswer> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
     await notifyMain({ event: "waiting", summary: verdict.summary });
     try {
-      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
+      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site, ...(verdict.everyTime ? { everyTime: true } : {}) });
       if (answer.approved) lastApprovedAt = Date.now();
       return answer;
     } finally {

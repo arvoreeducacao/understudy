@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { normalizeSite } from "./rules.ts";
 
 export const APPROVAL_MODES = ["always", "on-miss", "auto", "off"] as const;
 export const APPROVAL_FALLBACKS = ["wait", "deny", "allow"] as const;
@@ -34,17 +33,25 @@ const SHARED_SECOND_LEVELS = new Set([
 ]);
 
 export const SHARED_HOSTING_SUFFIXES: readonly string[] = [
-  "amazonaws.com", "appspot.com", "azureedge.net", "azurewebsites.net", "blogspot.com", "cloudfront.net", "deno.dev", "duckdns.org", "firebaseapp.com", "fly.dev", "github.io",
-  "githubusercontent.com", "gitlab.io", "glitch.me", "herokuapp.com", "myshopify.com", "netlify.app", "ngrok-free.app", "ngrok.io", "no-ip.org", "now.sh", "onrender.com",
-  "ondigitalocean.app", "pages.dev", "r2.dev", "railway.app", "repl.co", "replit.dev", "sharepoint.com", "surge.sh", "trycloudflare.com", "vercel.app", "web.app", "web.core.windows.net",
-  "wixsite.com", "wordpress.com", "workers.dev",
+  "amazonaws.com", "appspot.com", "azureedge.net", "azurestaticapps.net", "azurewebsites.net", "b-cdn.net", "backblazeb2.com", "blogspot.com", "cloudflarestorage.com",
+  "cloudfront.net", "cloudfunctions.net", "core.windows.net", "deno.dev", "digitaloceanspaces.com", "duckdns.org", "firebaseapp.com", "firebasestorage.app", "fly.dev", "github.io",
+  "githubusercontent.com", "gitlab.io", "glitch.me", "googleapis.com", "googleusercontent.com", "herokuapp.com", "linodeobjects.com", "myshopify.com", "netlify.app", "ngrok-free.app",
+  "ngrok.io", "no-ip.org", "now.sh", "onrender.com", "ondigitalocean.app", "pages.dev", "r2.dev", "railway.app", "repl.co", "replit.dev", "run.app", "sharepoint.com", "supabase.co",
+  "surge.sh", "trycloudflare.com", "vercel.app", "wasabisys.com", "web.app", "wixsite.com", "wordpress.com", "workers.dev",
 ];
+
+const SHARED_REGISTRY_SUFFIXES = new Set([
+  "ae.org", "africa.com", "ar.com", "br.com", "cn.com", "co.com", "co.nl", "co.no", "com.de", "com.se", "de.com", "eu.com", "gb.com", "gb.net", "gr.com", "hu.com", "in.net", "it.com",
+  "jp.net", "jpn.com", "kr.com", "mex.com", "no.com", "qc.com", "ru.com", "sa.com", "se.com", "se.net", "uk.com", "uk.net", "us.com", "us.org", "uy.com", "za.com", "za.net", "za.org",
+]);
 
 export function isSharedSuffix(host: string): boolean {
   const labels = host.split(".");
   if (labels.length < 2) return true;
-  if (SHARED_HOSTING_SUFFIXES.includes(host)) return true;
-  return labels.length === 2 && labels[1].length === 2 && SHARED_SECOND_LEVELS.has(labels[0]);
+  if (SHARED_HOSTING_SUFFIXES.some((apex) => host === apex || host.endsWith(`.${apex}`))) return true;
+  if (SHARED_REGISTRY_SUFFIXES.has(host)) return true;
+  if (labels.length === 2) return labels[1].length === 2 && SHARED_SECOND_LEVELS.has(labels[0]);
+  return labels.length === 3 && labels[2].length === 2 && SHARED_SECOND_LEVELS.has(labels[1]) && labels[0].length === 2;
 }
 
 function hostnameOf(value: string): string {
@@ -57,9 +64,7 @@ function hostnameOf(value: string): string {
 }
 
 export function allowedHost(value: string): string | null {
-  const host = hostnameOf(value);
-  const bare = normalizeSite(value);
-  const site = bare !== host && isSharedSuffix(bare) ? host : bare;
+  const site = hostnameOf(value);
   if (!HOST_NAME.test(site) || IPV4.test(site) || isSharedSuffix(site)) return null;
   return site;
 }
@@ -142,4 +147,53 @@ export function effectiveApprovalMode(mode: ApprovalMode, context: { untrusted?:
 
 export function listCoversActions(mode: EffectiveApprovalMode): boolean {
   return mode === "on-miss";
+}
+
+const SENSITIVE_WORDS = new Set([
+  "buy", "purchase", "checkout", "order", "orders", "pay", "payment", "payments", "delete", "remove", "destroy", "permission", "permissions", "role", "roles", "grantaccess", "makeadmin",
+  "signup", "signin", "login", "logon", "register", "createaccount", "newaccount", "send", "post", "publish", "share", "invite", "comment", "reply", "createtweet", "createretweet", "createpost", "transfer",
+  "transaction", "transactions", "pix", "boleto", "withdraw", "donate", "auth", "oauth", "token", "otp", "2fa", "mfa", "password", "passwd", "senha", "comprar", "compra", "pagar",
+  "pagamento", "finalizar", "excluir", "apagar", "remover", "criarconta", "entrar", "enviar", "envio", "publicar", "postar", "compartilhar", "convidar", "comentar", "responder",
+  "transferir", "transferencia", "sacar", "saque", "doar", "permissao", "permissoes",
+]);
+
+const SENSITIVE_PREFIXES = ["verif", "authent", "authori", "otp", "permiss", "cadastr", "transfer", "purchas", "checkout", "payment", "pagament", "publish", "publica", "comment", "comenta", "delet", "invit", "convid", "compartilh"];
+
+const OPERATION_NAMES = /"operationName"\s*:\s*"([A-Za-z_]\w{0,99})"|operationName=([A-Za-z_]\w{0,99})|\bmutation\s+([A-Za-z_]\w{0,99})/g;
+
+function words(text: string): string[] {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function sensitiveWords(tokens: string[]): boolean {
+  const joined = [...tokens, ...tokens.slice(1).map((token, index) => tokens[index] + token)];
+  return joined.some((word) => SENSITIVE_WORDS.has(word) || SENSITIVE_PREFIXES.some((prefix) => word.startsWith(prefix)));
+}
+
+export function confirmsAlways(text: string): boolean {
+  return sensitiveWords(words(text));
+}
+
+export function asksEveryTime(url: string, body?: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return true;
+  }
+  const query = [...parsed.searchParams].flat().join(" ");
+  let path = parsed.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {}
+  if (sensitiveWords(words(`${path} ${query}`))) return true;
+  if (!body) return false;
+  return [...body.slice(0, 20_000).matchAll(OPERATION_NAMES)].some((match) => sensitiveWords(words(match[1] ?? match[2] ?? match[3] ?? "")));
 }

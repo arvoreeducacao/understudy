@@ -152,7 +152,7 @@ export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, se
 
 async function untrustedTurn(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId">) {
   const flagged = outsiderTurn(agent.id) || guestTurn(agent.id) || turnUntrusted(agent.id) || turnWakesFollowup(agent.id);
-  const run = flagged ? null : await runningRun(agent.id);
+  const run = flagged ? null : await turnRun(agent.id);
   return untrustedTurnFor({ ownerId: agent.ownerId, audience: hub.turnAudience(agent.id), flagged: flagged || !turnKnown(agent.id), runTrigger: run?.trigger ?? null });
 }
 
@@ -310,9 +310,10 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         stepId: z.string().optional(),
         action: z.object({ tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()) }).optional(),
         site: z.string().max(253).optional(),
+        everyTime: z.boolean().optional(),
       }),
       run: (async (
-        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string },
+        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string; everyTime?: boolean },
         extra: Extra,
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
@@ -344,7 +345,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         const runId = asked && expected === asked && (await hub.runs.runState(agent.id, asked)) === "running" ? asked : undefined;
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted || forced));
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted || forced || args.everyTime === true));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
