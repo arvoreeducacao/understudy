@@ -390,3 +390,43 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
     await setApprovalMode("on-miss");
   }
 });
+
+test("going ahead after 30 minutes never runs a cut-off call on its own; the same call repeated in the run uses that yes once", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const db = getDb();
+  const runId = "run_tp_fallback";
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId });
+  await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "allow" } }).where(eq(schema.agents.id, ids.agent));
+  const args = { to: "client@example.com", body: "Weekly report" };
+  try {
+    const cut = new AbortController();
+    const first = fetch(`${panelUrl}/api/mcp`, {
+      method: "POST",
+      signal: cut.signal,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "mail__create_draft", arguments: args } }),
+    }).then((res) => res.text()).catch((error: Error) => `cut off: ${error.name}`);
+    const asked = await pendingApproval();
+    assert.equal(asked.needsAnswer, false);
+    cut.abort();
+    assert.match(await first, /^cut off/);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
+    await createHub().approvals.settleUnanswered();
+    const [settled] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
+    assert.equal(settled.status, "approved");
+    assert.equal(settled.answeredVia, "fallback");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(calls.length, 0);
+    assert.equal(await call("mail__create_draft", args), "create_draft done");
+    assert.equal(calls.length, 1);
+    const [used] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
+    assert.ok(used.usedAt);
+  } finally {
+    await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "wait" } }).where(eq(schema.agents.id, ids.agent));
+    noteTurn(ids.agent, {});
+  }
+});

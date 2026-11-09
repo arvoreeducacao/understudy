@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AutoRefresh } from "@/components/AutoRefresh";
-import { agentAccess } from "@/lib/access";
+import { agentAccess, canApprove } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { formatTime, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
@@ -20,7 +20,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     .innerJoin(schema.agents, eq(schema.agents.id, schema.runs.agentId))
     .leftJoin(schema.recipes, eq(schema.recipes.id, schema.runs.recipeId))
     .where(eq(schema.runs.id, id));
-  if (!row || !(await agentAccess(user.id, row.agent.id))) redirect("/");
+  const access = row ? await agentAccess(user.id, row.agent.id) : null;
+  if (!row || !access) redirect("/");
+  const answers = canApprove(access);
   const { run, agent, recipe } = row;
   const [record] = await db.select().from(schema.runRecords).where(eq(schema.runRecords.runId, id));
   const approvalIds = (record?.steps ?? []).map((s) => s.approvalId).filter((x): x is string => Boolean(x));
@@ -63,7 +65,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </div>
         <span className={`pill ${statusPill}`}>
           <span className="dot" />
-          {waiting ? messages.runList.waiting : messages.recipe.runStatus[run.status]}
+          {waiting ? (answers ? messages.runList.waiting : t.waitingOwner) : messages.recipe.runStatus[run.status]}
         </span>
       </div>
 
@@ -73,7 +75,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <div className="card p-[18px] flex flex-col gap-2" role="status">
               <h3 className="m-0 text-[14px] font-semibold flex items-center gap-2">
                 <ShieldAlert size={16} aria-hidden />
-                {t.waitingTitle}
+                {answers ? t.waitingTitle : t.waitingOwnerTitle}
               </h3>
               <ul className="m-0 pl-5 flex flex-col gap-1 text-[13px]">
                 {waitingFor.map((ask) => (
@@ -81,11 +83,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 ))}
               </ul>
               <p className="m-0 text-[12.5px] text-ash" suppressHydrationWarning>
-                {t.waitingSince(formatWhen(waitingFor[0].createdAt), formatWhen(waitingFor[0].expiresAt))}
+                {(answers ? t.waitingSince : t.waitingOwnerSince)(formatWhen(waitingFor[0].createdAt), formatWhen(waitingFor[0].expiresAt))}
               </p>
-              <Link href="/waiting" className="btn pri self-start">
-                {t.waitingAnswer}
-              </Link>
+              {answers && (
+                <Link href="/waiting" className="btn pri self-start">
+                  {t.waitingAnswer}
+                </Link>
+              )}
             </div>
           )}
           {record && record.unusual.length > 0 && (

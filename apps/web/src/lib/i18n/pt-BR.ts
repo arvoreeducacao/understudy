@@ -1370,6 +1370,9 @@ export const ptBR: Messages = {
     waitingTitle: "Pausada até você responder",
     waitingSince: (since: string, until: string) => `Esperando sua resposta desde ${since}. O pedido vale até ${until}; a tarefa segue assim que você responder.`,
     waitingAnswer: "Responder agora",
+    waitingOwner: "esperando o dono",
+    waitingOwnerTitle: "Pausada até o dono responder",
+    waitingOwnerSince: (since: string, until: string) => `Esperando resposta desde ${since}. O pedido vale até ${until}; a tarefa segue assim que for respondido.`,
   },
   approvals: {
     emptyValue: "vazio",
@@ -1397,8 +1400,10 @@ export const ptBR: Messages = {
     finishedOk: (summary: string) => `Terminou: ${summary}`,
     finishedFail: (summary: string) => `Não terminou: ${summary}`,
     computerOffline: "O computador estava desligado.",
-    stalled: (minutes: number, since: string, last: string | null) =>
-      `Parou de dar sinal às ${since}${last ? ` (a última coisa que fez: ${last})` : ""} e não estava esperando sua aprovação, então o painel encerrou a rodada depois de ${minutes} minutos sem atividade.`,
+    stalled: (minutes: number, since: string, last: string | null, late: { summary: string; at: string } | null) =>
+      `Nada veio do computador depois de ${since}${last ? ` (a última coisa que fez: ${last})` : ""}, então o painel encerrou a rodada depois de ${minutes} minutos sem atividade.${late ? ` Sua resposta a "${late.summary}" às ${late.at} chegou depois disso e não foi usada.` : ""}`,
+    neverStarted: (minutes: number, since: string) => `O computador nunca começou esta rodada: nada veio dele por ${minutes} minutos depois de ${since}, então o painel encerrou a rodada.`,
+    skipped: (title: string, since: string) => `Pulei uma rodada agendada de ${title}: a rodada de ${since} ainda está aberta.`,
   },
   approvalReminder: {
     slack: (agent: string, summary: string, runUrl: string, waitingUrl: string) =>

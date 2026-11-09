@@ -287,6 +287,15 @@ test("a request names only the run of the turn, someone else's turn needs a pers
   const db = getDb();
   await db.insert(schema.runs).values({ id: "run_am_other", agentId: ids.agent, trigger: "schedule", status: "running" });
   assert.match(await call("request_approval", { summary: "Post for me", runId: "run_am_other" }), /^not asked: run_am_other is not the task run you are working on/);
+  forgetTurnWake(ids.agent);
+  const unknownTurn = call("request_approval", { summary: "Post for me", runId: "run_am_other" });
+  const onlyAPerson = await pendingApproval();
+  assert.equal(onlyAPerson.runId, "run_am_other");
+  assert.equal(onlyAPerson.needsAnswer, true);
+  await createHub().answerApproval(onlyAPerson.id, false, undefined, ids.owner);
+  await unknownTurn;
+  assert.match(await call("request_approval", { summary: "Post for me", runId: "run_am_nowhere" }), /^not asked: run_am_nowhere is not the task run you are working on/);
+  noteTurn(ids.agent, {});
   await db.delete(schema.runs).where(eq(schema.runs.id, "run_am_other"));
 
   noteTurn(ids.agent, { untrusted: true });

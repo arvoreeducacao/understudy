@@ -94,7 +94,7 @@ test("one approval covers a site across addresses and scripts of the same conver
     return result as Extract<typeof result, { kind: "ask" }>;
   };
   const sites = (conversation: string) => ({ has: (site: string) => sitesApprovedIn(file, conversation).includes(site), add: (site: string) => rememberApprovedSite(file, conversation, site) });
-  const first = scriptAsks(answer, [], sites("chat:owner:2026-01-05"), "conversation");
+  const first = scriptAsks(answer, [], null, sites("chat:owner:2026-01-05"), "conversation");
   const burst = await Promise.all([first.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), first.request(verdict("https://www.social.test/a2"), "POST www.social.test/a2")]);
   assert.deepEqual(burst, [true, true]);
   assert.equal(asked.length, 1);
@@ -103,7 +103,7 @@ test("one approval covers a site across addresses and scripts of the same conver
   assert.equal(scriptRequestVerdict(chat, [], post("https://www.social.test/a3"), "", null, policy(), sitesApprovedIn(file, chat.conversation)).kind, "pass");
   assert.deepEqual(sitesApprovedIn(file, "chat:owner:2026-01-06"), []);
   assert.deepEqual(sitesApprovedIn(file, undefined), []);
-  const denied = scriptAsks(async () => ({ approved: false, text: "denied" }), [], memorySites());
+  const denied = scriptAsks(async () => ({ approved: false, text: "denied" }), [], null, memorySites());
   assert.equal(await denied.request(verdict("https://other.test/x"), "POST other.test/x"), false);
 });
 
@@ -188,7 +188,7 @@ test("a sign-in, code, password, payment, delete or send request asks every time
   assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ mode: "off", hosts: ["books.test"] })), { kind: "pass", without: "your owner lets you act without asking" });
   assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/catalog/search"), "", null, policy({ hosts: ["books.test"] })), { kind: "pass", without: "your owner always allows books.test" });
   const asked: string[] = [];
-  const asks = scriptAsks(async (ask) => (asked.push(ask.summary), { approved: true, text: "approved" }), [], memorySites());
+  const asks = scriptAsks(async (ask) => (asked.push(ask.summary), { approved: true, text: "approved" }), [], null, memorySites());
   const read = scriptRequestVerdict(chat, [], post("https://books.test/api/catalog/search"), "", null, policy());
   assert.equal(read.kind, "ask");
   await asks.request(read as Extract<typeof read, { kind: "ask" }>, "POST books.test/api/catalog/search");

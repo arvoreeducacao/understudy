@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { cleanApprovalPolicy, normalizeRecipe, RUN_RECORD_MAX_SCREENSHOTS, type RunStep, type Usage } from "@understudy/protocol";
 import { effectiveModel } from "@/lib/models";
 import { approvalsRequiredFor, quotedInputTrigger } from "@/lib/run-policy";
@@ -16,11 +16,106 @@ import { log } from "./shared";
 export const STALL_MS = 35 * 60 * 1000;
 const STALL_NOTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const STALL_SCAN_LIMIT = 500;
+const STOP_RESEND_MS = 60 * 1000;
+const STOP_MEMORY_MS = 24 * 60 * 60 * 1000;
 
-export type StalledRun = { id: string; agentId: string; startedAt: Date; lastSeen: Date; ranAt: Date; waiting: boolean; undelivered: boolean; lastActivity: string | null };
+export type StalledRun = {
+  id: string;
+  agentId: string;
+  startedAt: Date;
+  started: boolean;
+  lastSeen: Date;
+  activityAt: Date | null;
+  lastActivity: string | null;
+  lateAnswer: { summary: string; at: Date } | null;
+};
+
+type StallRow = {
+  id: string;
+  agentId: string;
+  startedAt: Date;
+  activityAt: Date | string | null;
+  askedAt: Date | string | null;
+  agentSeen: Date | string;
+  runWaiting: boolean;
+  agentWaiting: boolean;
+  undelivered: boolean;
+  lastActivity: string | null;
+  lateSummary: string | null;
+  lateAt: Date | string | null;
+};
+
+const asDate = (value: Date | string | null) => (value === null ? null : new Date(value));
+
+export function stallVerdict(row: StallRow, now: number, quietMs: number): StalledRun | null {
+  if (row.undelivered) return null;
+  const activityAt = asDate(row.activityAt);
+  const started = activityAt !== null;
+  const askedAt = asDate(row.askedAt);
+  const runSeen = new Date(Math.max(row.startedAt.getTime(), activityAt?.getTime() ?? 0, askedAt?.getTime() ?? 0));
+  const lastSeen = started ? runSeen : new Date(Math.max(runSeen.getTime(), new Date(row.agentSeen).getTime()));
+  if (started ? row.runWaiting : row.agentWaiting || row.runWaiting) return null;
+  if (now - lastSeen.getTime() < quietMs) return null;
+  const lateAt = asDate(row.lateAt);
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    startedAt: row.startedAt,
+    started,
+    lastSeen,
+    activityAt,
+    lastActivity: row.lastActivity,
+    lateAnswer: started && row.lateSummary && lateAt ? { summary: row.lateSummary, at: lateAt } : null,
+  };
+}
 
 export class Runs {
+  private stopsSent = new Map<string, { agentId: string; reason: string; at: number }>();
+
   constructor(private hub: Hub) {}
+
+  resendStop(agentId: string, runId: string, reason: string, now = Date.now()) {
+    const last = this.stopsSent.get(runId);
+    if (last && now - last.at < STOP_RESEND_MS) return false;
+    for (const [id, sent] of this.stopsSent) if (now - sent.at > STOP_MEMORY_MS) this.stopsSent.delete(id);
+    this.stopsSent.set(runId, { agentId, reason, at: now });
+    return this.hub.sendToComputer(agentId, { type: "run_stop", runId, reason: reason.slice(0, 1000) });
+  }
+
+  resendStopsFor(agentId: string, now = Date.now()) {
+    let sent = 0;
+    for (const [runId, stop] of this.stopsSent) {
+      if (stop.agentId !== agentId || now - stop.at > STOP_MEMORY_MS) continue;
+      if (this.hub.sendToComputer(agentId, { type: "run_stop", runId, reason: stop.reason.slice(0, 1000) })) sent += 1;
+    }
+    return sent;
+  }
+
+  noteRunSign(agentId: string, runId: string) {
+    const stopped = this.stopsSent.get(runId);
+    if (stopped && stopped.agentId === agentId) this.resendStop(agentId, runId, stopped.reason);
+  }
+
+  async runState(agentId: string, runId: string): Promise<"running" | "closed" | "missing"> {
+    const [run] = await getDb()
+      .select({ status: schema.runs.status, summary: schema.runs.summary })
+      .from(schema.runs)
+      .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId)));
+    if (!run) return "missing";
+    if (run.status === "running") return "running";
+    this.resendStop(agentId, runId, run.summary ?? "");
+    return "closed";
+  }
+
+  async closedRun(agentId: string, runId: string) {
+    const [run] = await getDb()
+      .select({ status: schema.runs.status, summary: schema.runs.summary })
+      .from(schema.runs)
+      .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId)));
+    if (!run || run.status === "running") return null;
+    this.resendStop(agentId, runId, run.summary ?? "");
+    return run.summary ?? "";
+  }
 
   async start(recipeId: string, trigger: RunTrigger, options: { scheduledFor?: Date; input?: string; group?: { name: string; locale: string } } = {}) {
     const { scheduledFor, input, group } = options;
@@ -34,6 +129,19 @@ export class Runs {
     if (!found) return { ok: false as const, reason: "not_found" };
     if (found.ownerStatus !== "approved") return { ok: false as const, reason: "owner_inactive" };
     const recipe = found.recipe;
+    if (trigger === "schedule") {
+      const [open] = await db
+        .select({ id: schema.runs.id, startedAt: schema.runs.startedAt })
+        .from(schema.runs)
+        .where(and(eq(schema.runs.recipeId, recipeId), eq(schema.runs.status, "running")))
+        .orderBy(asc(schema.runs.startedAt))
+        .limit(1);
+      if (open) {
+        await this.hub.addMessage(recipe.agentId, "system", copy.runs.skipped(recipe.recipe.title, formatWhen(open.startedAt)), open.id);
+        log("run_skipped", { recipeId, openRunId: open.id });
+        return { ok: false as const, reason: "already_running" };
+      }
+    }
     const runId = newId("run");
     const inserted = await db
       .insert(schema.runs)
@@ -122,33 +230,41 @@ export class Runs {
         id: schema.runs.id,
         agentId: schema.runs.agentId,
         startedAt: schema.runs.startedAt,
-        lastSeen: sql<Date | string>`greatest(
+        activityAt: sql<Date | string | null>`(select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id" and m.role in ('activity', 'agent'))`,
+        askedAt: sql<Date | string | null>`(select max(coalesce(a.answered_at, a.created_at)) from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id")`,
+        agentSeen: sql<Date | string>`greatest(
           "runs"."started_at",
-          (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.role <> 'user'),
-          (select max(t.created_at) from tool_calls t where t.agent_id = "runs"."agent_id" and t.created_at >= "runs"."started_at"),
+          (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.role in ('activity', 'agent')),
           (select max(coalesce(a.answered_at, a.created_at)) from approvals a where a.agent_id = "runs"."agent_id" and coalesce(a.answered_at, a.created_at) >= "runs"."started_at")
         )`,
-        ranAt: sql<Date | string>`greatest("runs"."started_at", (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id"))`,
-        waiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.status = 'pending' and (a.expires_at is null or a.expires_at > now()))`,
+        runWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status = 'pending' and (a.expires_at > now() or (a.expires_at is null and a.created_at > now() - interval '24 hours')))`,
+        agentWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.status = 'pending' and (a.expires_at > now() or (a.expires_at is null and a.created_at > now() - interval '24 hours')))`,
         undelivered: sql<boolean>`exists (select 1 from inbound_queue q where q.agent_id = "runs"."agent_id" and q.run_id = "runs"."id")`,
         lastActivity: sql<string | null>`(select m.text from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id" and m.role in ('activity', 'agent') order by m.created_at desc limit 1)`,
+        lateSummary: sql<string | null>`(select a.summary from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status in ('approved', 'denied') order by a.answered_at desc nulls last limit 1)`,
+        lateAt: sql<Date | string | null>`(select a.answered_at from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status in ('approved', 'denied') order by a.answered_at desc nulls last limit 1)`,
       })
       .from(schema.runs)
       .where(eq(schema.runs.status, "running"))
       .limit(STALL_SCAN_LIMIT);
-    return rows
-      .map((row) => ({ ...row, lastSeen: new Date(row.lastSeen), ranAt: new Date(row.ranAt) }))
-      .filter((row) => !row.waiting && !row.undelivered && now - row.lastSeen.getTime() >= quietMs);
+    return rows.map((row) => stallVerdict(row, now, quietMs)).filter((run): run is StalledRun => run !== null);
+  }
+
+  stallSummary(run: StalledRun) {
+    const minutes = Math.round(STALL_MS / 60_000);
+    if (!run.started || !run.activityAt) return copy.runs.neverStarted(minutes, formatWhen(run.startedAt));
+    const late = run.lateAnswer && run.lateAnswer.at > run.activityAt ? { summary: run.lateAnswer.summary.replace(/\s+/g, " ").slice(0, 200), at: formatWhen(run.lateAnswer.at) } : null;
+    return copy.runs.stalled(minutes, formatWhen(run.activityAt), run.lastActivity?.replace(/\s+/g, " ").slice(0, 200) ?? null, late);
   }
 
   async failStalled(now = Date.now()) {
     for (const run of await this.stalled(now)) {
-      const summary = copy.runs.stalled(Math.round(STALL_MS / 60_000), formatWhen(run.ranAt), run.lastActivity?.replace(/\s+/g, " ").slice(0, 200) ?? null);
-      const recent = now - run.ranAt.getTime() < STALL_NOTICE_MAX_AGE_MS;
+      const summary = this.stallSummary(run);
+      const recent = now - run.lastSeen.getTime() < STALL_NOTICE_MAX_AGE_MS;
       if (recent) await this.finish(run.agentId, run.id, false, summary);
       else await this.close(run.agentId, run.id, false, summary);
-      const stopped = this.hub.sendToComputer(run.agentId, { type: "run_stop", runId: run.id, reason: summary });
-      log("run_stalled", { runId: run.id, agentId: run.agentId, lastSeen: run.lastSeen.toISOString(), ranAt: run.ranAt.toISOString(), notified: recent, stopped });
+      const stopped = this.resendStop(run.agentId, run.id, summary, now);
+      log("run_stalled", { runId: run.id, agentId: run.agentId, started: run.started, lastSeen: run.lastSeen.toISOString(), notified: recent, stopped });
     }
   }
 

@@ -4,7 +4,8 @@ import { API_METHODS, callApi, type ApiCallDeps } from "./api-call.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { notifyGuardSocket } from "./browser-guard.ts";
 import { cdpCall, cdpConnect, pageTargets } from "./cdp.ts";
-import { openGatekeeper, requestOwnerApproval, type McpSession } from "./gatekeeper-client.ts";
+import { askOwnerFor, askStoreFile, openAskStore } from "./approval-asks.ts";
+import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
 import { readTurnState, turnStateFile } from "./turn-state.ts";
 import { hostMatches, openVault, type CredentialInfo, type Vault } from "./vault.ts";
@@ -141,18 +142,19 @@ function ownerApproval(home: string): Pick<ApiCallDeps, "approve" | "notify"> {
   const token = process.env.AGENT_TOKEN || "";
   const notify = (event: Record<string, unknown>) => notifyGuardSocket(process.env.UNDERSTUDY_GUARD_SOCKET || `${home}/.understudy/guard.sock`, event);
   let gatekeeper: Promise<McpSession> | null = null;
+  const asked = openAskStore(askStoreFile(home));
+  const session = () =>
+    (gatekeeper ??= openGatekeeper(serverUrl, token).catch((error: Error) => {
+      gatekeeper = null;
+      throw error;
+    }));
   return {
     notify,
     async approve(request) {
       if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
-      gatekeeper ??= openGatekeeper(serverUrl, token).catch((error) => {
-        gatekeeper = null;
-        throw error;
-      });
-      const session = await gatekeeper;
       await notify({ event: "waiting", summary: request.summary });
       try {
-        return await requestOwnerApproval(session, request);
+        return await askOwnerFor(session, asked, request);
       } finally {
         await notify({ event: "resumed" });
       }
