@@ -57,7 +57,7 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
 }
 
 
-export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string; site?: string; everyTime?: boolean };
+export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string; site?: string; everyTime?: boolean; cut?: boolean; contentHash?: string };
 
 export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string; answeredBy?: "reviewer" | "fallback" };
 
@@ -78,7 +78,7 @@ export async function askOwnerOnce(session: McpSession, request: ApprovalRequest
     const text = await session.call("wait_for_approval", { requestId: knownRequestId });
     if (!/unknown request/i.test(text)) return readOwnerAnswer(text, knownRequestId);
   }
-  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}), ...(request.site ? { site: request.site } : {}), ...(request.everyTime ? { everyTime: true } : {}), reviewerAware: true });
+  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}), ...(request.site ? { site: request.site } : {}), ...(request.everyTime ? { everyTime: true } : {}), ...(request.cut ? { cut: true } : {}), ...(request.contentHash ? { contentHash: request.contentHash } : {}), reviewerAware: true });
   return readOwnerAnswer(text);
 }
 

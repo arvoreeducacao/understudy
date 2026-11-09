@@ -320,9 +320,11 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         site: z.string().max(253).optional(),
         reviewerAware: z.boolean().optional(),
         everyTime: z.boolean().optional(),
+        cut: z.boolean().optional(),
+        contentHash: z.string().max(128).optional(),
       }),
       run: (async (
-        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string; reviewerAware?: boolean; everyTime?: boolean },
+        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string; reviewerAware?: boolean; everyTime?: boolean; cut?: boolean; contentHash?: string },
         extra: Extra,
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
@@ -356,8 +358,19 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
         const grant = site ? { host: site } : undefined;
         const everyTime = args.everyTime === true;
-        const reviewable = !joined && !forced && !everyTime && mode === "auto" && !(args.site && !args.reviewerAware);
-        const reviewed = reviewable ? await autoReview(hub, agent, { summary, fields, runId, stepId: args.stepId }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant }) : null;
+        const fromBrowser = Boolean(args.site) || fields.some((field) => ["page", "request"].includes(field.label.trim().toLowerCase()));
+        const reviewable = !joined && !forced && !everyTime && mode === "auto" && (args.reviewerAware === true || !fromBrowser);
+        const request = {
+          summary,
+          fields,
+          runId,
+          stepId: args.stepId,
+          ...(args.reviewerAware ? { source: "computer" as const } : {}),
+          ...(args.action ? { tool: actionToolName(args.action.tool) } : {}),
+          ...(args.cut ? { cut: true } : {}),
+          ...(args.contentHash ? { contentHash: args.contentHash } : {}),
+        };
+        const reviewed = reviewable ? await autoReview(hub, agent, request, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant }) : null;
         const id =
           joined ??
           (reviewed?.kind === "approved"
@@ -569,7 +582,7 @@ async function guardOutward(
   ask: boolean,
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
-  approval: { runId?: string | null; grant?: ApprovalGrant; forced?: boolean } = {},
+  approval: { runId?: string | null; grant?: ApprovalGrant; forced?: boolean; panelSummary?: boolean } = {},
 ): Promise<GuardResult & { asked?: boolean; pending?: boolean; approvalId?: string; skipped?: "mode" | "listed" }> {
   fields = withoutForeignReviewer(fields);
   const forced = Boolean(approval.forced);
@@ -595,7 +608,7 @@ async function guardOutward(
   const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash, forced) : null;
   if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
   const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
-  const reviewed = earlier || forced || mode !== "auto" ? null : await autoReview(hub, agent, { summary, fields, runId: runId ?? undefined }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant });
+  const reviewed = earlier || forced || mode !== "auto" ? null : await autoReview(hub, agent, { summary, fields, runId: runId ?? undefined, ...(approval.panelSummary ? { source: "panel" as const } : {}) }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant });
   const id = earlier?.id ?? (reviewed?.kind === "approved" ? reviewed.id : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, forced || untrusted, reviewed?.review));
   const outcome = await waitOutcome(id, extra);
   if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
@@ -652,7 +665,7 @@ async function proxyCall(
   const adminAllows = canAlwaysAllow(ceiling, toolName, tool.annotations);
   const grant = adminAllows ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant, forced: !adminAllows || handedOffWrite });
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant, forced: !adminAllows || handedOffWrite, panelSummary: true });
   if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.pending ? undefined : allowed.asked ? "denied" : "blocked" };
   if (extra.signal?.aborted) {
     if (allowed.approvalId) await hub.releaseApproval(allowed.approvalId, agent.id);

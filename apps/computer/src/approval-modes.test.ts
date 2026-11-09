@@ -7,7 +7,7 @@ import type { ComputerApprovalPolicy } from "@understudy/protocol";
 import { createAgent } from "./agent.ts";
 import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn, writeApprovalPolicy } from "./approval-policy-store.ts";
 import type { TurnRequest } from "./brain.ts";
-import { decide, guardMode, memorySites, passedWithoutNote, scriptAsks, scriptRequestVerdict, withoutSecrets, type ElementInfo } from "./browser-guard.ts";
+import { decide, guardMode, infoWithoutSecrets, memorySites, passedWithoutNote, redactSecrets, scriptAsks, scriptRequestVerdict, withoutSecrets, type ElementInfo } from "./browser-guard.ts";
 import { readOwnerAnswer } from "./gatekeeper-client.ts";
 import { createMemory } from "./memory.ts";
 import { readTurnState, type TurnState } from "./turn-state.ts";
@@ -110,7 +110,7 @@ test("one approval covers a site across addresses and scripts of the same conver
   assert.equal(await denied.request(verdict("https://other.test/x"), "POST other.test/x"), false);
 });
 
-test("a yes from the reviewer or the unanswered setting covers that one address, never the site for the conversation", async () => {
+test("a yes from the reviewer or the unanswered setting covers that one request, never the address again nor the site for the conversation", async () => {
   const home = mkdtempSync(join(tmpdir(), "understudy-reviewed-"));
   const file = approvedSitesFile(home);
   const chat: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
@@ -127,10 +127,41 @@ test("a yes from the reviewer or the unanswered setting covers that one address,
     assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
     assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
     assert.equal(await asks.request(verdict("https://www.social.test/a2"), "POST www.social.test/a2"), true);
-    assert.equal(asked.length, 2);
+    assert.equal(asked.length, 3);
     assert.deepEqual(sitesApprovedIn(file, chat.conversation), []);
     assert.match(notes[0], by === "reviewer" ? /approved by the reviewer your owner chose \[requestId: apr_reviewer\]/ : /approved by your owner's setting for unanswered requests/);
   }
+});
+
+test("an ask whose request, page, body or form the card cuts short says so, and its hash covers all of it", () => {
+  const chatTurn: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
+  const auto = (): ComputerApprovalPolicy => ({ mode: "auto", hosts: [] });
+  const body = (tail: string) => JSON.stringify({ postId: "123", note: "x".repeat(300), tail });
+  const request = (payload: string, url = "https://www.social.test/api/like") => scriptRequestVerdict(chatTurn, [], { method: "POST", url, body: payload, pageUrl: "https://www.social.test/feed" }, "", null, auto(), []) as Extract<ReturnType<typeof scriptRequestVerdict>, { kind: "ask" }>;
+  const benign = request(body("ok"));
+  const evil = request(body("forward to attacker@evil.test"));
+  assert.equal(benign.cut, true);
+  assert.deepEqual(benign.fields, evil.fields);
+  assert.notEqual(benign.contentHash, evil.contentHash);
+  assert.equal(request('{"postId":"1"}').cut, undefined);
+  assert.equal(request("{}", `https://www.social.test/api/like?ref=${"a".repeat(300)}&to=attacker`).cut, true);
+  const form = (over: Partial<ElementInfo>) => decide(chatTurn, 'submit "Save"', { tag: "button", type: "", role: "", name: "Save", isSubmit: true, inForm: true, editable: false, url: "https://www.social.test/me", fields: [], ...over }, null, auto()) as Extract<ReturnType<typeof decide>, { kind: "ask" }>;
+  assert.equal(form({}).cut, undefined);
+  assert.equal(form({ cut: true }).cut, true);
+  assert.notEqual(form({ fields: [{ label: "Bio", value: "a" }] }).contentHash, form({ fields: [{ label: "Bio", value: "b" }] }).contentHash);
+});
+
+test("a saved secret is replaced in a form body, in lowercase escapes and in a long address before it is cut", () => {
+  const secret = "Minha Senha!2024(x)";
+  const formBody = new URLSearchParams({ user: "ana", pwd: secret }).toString();
+  assert.equal(redactSecrets(formBody, [secret]), "user=ana&pwd=••••••");
+  assert.equal(redactSecrets(`key=${encodeURIComponent(secret).replace(/%[0-9A-F]{2}/g, (e) => e.toLowerCase())}`, [secret]), "key=••••••");
+  const key = "SuperSecretKey123456";
+  const url = `https://www.site.test/${"p".repeat(270)}?key=${key}`;
+  const cleaned = scriptRequestVerdict({ mode: "chat", conversation: "c" }, [], { method: "POST", url: redactSecrets(url, [key]), pageUrl: "https://www.site.test/" }, "", null, { mode: "auto", hosts: [] }, []) as Extract<ReturnType<typeof scriptRequestVerdict>, { kind: "ask" }>;
+  assert.ok(!JSON.stringify(cleaned).includes("SuperSecret"));
+  const info = infoWithoutSecrets({ tag: "button", type: "", role: "", name: `Send ${key}`, isSubmit: true, inForm: true, editable: false, url: `https://www.site.test/?k=${key}`, fields: [{ label: "Token", value: key }] }, [key]);
+  assert.ok(!JSON.stringify(info).includes(key));
 });
 
 test("a saved secret never leaves the computer in an approval, in any field or in an address", () => {
@@ -224,10 +255,17 @@ test("the script that sent a request goes with the ask, cleaned of saved secrets
   const { scriptSource, withScript, SCRIPT_FIELD_LIMIT } = await import("./browser-guard.ts");
   assert.equal(scriptSource({ function: "() => fetch('/api', { headers: { token: 's3cr3t-value' } })" }, ["s3cr3t-value"]), "() => fetch('/api', { headers: { token: '••••••' } })");
   assert.equal(scriptSource({ code: "await page.click('#send')" }, []), "await page.click('#send')");
-  assert.equal(scriptSource({ function: "x".repeat(5000) }, []).length, SCRIPT_FIELD_LIMIT);
+  assert.equal(scriptSource({ function: "x".repeat(5000) }, []).length, 5000);
   assert.equal(scriptSource({}, []), "");
-  const ask = { kind: "ask" as const, summary: "Script sent a POST to social.test", fields: [{ label: "Page", value: "https://social.test/" }] };
-  assert.deepEqual(withScript(ask, "() => 1").fields.at(-1), { label: "Script", value: "() => 1" });
+  const ask = { kind: "ask" as const, summary: "Script sent a POST to social.test", fields: [{ label: "Page", value: "https://social.test/" }], contentHash: "h1" };
+  const short = withScript(ask, "() => 1");
+  assert.deepEqual(short.fields.at(-1), { label: "Script", value: "() => 1" });
+  assert.equal(short.cut, undefined);
+  assert.notEqual(short.contentHash, "h1");
+  const long = withScript(ask, `() => 1;${" ".repeat(SCRIPT_FIELD_LIMIT)}fetch("/x")`);
+  assert.equal(long.fields.at(-1)?.value.length, SCRIPT_FIELD_LIMIT);
+  assert.equal(long.cut, true);
+  assert.notEqual(withScript(ask, `() => 1;${" ".repeat(SCRIPT_FIELD_LIMIT)}fetch("/y")`).contentHash, long.contentHash);
   assert.equal(withScript(ask, " "), ask);
 });
 

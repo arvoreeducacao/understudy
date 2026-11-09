@@ -949,7 +949,9 @@ test("an ask-first step asks the owner for the exact item, and the approval cove
   assert.equal(dialogReason({ accept: true }, { type: "alert", message: "Saved" }), null);
   assert.equal(dialogReason({ accept: true }, null), "confirm a question the page asked");
   assert.equal(dialogReason({ accept: true, promptText: "16" }, { type: "prompt", message: "How many?" }), 'confirm the page\'s question "How many?" with "16"');
-  assert.deepEqual(decide({ mode: "chat" }, "confirm a question the page asked", { ...info, url: "" }), {
+  const { contentHash: confirmHash, ...confirmAsk } = decide({ mode: "chat" }, "confirm a question the page asked", { ...info, url: "" }) as Extract<ReturnType<typeof decide>, { kind: "ask" }>;
+  assert.match(confirmHash ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(confirmAsk, {
     kind: "ask",
     summary: "Confirm a question the page asked",
     stepId: undefined,

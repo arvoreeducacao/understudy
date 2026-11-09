@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, test } from "node:test";
 import { and, eq, inArray } from "drizzle-orm";
-import { FOR_THE_PERSON_REASON } from "./reviewer";
+import { FOR_THE_PERSON_REASON, TOO_LONG_REASON } from "./reviewer";
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url && "set TEST_DATABASE_URL to a disposable Postgres to run";
@@ -421,6 +421,72 @@ test("a Reviewer field the assistant sends is relabeled and never counts as the 
   await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
   assert.match(await call("request_approval", { ...reviewedScriptAsk }), /\[answeredBy: reviewer\]$/);
   assert.equal(reviews.length, 1);
+});
+
+test("an ask the computer cut short, or one from a computer that does not mark reviewer answers, goes to the owner without the model", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  await ownerSaid("Like Ana's newest posts on the social site");
+  const deny = async (args: Record<string, unknown>) => {
+    const pending = call("request_approval", args);
+    const approval = await pendingApproval();
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    await pending;
+    return approval;
+  };
+  const cut = await deny({ ...reviewedScriptAsk, cut: true, contentHash: "a".repeat(64) });
+  assert.deepEqual(cut.fields.at(-1), { label: "Reviewer", value: TOO_LONG_REASON });
+  const { site: _site, ...withoutSite } = scriptAsk;
+  const older = await deny({ ...withoutSite, fields: [{ label: "Page", value: "http://192.168.0.10/admin" }, { label: "Request", value: "POST http://192.168.0.10/api/save" }] });
+  assert.equal(older.review, null);
+  assert.equal(reviews.length, 0);
+});
+
+test("two requests that look the same on the card but differ in full are each sent to the model", { skip }, async () => {
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  await ownerSaid("Like the newest posts from Ana on the social site, all of them");
+  assert.match(await call("request_approval", { ...reviewedScriptAsk, contentHash: "b".repeat(64) }), /\[answeredBy: reviewer\]$/);
+  assert.match(await call("request_approval", { ...reviewedScriptAsk, contentHash: "c".repeat(64) }), /\[answeredBy: reviewer\]$/);
+  assert.match(await call("request_approval", { ...reviewedScriptAsk, contentHash: "c".repeat(64) }), /\[answeredBy: reviewer\]$/);
+  assert.equal(reviews.length, 2);
+});
+
+test("a task that always asks first, or is still in its first runs, never goes to the reviewer", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  const recipe = { title: "Daily likes", trigger: "every morning", steps: [{ id: "s1", text: "Like Ana's newest posts", mode: "auto" as const }], questions: [], askFirstRuns: 3 };
+  await db.delete(schema.recipes).where(eq(schema.recipes.id, "rcp_am_learn"));
+  await db.insert(schema.recipes).values({ id: "rcp_am_learn", agentId: ids.agent, recipe, runsDone: 1 });
+  await db.insert(schema.runs).values({ id: "run_am_learn", agentId: ids.agent, recipeId: "rcp_am_learn", trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId: "run_am_learn" });
+  try {
+    const askedInRun = async () => {
+      const pending = call("request_approval", { ...reviewedScriptAsk, runId: "run_am_learn" });
+      const approval = await pendingApproval();
+      await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+      await pending;
+    };
+    await askedInRun();
+    await db.update(schema.recipes).set({ runsDone: 3, askAlways: true }).where(eq(schema.recipes.id, "rcp_am_learn"));
+    await askedInRun();
+    assert.equal(reviews.length, 0);
+    await db.update(schema.recipes).set({ askAlways: false }).where(eq(schema.recipes.id, "rcp_am_learn"));
+    assert.match(await call("request_approval", { ...reviewedScriptAsk, runId: "run_am_learn" }), /\[answeredBy: reviewer\]$/);
+    assert.equal(reviews.length, 1);
+  } finally {
+    noteTurn(ids.agent, {});
+    await db.delete(schema.runs).where(eq(schema.runs.id, "run_am_learn"));
+    await db.delete(schema.recipes).where(eq(schema.recipes.id, "rcp_am_learn"));
+  }
 });
 
 test("the same request in the same conversation goes to the model once a day", { skip }, async () => {
