@@ -523,7 +523,7 @@ async function guardOutward(
     if (asked) return { ok: false, text: brainText.askedNotApproved(asked.status, asked.id) };
     return { ok: true };
   }
-  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
+  if (extra.call && runId && (await hub.useActionApproval(agent.id, runId, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
   const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash) : null;
   if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
