@@ -19,7 +19,7 @@ import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
 import { followupTools } from "./followup-tools";
-import { turnRunId, turnUntrusted, turnWakesFollowup } from "./followups";
+import { turnKnown, turnRunId, turnUntrusted, turnWakesFollowup } from "./followups";
 import { untrustedTurnFor } from "./approval-modes";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
@@ -79,6 +79,14 @@ export async function runningRun(agentId: string) {
   return run ?? null;
 }
 
+async function runOf(agentId: string, runId: string) {
+  const [run] = await getDb()
+    .select({ id: schema.runs.id, trigger: schema.runs.trigger })
+    .from(schema.runs)
+    .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")));
+  return run ?? null;
+}
+
 export async function runningRunId(agentId: string) {
   return (await runningRun(agentId))?.id ?? null;
 }
@@ -127,12 +135,20 @@ export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, se
 async function untrustedTurn(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId">) {
   const flagged = outsiderTurn(agent.id) || guestTurn(agent.id) || turnUntrusted(agent.id) || turnWakesFollowup(agent.id);
   const run = flagged ? null : await runningRun(agent.id);
-  return untrustedTurnFor({ ownerId: agent.ownerId, audience: hub.turnAudience(agent.id), flagged, runTrigger: run?.trigger ?? null });
+  return untrustedTurnFor({ ownerId: agent.ownerId, audience: hub.turnAudience(agent.id), flagged: flagged || (!turnKnown(agent.id) && !run), runTrigger: run?.trigger ?? null });
 }
 
 async function approvalMode(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId" | "approvalPolicy">) {
   const policy = cleanApprovalPolicy(agent.approvalPolicy);
-  return { policy, mode: effectiveApprovalMode(policy.mode, { untrusted: await untrustedTurn(hub, agent) }) };
+  const untrusted = await untrustedTurn(hub, agent);
+  return { policy, untrusted, mode: effectiveApprovalMode(policy.mode, { untrusted }) };
+}
+
+export function sitesInFields(fields: { label: string; value: string }[]) {
+  return fields
+    .filter((field) => field.label === "Page" || field.label === "Request")
+    .map((field) => allowedHost(field.value.trim().replace(/^[A-Z]+\s+/, "")))
+    .filter((site): site is string => Boolean(site));
 }
 
 export function actionToolName(tool: string) {
@@ -274,12 +290,13 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
         if (label && !outsiderLimiter.allow(`outsider:${agent.id}`, 1 / 60, 3)) return text(brainText.outsiderBusy, true);
-        const { mode } = await approvalMode(hub, agent);
+        const { mode, untrusted } = await approvalMode(hub, agent);
         if (!label && mode === "off" && !args.runId && !(await runningRun(agent.id))) {
           console.log(JSON.stringify({ at: new Date().toISOString(), event: "approval_skipped", agentId: agent.id, mode }));
           return text(brainText.approvalsOff);
         }
-        const site = !label && args.site ? allowedHost(args.site) : null;
+        const asked = !label && args.site && listCoversActions(mode) ? allowedHost(args.site) : null;
+        const site = asked && sitesInFields(args.fields ?? []).includes(asked) ? asked : null;
         let fields = args.fields ?? [];
         let hash: string | undefined;
         if (args.action) {
@@ -291,9 +308,10 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
         }
+        if (args.runId && args.runId !== (await turnRunId(agent.id, runningRunId))) return text(`not asked: ${args.runId.slice(0, 100)} is not the task run you are working on; ask without runId`, true);
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined));
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -371,12 +389,13 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   builtins.push(...(followupTools(hub, agent, { outsider: () => outsider() || guestTurn(agent.id), untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
 
   const guard = async (input: GuardInput) => {
-    const run = input.toOwner ? null : await runningRun(agent.id);
+    const runId = input.toOwner ? null : await turnRunId(agent.id, runningRunId);
+    const run = runId ? await runOf(agent.id, runId) : null;
     const handedOff = run?.trigger === "handoff";
     const extra = input.extra as Extra;
     const tool = extra.call ? actionToolName(extra.call.name) : null;
     return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, extra, {
-      runId: handedOff ? run?.id : undefined,
+      runId: run?.id,
       forced: handedOff,
       ...(tool ? { grant: { gatekeeperTool: tool } } : {}),
     });
@@ -495,7 +514,7 @@ async function guardOutward(
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
   const tool = extra.call ? actionToolName(extra.call.name) : null;
-  const { policy, mode } = ask && !approval.forced ? await approvalMode(hub, agent) : { policy: null, mode: "always" as const };
+  const { policy, mode, untrusted } = ask && !approval.forced ? await approvalMode(hub, agent) : { policy: null, mode: "always" as const, untrusted: true };
   const skipped = !ask || !policy ? undefined : mode === "off" ? ("mode" as const) : listCoversActions(mode) && tool && toolListed(tool, policy.allow) ? ("listed" as const) : undefined;
   if (!ask || skipped) {
     const asked = tool ? await unapprovedAsk(agent.id, tool) : null;
@@ -506,7 +525,7 @@ async function guardOutward(
   const hash = payloadHash(target, args);
   const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
   const joined = approval.runId ? await hub.openApprovalAsk(agent.id, { runId: approval.runId, summary, fields, payloadHash: hash }) : null;
-  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant));
+  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, Boolean(approval.forced) || untrusted));
   let outcome = await waitOutcome(id, extra);
   while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };

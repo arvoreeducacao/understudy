@@ -74,13 +74,16 @@ test("the agent's approval mode decides whether a task's first runs ask, never t
   for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 99, trigger, mode: "off" }), true, trigger);
 });
 
-test("when nobody answers, wait keeps waiting, a no is always allowed, and going ahead only covers tasks the owner or a schedule started", () => {
-  assert.equal(unansweredOutcome({ fallback: "wait", askedBy: null, runTrigger: "schedule" }), null);
-  assert.equal(unansweredOutcome({ fallback: "deny", askedBy: null, runTrigger: null }), "deny");
-  assert.equal(unansweredOutcome({ fallback: "deny", askedBy: "usr_member", runTrigger: "webhook" }), "deny");
-  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: "schedule" }), "allow");
-  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: "manual" }), "allow");
-  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: null }), null);
-  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: "usr_member", runTrigger: "schedule" }), null);
-  for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: trigger }), null, trigger);
+test("when nobody answers, wait keeps waiting, a no is always allowed, and going ahead only covers a running task the owner or a schedule started, never a request only a person may answer", () => {
+  const base = { askedBy: null, needsAnswer: false, runTrigger: "schedule", runRunning: true };
+  assert.equal(unansweredOutcome({ ...base, fallback: "wait" }), null);
+  assert.equal(unansweredOutcome({ ...base, fallback: "deny", runTrigger: null, runRunning: false }), "deny");
+  assert.equal(unansweredOutcome({ ...base, fallback: "deny", askedBy: "usr_member", needsAnswer: true, runTrigger: "webhook" }), "deny");
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow" }), "allow");
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow", runTrigger: "manual" }), "allow");
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow", needsAnswer: true }), null);
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow", runRunning: false }), null);
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow", runTrigger: null }), null);
+  assert.equal(unansweredOutcome({ ...base, fallback: "allow", askedBy: "usr_member" }), null);
+  for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(unansweredOutcome({ ...base, fallback: "allow", runTrigger: trigger }), null, trigger);
 });

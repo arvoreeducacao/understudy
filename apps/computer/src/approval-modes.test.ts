@@ -37,13 +37,22 @@ test("off lets the owner's own turns act without asking", () => {
   assert.deepEqual(scriptRequestVerdict(chat, [], post("https://www.social.test/api/like"), "", null, policy({ mode: "off" })), { kind: "pass", without: "your owner lets you act without asking" });
 });
 
-test("a turn from anyone but the owner, a webhook run or a run that must ask never drops below on-miss", () => {
+test("a turn from anyone but the owner and a webhook or handed-over run ask as before, ignoring the list; a run that must ask never drops below on-miss", () => {
   const off = policy({ mode: "off" });
-  assert.equal(guardMode(fromSomeoneElse, off), "on-miss");
+  const listed = policy({ hosts: ["social.test"] });
+  assert.equal(guardMode(fromSomeoneElse, off), "always");
+  assert.equal(guardMode(fromSomeoneElse, listed), "always");
+  assert.equal(decide(fromSomeoneElse, 'submit "Post"', element(), null, listed).kind, "ask");
+  assert.equal(scriptRequestVerdict(fromSomeoneElse, [], post("https://www.social.test/api/like"), "", null, listed, ["social.test"]).kind, "ask");
   assert.equal(decide(fromSomeoneElse, 'submit "Post"', element(), null, off).kind, "ask");
   assert.equal(scriptRequestVerdict(fromSomeoneElse, [], post("https://www.social.test/api/like"), "", null, off).kind, "ask");
   const webhookRun: TurnState = { mode: "run", runId: "r1", approvalsRequired: true, untrusted: true, askSteps: [{ id: "s1", text: "Post the update" }], conversation: "run:r1" };
   assert.equal(decide(webhookRun, 'submit "Post"', element(), null, off).kind, "ask");
+  const listedAsk = decide(webhookRun, 'submit "Post"', element(), null, listed);
+  assert.equal(listedAsk.kind, "ask");
+  assert.equal(listedAsk.kind === "ask" && listedAsk.site, undefined);
+  assert.equal(scriptRequestVerdict(webhookRun, [], post("https://www.social.test/api/other"), "Post the update", null, listed, ["social.test"]).kind, "ask");
+  assert.equal(scriptRequestVerdict(webhookRun, [], post("https://www.social.test/api/other"), "", null, listed, ["social.test"]).kind, "drop");
   const graduatedRun: TurnState = { mode: "run", runId: "r2", approvalsRequired: true, askSteps: [{ id: "s1", text: "Post the update" }], conversation: "run:r2" };
   assert.equal(guardMode(graduatedRun, off), "on-miss");
   assert.equal(decide({ ...graduatedRun, approvalsRequired: false }, 'submit "Post"', element(), null, policy()).kind, "pass");
@@ -65,9 +74,11 @@ test("a script request asks once per site per conversation, and the list covers 
   assert.deepEqual(scriptRequestVerdict(chat, [], post("https://www.social.test/voyager/api/zzz999"), "", null, policy(), ["social.test"]), { kind: "pass", without: "your owner approved social.test earlier in this conversation" });
   assert.equal(scriptRequestVerdict(chat, [], post("https://cdn.social.test/x"), "", null, policy(), ["social.test"]).kind, "ask");
   assert.deepEqual(scriptRequestVerdict(chat, [], post("https://cdn.social.test/x"), "", null, policy({ hosts: ["social.test"] })), { kind: "pass", without: "your owner always allows social.test" });
-  assert.deepEqual(scriptRequestVerdict(chat, [], post("https://cdn.social.test/x"), "", null, policy({ mode: "always", hosts: ["social.test"] })), { kind: "pass", without: "your owner always allows social.test" });
-  const run: TurnState = { mode: "run", runId: "r1", approvalsRequired: true, askSteps: [], conversation: "run:r1" };
-  assert.deepEqual(scriptRequestVerdict(run, [], post("https://www.social.test/a"), "", null, policy(), ["social.test"]), { kind: "pass", without: "your owner approved social.test earlier in this run" });
+  const always = scriptRequestVerdict(chat, [], post("https://cdn.social.test/x"), "", null, policy({ mode: "always", hosts: ["social.test"] }), ["social.test"]);
+  assert.equal(always.kind, "ask");
+  assert.equal(always.kind === "ask" && always.site, undefined);
+  const run: TurnState = { mode: "run", runId: "r1", approvalsRequired: true, askSteps: [{ id: "s1", text: "Like the newest posts" }], conversation: "run:r1" };
+  assert.deepEqual(scriptRequestVerdict(run, [], post("https://www.social.test/a"), "like the newest posts", null, policy(), ["social.test"]), { kind: "pass", without: "your owner approved social.test earlier in this run" });
   assert.equal(scriptRequestVerdict(chat, [], { ...post("https://www.google-analytics.com/g/collect"), pageUrl: "https://shop.test/" }, "", null, policy()).kind, "drop");
   assert.deepEqual(passedWithoutNote([{ request: "POST social.test/a", why: "x" }, { request: "POST social.test/a", why: "x" }, { request: "POST shop.test/b", why: "y" }]), ["sent without asking (x): POST social.test/a ×2", "sent without asking (y): POST shop.test/b"]);
 });
@@ -158,7 +169,7 @@ test("the turn records whose it is and which conversation it belongs to", async 
     { untrusted: false, conversation: "chat:owner_1:2026-01-05" },
     { untrusted: true, conversation: "chat:member_2:2026-01-05" },
     { untrusted: true, conversation: "chat:agent:agent_9:2026-01-05" },
-    { untrusted: true, conversation: "chat:owner:2026-01-05" },
+    { untrusted: true, conversation: "chat:followup:f1:2026-01-05" },
     { untrusted: true, conversation: "room:room_1:2026-01-05" },
     { untrusted: false, conversation: "run:r1" },
   ]);
@@ -198,4 +209,18 @@ test("buying, deleting, changing permissions or creating an account asks even on
   }
   assert.deepEqual(decide(chat, 'submit "Post"', element(), null, listed), { kind: "pass", without: "your owner always allows social.test" });
   assert.equal(confirmsAlways('submit "Post" Post'), false);
+});
+
+test("in a run, a script request outside the steps is dropped before any site shortcut", () => {
+  const run: TurnState = { mode: "run", runId: "r9", approvalsRequired: true, askSteps: [{ id: "s1", text: "Post the update" }], conversation: "run:r9" };
+  assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "", null, policy({ hosts: ["social.test"] }), ["social.test"]).kind, "drop");
+  assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "", null, policy(), ["social.test"]).kind, "drop");
+  assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "post the update", null, policy(), ["social.test"]).kind, "pass");
+});
+
+test("a bare public suffix or shared hosting domain is never a site to allow", () => {
+  const ask = decide(chat, 'submit "Send"', element({ url: "https://www.gov.br/x" }), null, policy({ hosts: ["gov.br", "com"] }));
+  assert.equal(ask.kind, "ask");
+  assert.equal(ask.kind === "ask" && ask.site, "www.gov.br");
+  assert.equal(decide(chat, 'submit "Send"', element({ url: "https://attacker.github.io/" }), null, policy({ hosts: ["github.io"] })).kind, "ask");
 });

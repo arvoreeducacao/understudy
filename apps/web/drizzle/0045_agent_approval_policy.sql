@@ -1,1 +1,2 @@
-ALTER TABLE "agents" ADD COLUMN "approval_policy" jsonb DEFAULT '{"mode":"on-miss","allow":[],"fallback":"wait"}'::jsonb NOT NULL;
+ALTER TABLE "agents" ADD COLUMN "approval_policy" jsonb DEFAULT '{"mode":"on-miss","allow":[],"fallback":"wait"}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "approvals" ADD COLUMN "needs_answer" boolean DEFAULT false NOT NULL;

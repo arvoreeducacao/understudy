@@ -66,10 +66,10 @@ test("adding and removing entries keeps the list clean and bounded", () => {
   assert.equal(full.allow[0].value, "site5.test");
 });
 
-test("turns that are not the owner's never go below asking what is not allowed", () => {
+test("turns that are not the owner's ask as before, ignoring the list", () => {
   assert.equal(effectiveApprovalMode("off"), "off");
-  assert.equal(effectiveApprovalMode("off", { untrusted: true }), "on-miss");
-  assert.equal(effectiveApprovalMode("on-miss", { untrusted: true }), "on-miss");
+  assert.equal(effectiveApprovalMode("off", { untrusted: true }), "always");
+  assert.equal(effectiveApprovalMode("on-miss", { untrusted: true }), "always");
   assert.equal(effectiveApprovalMode("always", { untrusted: true }), "always");
   assert.equal(effectiveApprovalMode("auto"), "on-miss");
   assert.equal(listCoversActions("on-miss"), true);
@@ -82,4 +82,14 @@ test("the computer gets the mode, the listed sites and who the owner is", () => 
   assert.deepEqual(wire, { mode: "always", hosts: ["shop.test"], ownerId: "user_1" });
   assert.equal(parseServerToComputer({ type: "set_approval_policy", policy: wire }).ok, true);
   assert.equal(parseServerToComputer({ type: "set_approval_policy", policy: { mode: "sometimes", hosts: [] } }).ok, false);
+});
+
+test("a public suffix, a shared hosting domain, a bare name or an address is never a site to allow", () => {
+  for (const value of ["com", "gov.br", "co.uk", "com.br", "github.io", "vercel.app", "localhost", "1", "192.168.0.1"]) assert.equal(allowedHost(value), null, value);
+  assert.equal(allowedHost("https://www.gov.br/receitafederal"), "www.gov.br");
+  assert.equal(allowedHost("attacker.github.io"), "attacker.github.io");
+  assert.equal(allowedHost("example.com:8443"), "example.com");
+  assert.equal(siteListed("any-shop.com", ["com"]), false);
+  assert.equal(siteListed("attacker.github.io", ["github.io"]), false);
+  assert.deepEqual(cleanApprovalPolicy({ allow: [{ kind: "host", value: "com" }, { kind: "host", value: "github.io" }] }).allow, []);
 });
