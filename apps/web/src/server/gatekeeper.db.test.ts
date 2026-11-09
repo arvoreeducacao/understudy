@@ -108,6 +108,7 @@ before(async () => {
     name: "GK",
     look: { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" },
     tokenHash: hashToken(token),
+    computerStatus: "stopped_by_owner",
     tools: { notifyOwner: true, slack: false, slackChannels: [], servers: [ids.server], askTools: [] },
   } as never);
   await db.insert(schema.agentMembers).values({ agentId: ids.agent, userId: ids.member, role: "viewer" });
