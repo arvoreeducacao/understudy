@@ -39,8 +39,8 @@ before(async () => {
   const look = { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" };
   const tools = { notifyOwner: true, slack: false, slackChannels: [] };
   await db.insert(schema.agents).values([
-    { id: ids.keyed, ownerId: ids.owner, name: "Keyed", look, tokenHash: "model_hash_keyed", tools, brainAccount: { url: providerUrl, auth: "x-api-key", key: seal(PROVIDER_KEY), last4: "0001", maxUsdPerTurn: 2 } } as never,
-    { id: ids.plain, ownerId: ids.owner, name: "Plain", look, tokenHash: "model_hash_plain", tools } as never,
+    { id: ids.keyed, ownerId: ids.owner, name: "Keyed", look, tokenHash: "model_hash_keyed", computerStatus: "stopped_by_owner", tools, brainAccount: { url: providerUrl, auth: "x-api-key", key: seal(PROVIDER_KEY), last4: "0001", maxUsdPerTurn: 2 } } as never,
+    { id: ids.plain, ownerId: ids.owner, name: "Plain", look, tokenHash: "model_hash_plain", computerStatus: "stopped_by_owner", tools } as never,
   ]);
 
   const { handleModelProxy, isModelProxyRoute } = await import("./model-proxy");

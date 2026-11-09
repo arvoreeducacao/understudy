@@ -82,15 +82,6 @@ export async function runningRun(agentId: string) {
   return run ?? null;
 }
 
-async function runOfThisTurn(agentId: string, runId: string) {
-  if (turnKnown(agentId)) return runId === (await turnRunId(agentId, runningRunId));
-  const [run] = await getDb()
-    .select({ id: schema.runs.id })
-    .from(schema.runs)
-    .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")));
-  return Boolean(run);
-}
-
 export async function runningRunId(agentId: string) {
   return (await runningRun(agentId))?.id ?? null;
 }
@@ -262,7 +253,7 @@ export function runApprovalsView(runId: string, rows: RunApprovalRow[]) {
   return {
     runId,
     pending: pending.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, expiresAt: row.expiresAt?.toISOString() ?? null })),
-    answered: answered.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, status: row.status, ...(row.note ? { note: row.note } : {}) })),
+    answered: answered.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, status: row.status, ...(row.note ? { note: row.note } : {}), answeredAt: row.answeredAt?.toISOString() ?? null, used: Boolean(row.usedAt) })),
   };
 }
 
@@ -331,8 +322,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           console.log(JSON.stringify({ at: new Date().toISOString(), event: "approval_skipped", agentId: agent.id, mode }));
           return text(brainText.approvalsOff);
         }
-        const asked = !label && args.site && listCoversActions(mode) ? allowedHost(args.site) : null;
-        const site = asked && sitesInFields(args.fields ?? []).includes(asked) ? asked : null;
+        const offered = !label && args.site && listCoversActions(mode) ? allowedHost(args.site) : null;
+        const site = offered && sitesInFields(args.fields ?? []).includes(offered) ? offered : null;
         let fields = args.fields ?? [];
         let hash: string | undefined;
         if (args.action) {
@@ -344,12 +335,14 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
         }
-        const closed = await closedRunText(hub, agent.id, args.runId);
+        const asked = args.runId && !outsider() ? args.runId : undefined;
+        const closed = await closedRunText(hub, agent.id, asked);
         if (closed) return text(closed, true);
-        if (args.runId && !(await runOfThisTurn(agent.id, args.runId))) return text(`not asked: ${args.runId.slice(0, 100)} is not the task run you are working on; ask without runId`, true);
+        const expected = asked ? await turnRunId(agent.id, async () => asked) : null;
+        const runId = asked && expected === asked && (await hub.runs.runState(agent.id, asked)) === "running" ? asked : undefined;
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
-        const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted));
+        const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },

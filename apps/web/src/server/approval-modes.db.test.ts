@@ -285,8 +285,16 @@ test("a request names only the run of the turn, someone else's turn needs a pers
   const { forgetTurnWake, noteTurn } = await import("./followups");
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();
+  const deniedOutsideTheRun = async (runId: string) => {
+    const pending = call("request_approval", { summary: "Post for me", runId });
+    const approval = await pendingApproval();
+    assert.equal(approval.runId, null);
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^denied/);
+    return approval;
+  };
   await db.insert(schema.runs).values({ id: "run_am_other", agentId: ids.agent, trigger: "schedule", status: "running" });
-  assert.match(await call("request_approval", { summary: "Post for me", runId: "run_am_other" }), /^not asked: run_am_other is not the task run you are working on/);
+  await deniedOutsideTheRun("run_am_other");
   forgetTurnWake(ids.agent);
   const unknownTurn = call("request_approval", { summary: "Post for me", runId: "run_am_other" });
   const onlyAPerson = await pendingApproval();
@@ -294,7 +302,7 @@ test("a request names only the run of the turn, someone else's turn needs a pers
   assert.equal(onlyAPerson.needsAnswer, true);
   await createHub().answerApproval(onlyAPerson.id, false, undefined, ids.owner);
   await unknownTurn;
-  assert.match(await call("request_approval", { summary: "Post for me", runId: "run_am_nowhere" }), /^not asked: run_am_nowhere is not the task run you are working on/);
+  assert.equal((await deniedOutsideTheRun("run_am_nowhere")).needsAnswer, true);
   noteTurn(ids.agent, {});
   await db.delete(schema.runs).where(eq(schema.runs.id, "run_am_other"));
 

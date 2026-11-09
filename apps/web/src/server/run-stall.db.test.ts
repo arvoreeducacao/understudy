@@ -21,6 +21,8 @@ const agents = {
   slow: "agt_stall_slow",
   hourly: "agt_stall_hourly",
   undated: "agt_stall_undated",
+  expiring: "agt_stall_expiring",
+  idleQueue: "agt_stall_idle_queue",
 };
 const minutes = (count: number) => new Date(Date.now() - count * 60_000);
 const day = 24 * 60;
@@ -78,6 +80,9 @@ before(async () => {
     { id: "run_stall_hourly", agentId: agents.hourly, recipeId: "rcp_stall_hourly", trigger: "schedule", status: "running", startedAt: minutes(65) },
     { id: "run_stall_undated", agentId: agents.undated, trigger: "schedule", status: "running", startedAt: minutes(26 * 60) },
     { id: "run_stall_undated_queued", agentId: agents.undated, trigger: "schedule", status: "running", startedAt: minutes(50) },
+    { id: "run_stall_expiring", agentId: agents.expiring, trigger: "schedule", status: "running", startedAt: minutes(day + 40) },
+    { id: "run_stall_idle_done", agentId: agents.idleQueue, trigger: "schedule", status: "ok", startedAt: minutes(80) },
+    { id: "run_stall_idle_queued", agentId: agents.idleQueue, trigger: "schedule", status: "running", startedAt: minutes(80) },
   ]);
   await db.insert(schema.messages).values([
     { id: "msg_stall_1", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Reading the page", createdAt: minutes(50) },
@@ -92,6 +97,8 @@ before(async () => {
     { id: "msg_stall_10", agentId: agents.expired, runId: "run_stall_expired", role: "activity", text: "Asking for approval: Pay the invoice", createdAt: minutes(day + 110) },
     { id: "msg_stall_11", agentId: agents.slow, runId: "run_stall_slow", role: "activity", text: "evaluate", createdAt: minutes(30) },
     { id: "msg_stall_13", agentId: agents.undated, runId: "run_stall_undated", role: "activity", text: "Asking for approval: Export the report", createdAt: minutes(25 * 60) },
+    { id: "msg_stall_14", agentId: agents.expiring, runId: "run_stall_expiring", role: "activity", text: "Asking for approval: Pay the invoice", createdAt: minutes(day + 1) },
+    { id: "msg_stall_15", agentId: agents.idleQueue, runId: "run_stall_idle_done", role: "activity", text: "Wrapping up", createdAt: minutes(40) },
     { id: "msg_stall_12", agentId: agents.hourly, runId: "run_stall_hourly", role: "activity", text: "Asking for approval: Post the digest", createdAt: minutes(60) },
   ]);
   await db.insert(schema.approvals).values([
@@ -100,6 +107,7 @@ before(async () => {
     { id: "apr_stall_late", agentId: agents.late, runId: "run_stall_late", stepId: "s2", summary: "Send the board update", source: "mcp", status: "approved", createdAt: minutes(100), answeredAt: minutes(50), expiresAt: later },
     { id: "apr_stall_expired", agentId: agents.expired, runId: "run_stall_expired", stepId: "s2", summary: "Pay the invoice", source: "mcp", status: "expired", createdAt: minutes(day + 110), answeredAt: minutes(50), expiresAt: minutes(50) },
     { id: "apr_stall_undated", agentId: agents.undated, runId: "run_stall_undated", stepId: "s2", summary: "Export the report", source: "computer", status: "pending", createdAt: minutes(25 * 60), expiresAt: null },
+    { id: "apr_stall_expiring", agentId: agents.expiring, runId: "run_stall_expiring", stepId: "s2", summary: "Pay the invoice", source: "mcp", status: "pending", createdAt: minutes(day + 1), expiresAt: new Date(Date.now() - 2000) },
     { id: "apr_stall_hourly", agentId: agents.hourly, runId: "run_stall_hourly", stepId: "s1", summary: "Post the digest", source: "mcp", status: "pending", createdAt: minutes(60), expiresAt: later },
   ]);
   await db.insert(schema.inboundQueue).values({ id: "inq_stall_1", agentId: agents.undelivered, message: { type: "run_recipe", runId: "run_stall_undelivered" }, source: "run", runId: "run_stall_undelivered", expiresAt: new Date(Date.now() + 5 * 60_000) });
@@ -205,6 +213,21 @@ test("a request with no expiry that is more than a day old no longer holds a run
   assert.equal((await runRow("run_stall_undated_queued")).status, "failed");
 });
 
+test("a request that has just passed its expiry still counts as news for its run, so the run hears the expiry instead of being closed as silent", { skip }, async () => {
+  await sweepOnce();
+  assert.equal((await runRow("run_stall_expiring")).status, "running");
+});
+
+test("a queued run its computer never picked up says when the computer was last heard from", { skip }, async () => {
+  const { formatWhen } = await import("@/lib/format");
+  const { getDb, schema } = await import("@/lib/db");
+  await sweepOnce();
+  const [last] = await getDb().select().from(schema.messages).where(eq(schema.messages.id, "msg_stall_15"));
+  const queued = await runRow("run_stall_idle_queued");
+  assert.equal(queued.status, "failed");
+  assert.equal(queued.summary, `Its computer never started this run: nothing came from it for 35 minutes after ${formatWhen(last.createdAt)}, so the panel closed the run.`);
+});
+
 test("a computer that comes back gets the stop orders for its closed runs again", { skip }, async () => {
   const { runs, toComputer } = await sweepOnce();
   const before = toComputer.filter((sent) => sent.agentId === agents.quiet).length;
@@ -233,8 +256,10 @@ test("a scheduled run of a task that still has an open run is skipped and noted,
   const { Runs } = await import("./hub/runs");
   const { getDb, schema } = await import("@/lib/db");
   const { hub, said } = fakeHub();
-  const started = await new Runs(hub as never).start("rcp_stall_hourly", "schedule", { scheduledFor: new Date() });
+  const runs = new Runs(hub as never);
+  const started = await runs.start("rcp_stall_hourly", "schedule", { scheduledFor: new Date() });
   assert.deepEqual(started, { ok: false, reason: "already_running" });
+  assert.deepEqual(await runs.start("rcp_stall_hourly", "schedule", { scheduledFor: new Date(Date.now() + 300_000) }), { ok: false, reason: "already_running" });
   const rows = await getDb().select().from(schema.runs).where(eq(schema.runs.recipeId, "rcp_stall_hourly"));
   assert.deepEqual(rows.map((row) => row.id), ["run_stall_hourly"]);
   assert.equal(said.length, 1);
