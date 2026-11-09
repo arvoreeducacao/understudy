@@ -449,8 +449,9 @@ export class Hub {
     timeoutSeconds?: number,
     payloadHash?: string,
     grant?: ApprovalGrant,
+    needsAnswer = false,
   ) {
-    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant);
+    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant, needsAnswer);
   }
 
   openApprovalAsk(agentId: string, request: Parameters<Approvals["openAsk"]>[1]) {

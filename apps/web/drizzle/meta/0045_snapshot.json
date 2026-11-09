@@ -1,5 +1,5 @@
 {
-  "id": "216ad4a6-7f84-4eb1-9d06-37391faa3c90",
+  "id": "08cca6bc-4ce2-4f30-85c4-539d21ca566c",
   "prevId": "47d75522-023f-41b0-9fa5-9e52a89c4226",
   "version": "7",
   "dialect": "postgresql",
@@ -938,6 +938,13 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "needs_answer": {
+          "name": "needs_answer",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "answered_via": {
           "name": "answered_via",

@@ -460,7 +460,8 @@ export function createAgent(options: {
     if (cancelled()) return;
     const ownerId = options.approvalPolicyFile ? readApprovalPolicy(options.approvalPolicyFile).ownerId : undefined;
     const untrusted = Boolean(job.fromAgent || job.external || job.followup || (job.askedBy && job.askedBy !== ownerId));
-    markTurn({ mode: "chat", untrusted, conversation: `chat:${job.fromAgent ? `agent:${job.fromAgent.id}` : job.askedBy ?? "owner"}:${day}`.slice(0, 400) });
+    const who = job.followup ? `followup:${job.followup.id}` : job.fromAgent ? `agent:${job.fromAgent.id}` : job.askedBy ?? "owner";
+    markTurn({ mode: "chat", untrusted, conversation: `chat:${who}:${day}`.slice(0, 400) });
     const said = ownerMessage(job.text, job.attachments ?? [], options.config.home, job.artifactEdit);
     const message = job.fromAgent
       ? teammateMessage(job.fromAgent.name, job.text, job.fromAgent.owner)

@@ -14,9 +14,9 @@ export const UNANSWERED_AFTER_MS = 30 * 60 * 1000;
 
 export const OWNER_STARTED_TRIGGERS: readonly string[] = ["schedule", "manual"];
 
-export function unansweredOutcome(input: { fallback: ApprovalFallback; askedBy: string | null; runTrigger: string | null }): "deny" | "allow" | null {
+export function unansweredOutcome(input: { fallback: ApprovalFallback; askedBy: string | null; needsAnswer: boolean; runTrigger: string | null; runRunning: boolean }): "deny" | "allow" | null {
   if (input.fallback === "deny") return "deny";
-  if (input.fallback !== "allow" || input.askedBy || !input.runTrigger) return null;
+  if (input.fallback !== "allow" || input.askedBy || input.needsAnswer || !input.runRunning || !input.runTrigger) return null;
   return OWNER_STARTED_TRIGGERS.includes(input.runTrigger) ? "allow" : null;
 }
 

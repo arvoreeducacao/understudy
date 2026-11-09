@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { brainText } from "@/lib/brain-text";
 import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
-import { UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
+import { OWNER_STARTED_TRIGGERS, UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
 import { ESCALATIONS_BEFORE_STEPPING_ASIDE, REVIEWER_FIELD } from "../reviewer";
 import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
@@ -19,7 +19,7 @@ import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
 import { grantAllowEntry } from "../approval-modes";
 import { allowEntryOf, alwaysAllowOf } from "@/lib/always-allow";
-import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
+import type { ApprovalGrant, ApprovalVia, RunTrigger } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
 
@@ -40,6 +40,7 @@ export class Approvals {
     timeoutSeconds?: number,
     payloadHash?: string,
     grant?: ApprovalGrant,
+    needsAnswer = false,
   ) {
     const db = getDb();
     const id = newId("apr");
@@ -59,6 +60,7 @@ export class Approvals {
       requestId,
       payloadHash: payloadHash ?? null,
       grant: grant ?? null,
+      needsAnswer,
       askedBy,
       expiresAt,
     };
@@ -344,22 +346,32 @@ export class Approvals {
   async settleUnanswered(now = Date.now()) {
     const db = getDb();
     const due = await db
-      .select({ approval: schema.approvals, policy: schema.agents.approvalPolicy, trigger: schema.runs.trigger })
+      .select({ approval: schema.approvals, policy: schema.agents.approvalPolicy, trigger: schema.runs.trigger, runStatus: schema.runs.status })
       .from(schema.approvals)
       .innerJoin(schema.agents, eq(schema.agents.id, schema.approvals.agentId))
-      .leftJoin(schema.runs, eq(schema.runs.id, schema.approvals.runId))
+      .leftJoin(schema.runs, and(eq(schema.runs.id, schema.approvals.runId), eq(schema.runs.agentId, schema.approvals.agentId)))
       .where(
         and(
           eq(schema.approvals.status, "pending"),
           lte(schema.approvals.createdAt, new Date(now - UNANSWERED_AFTER_MS)),
           or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date(now))),
-          sql`${schema.agents.approvalPolicy}->>'fallback' in ('deny', 'allow')`,
+          or(
+            sql`${schema.agents.approvalPolicy}->>'fallback' = 'deny'`,
+            and(
+              sql`${schema.agents.approvalPolicy}->>'fallback' = 'allow'`,
+              eq(schema.approvals.needsAnswer, false),
+              isNull(schema.approvals.askedBy),
+              eq(schema.runs.status, "running"),
+              inArray(schema.runs.trigger, [...OWNER_STARTED_TRIGGERS] as RunTrigger[]),
+            ),
+          ),
         ),
       )
+      .orderBy(asc(schema.approvals.createdAt))
       .limit(100);
     const minutes = UNANSWERED_AFTER_MS / 60_000;
-    for (const { approval, policy, trigger } of due) {
-      const outcome = unansweredOutcome({ fallback: cleanApprovalPolicy(policy).fallback, askedBy: approval.askedBy, runTrigger: trigger });
+    for (const { approval, policy, trigger, runStatus } of due) {
+      const outcome = unansweredOutcome({ fallback: cleanApprovalPolicy(policy).fallback, askedBy: approval.askedBy, needsAnswer: approval.needsAnswer, runTrigger: trigger, runRunning: runStatus === "running" });
       if (!outcome) continue;
       const approved = outcome === "allow";
       const note = brainText.unanswered(approved, minutes);

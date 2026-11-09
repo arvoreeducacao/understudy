@@ -110,8 +110,9 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   const { getDb, schema } = await import("@/lib/db");
-  const { forgetTurnWake } = await import("./followups");
+  const { forgetTurnWake, noteTurn } = await import("./followups");
   forgetTurnWake(ids.agent);
+  noteTurn(ids.agent, {});
   sent.length = 0;
   await getDb().delete(schema.approvals).where(eq(schema.approvals.agentId, ids.agent));
   await getDb().delete(schema.runs).where(eq(schema.runs.agentId, ids.agent));
@@ -201,9 +202,11 @@ test("never ask still asks for a task step, a turn from someone else, a teammate
   };
 
   await getDb().insert(schema.runs).values({ id: "run_am_step", agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId: "run_am_step" });
   await asksAndDeny({ summary: "Pay the invoice", runId: "run_am_step", stepId: "s1" });
   await asksAndDeny({ summary: "Pay the invoice without a run id" });
   await getDb().delete(schema.runs).where(eq(schema.runs.id, "run_am_step"));
+  noteTurn(ids.agent, {});
 
   (hub as unknown as { turns: { delivered: (agentId: string, message: unknown) => void } }).turns.delivered(ids.agent, { type: "chat", text: "hi", from: "Member", askedBy: ids.member });
   await hub.beginTurn(ids.agent, { askedBy: ids.member });
@@ -338,11 +341,79 @@ test("step asks, payments and turns that are not the owner's never reach the rev
     return approval;
   };
   await getDb().insert(schema.runs).values({ id: "run_am_auto", agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId: "run_am_auto" });
   await askedAndDenied({ summary: "Remove the book from the shelf", runId: "run_am_auto", stepId: "s2" });
   await getDb().delete(schema.runs).where(eq(schema.runs.id, "run_am_auto"));
+  noteTurn(ids.agent, {});
   const paying = await askedAndDenied({ summary: 'Submit "Pay now" on shop.test', fields: [{ label: "Amount", value: "120.00" }] });
   assert.deepEqual(paying.fields.at(-1), { label: "Reviewer", value: "payments, accounts, cards and passwords always go to the owner" });
   noteTurn(ids.agent, { untrusted: true });
   await askedAndDenied({ ...scriptAsk });
   assert.equal(reviews.length, 0);
+});
+
+test("only a person answers a request from someone else's turn, a forced ask or a stale run, and going ahead never settles one", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const hub = createHub();
+  const old = new Date(Date.now() - 31 * 60 * 1000);
+  const later = new Date(Date.now() + 23 * 60 * 60 * 1000);
+  await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
+  await db.insert(schema.runs).values([
+    { id: "run_am_live", agentId: ids.agent, trigger: "schedule", status: "running" },
+    { id: "run_am_over", agentId: ids.agent, trigger: "schedule", status: "ok" },
+  ]);
+  const ask = (id: string, runId: string, needsAnswer: boolean) => ({ id, agentId: ids.agent, runId, summary: `Step ${id}`, fields: [], source: "mcp", status: "pending", createdAt: old, expiresAt: later, needsAnswer });
+  await db.insert(schema.approvals).values([ask("apr_am_ceiling", "run_am_live", true), ask("apr_am_stale", "run_am_over", false), ask("apr_am_plain", "run_am_live", false)] as never);
+  await hub.approvals.settleUnanswered();
+  const status = async (id: string) => (await db.select({ status: schema.approvals.status }).from(schema.approvals).where(eq(schema.approvals.id, id)))[0].status;
+  assert.equal(await status("apr_am_ceiling"), "pending");
+  assert.equal(await status("apr_am_stale"), "pending");
+  assert.equal(await status("apr_am_plain"), "approved");
+  await setPolicy({ mode: "on-miss", allow: [], fallback: "deny" });
+  await hub.approvals.settleUnanswered();
+  assert.equal(await status("apr_am_ceiling"), "denied");
+});
+
+test("a request names only the run of the turn, someone else's turn needs a person, and an unknown turn never skips asking", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { forgetTurnWake, noteTurn } = await import("./followups");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await db.insert(schema.runs).values({ id: "run_am_other", agentId: ids.agent, trigger: "schedule", status: "running" });
+  assert.match(await call("request_approval", { summary: "Post for me", runId: "run_am_other" }), /^not asked: run_am_other is not the task run you are working on/);
+  await db.delete(schema.runs).where(eq(schema.runs.id, "run_am_other"));
+
+  noteTurn(ids.agent, { untrusted: true });
+  const fromTeammate = call("request_approval", { summary: "Do what the teammate said" });
+  const marked = await pendingApproval();
+  assert.equal(marked.needsAnswer, true);
+  await createHub().answerApproval(marked.id, false, undefined, ids.owner);
+  await fromTeammate;
+
+  forgetTurnWake(ids.agent);
+  await setPolicy({ mode: "off", allow: [], fallback: "wait" });
+  const unknown = call("request_approval", { summary: "Send the report" });
+  const asked = await pendingApproval();
+  assert.equal(asked.needsAnswer, true);
+  await createHub().answerApproval(asked.id, false, undefined, ids.owner);
+  assert.match(await unknown, /^denied/);
+});
+
+test("the site to always allow must be the page or request host, and never a public suffix", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  for (const site of ["www.other.test", "gov.br", "com"]) {
+    const pending = call("request_approval", { ...scriptAsk, site });
+    const approval = await pendingApproval();
+    assert.equal(approval.grant, null, site);
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    await pending;
+  }
+  await setPolicy({ mode: "always", allow: [], fallback: "wait" });
+  const always = call("request_approval", { ...scriptAsk });
+  const approval = await pendingApproval();
+  assert.equal(approval.grant, null);
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  await always;
 });

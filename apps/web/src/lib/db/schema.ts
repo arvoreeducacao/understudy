@@ -380,6 +380,7 @@ export const approvals = pgTable(
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     usedAt: timestamp("used_at", { withTimezone: true }),
     grant: jsonb("tool_grant").$type<ApprovalGrant | null>(),
+    needsAnswer: boolean("needs_answer").notNull().default(false),
     answeredVia: text("answered_via").$type<ApprovalVia>(),
     slackMessages: jsonb("slack_messages").$type<SlackMessageRef[]>(),
   },

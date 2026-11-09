@@ -362,6 +362,7 @@ async function setApprovalMode(mode: "always" | "on-miss" | "auto" | "off") {
 }
 
 test("never ask runs a tool the owner set to ask without asking, and a tool set to never stays off", { skip }, async () => {
+  (await import("./followups")).noteTurn(ids.agent, {});
   await setApprovalMode("off");
   try {
     assert.equal(await call("mail__create_draft", { to: "client@example.com", body: "Hello" }), "create_draft done");
@@ -381,6 +382,7 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
   try {
     const pending = call("mail__create_draft", { to: "client@example.com", body: "Hello" });
     const approval = await pendingApproval();
+    assert.equal(approval.needsAnswer, true);
     await createHub().answerApproval(approval.id, false, undefined, ids.owner);
     assert.match(await pending, /^not called/);
     assert.equal(calls.length, 0);
@@ -400,6 +402,7 @@ test("in automatic mode a connector call the reviewer allows runs at once, and t
   });
   process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewer)}/v1`;
   process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+  (await import("./followups")).noteTurn(ids.agent, {});
   await setApprovalMode("auto");
   try {
     assert.equal(await call("mail__create_draft", { to: "client@example.com", body: "Hello" }), "create_draft done");

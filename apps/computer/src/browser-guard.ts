@@ -431,20 +431,21 @@ export function scriptRequestVerdict(
   if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
   const cover = coveringApproval(approval, state);
   if (cover) return { kind: "pass", coveredBy: cover };
-  if (guardMode(state, policy) === "off") return { kind: "pass", without: MODE_OFF_NOTE };
+  const mode = guardMode(state, policy);
+  if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
   let host = request.url;
   try {
     host = new URL(request.url).host;
   } catch {}
   const dropped = { kind: "drop" as const, request: `${method} ${bareUrl(request.url)}`, pageUrl: request.pageUrl ? bareUrl(request.pageUrl) : "unknown" };
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
+  const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
+  if (state.mode === "run" && !step) return dropped;
   const everyTime = asksEveryTime(request.url);
-  const site = everyTime ? null : siteOf(request.url);
+  const site = listCoversActions(mode) && !everyTime ? siteOf(request.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   if (site && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
-  const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
-  if (state.mode === "run" && !step) return dropped;
   return {
     kind: "ask",
     summary: `Script sent a ${method} to ${host}`.slice(0, 480),

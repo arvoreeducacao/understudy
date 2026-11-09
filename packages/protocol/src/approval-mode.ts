@@ -24,12 +24,44 @@ export type EffectiveApprovalMode = ApprovalMode;
 
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = { mode: "on-miss", allow: [], fallback: "wait" };
 
-const HOST_NAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+const HOST_NAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const TOOL_NAME = /^[a-z0-9][a-z0-9_.:-]{0,199}$/;
 
+const SHARED_SECOND_LEVELS = new Set([
+  "ac", "ad", "adv", "art", "biz", "blog", "co", "com", "ed", "edu", "eng", "gen", "go", "gob", "gouv", "gov", "govt", "gr", "gv", "id", "in", "ind", "inf", "info", "int", "jus", "leg",
+  "lg", "ltd", "me", "med", "mil", "mp", "ne", "net", "nic", "nm", "nom", "or", "org", "plc", "pro", "rec", "res", "sch", "tm", "tur", "tv", "web", "wiki",
+]);
+
+export const SHARED_HOSTING_SUFFIXES: readonly string[] = [
+  "amazonaws.com", "appspot.com", "azureedge.net", "azurewebsites.net", "blogspot.com", "cloudfront.net", "deno.dev", "duckdns.org", "firebaseapp.com", "fly.dev", "github.io",
+  "githubusercontent.com", "gitlab.io", "glitch.me", "herokuapp.com", "myshopify.com", "netlify.app", "ngrok-free.app", "ngrok.io", "no-ip.org", "now.sh", "onrender.com",
+  "ondigitalocean.app", "pages.dev", "r2.dev", "railway.app", "repl.co", "replit.dev", "sharepoint.com", "surge.sh", "trycloudflare.com", "vercel.app", "web.app", "web.core.windows.net",
+  "wixsite.com", "wordpress.com", "workers.dev",
+];
+
+export function isSharedSuffix(host: string): boolean {
+  const labels = host.split(".");
+  if (labels.length < 2) return true;
+  if (SHARED_HOSTING_SUFFIXES.includes(host)) return true;
+  return labels.length === 2 && labels[1].length === 2 && SHARED_SECOND_LEVELS.has(labels[0]);
+}
+
+function hostnameOf(value: string): string {
+  const trimmed = value.trim().toLowerCase();
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`).hostname.replace(/\.$/, "");
+  } catch {
+    return trimmed;
+  }
+}
+
 export function allowedHost(value: string): string | null {
-  const site = normalizeSite(value);
-  return HOST_NAME.test(site) ? site : null;
+  const host = hostnameOf(value);
+  const bare = normalizeSite(value);
+  const site = bare !== host && isSharedSuffix(bare) ? host : bare;
+  if (!HOST_NAME.test(site) || IPV4.test(site) || isSharedSuffix(site)) return null;
+  return site;
 }
 
 export function allowedTool(value: string): string | null {
@@ -82,7 +114,7 @@ export function withoutAllowed(policy: ApprovalPolicy, entry: ApprovalAllow): Ap
 export function listedSite(host: string, hosts: readonly string[]): string | null {
   const site = allowedHost(host);
   if (!site) return null;
-  return hosts.find((base) => site === base || site.endsWith(`.${base}`)) ?? null;
+  return hosts.find((base) => allowedHost(base) === base && (site === base || site.endsWith(`.${base}`))) ?? null;
 }
 
 export function siteListed(host: string, hosts: readonly string[]): boolean {
@@ -103,8 +135,7 @@ export function computerApprovalPolicy(policy: ApprovalPolicy, ownerId?: string)
 }
 
 export function effectiveApprovalMode(mode: ApprovalMode, context: { untrusted?: boolean } = {}): EffectiveApprovalMode {
-  if (mode === "always") return "always";
-  if (context.untrusted) return "on-miss";
+  if (mode === "always" || context.untrusted) return "always";
   return mode;
 }
 

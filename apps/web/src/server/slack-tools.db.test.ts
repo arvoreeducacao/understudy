@@ -309,6 +309,7 @@ async function savedPolicy() {
 const modesPosted = () => slackCalls.filter((c) => c.method === "chat.postMessage" && c.params.username === "Mona");
 
 test("always allow on a Slack approval stops asking for that tool only, and only the owner can grant it", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
   const { createHub } = await import("./hub");
   await setPolicy({ mode: "on-miss", allow: [], fallback: "wait" });
   const first = modesCall("slack_post_message", { channel: "#general", text: "hello team" });
@@ -328,6 +329,7 @@ test("always allow on a Slack approval stops asking for that tool only, and only
 });
 
 test("never ask posts on Slack without asking in the owner's own turn, but a handed-over task still asks", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
   const { createHub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();
@@ -339,6 +341,7 @@ test("never ask posts on Slack without asking in the owner's own turn, but a han
     assert.equal(modesPosted().length, before + 1);
     assert.equal((await db.select().from(schema.approvals).where(eq(schema.approvals.agentId, modes.agent))).filter((a) => a.status === "pending").length, 0);
     await db.insert(schema.runs).values({ id: runId, agentId: modes.agent, trigger: "handoff", status: "running" });
+    (await import("./followups")).noteTurn(modes.agent, { runId, untrusted: true });
     const handed = modesCall("slack_post_message", { channel: "#general", text: "from a teammate" });
     const approval = await modesPending();
     assert.equal(approval.grant, null);
@@ -350,6 +353,7 @@ test("never ask posts on Slack without asking in the owner's own turn, but a han
 });
 
 test("always ask ignores an always-allowed tool and offers no always allow", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
   const { createHub } = await import("./hub");
   await setPolicy({ mode: "always", allow: [{ kind: "tool", value: "slack_post_message" }], fallback: "wait" });
   const pending = modesCall("slack_post_message", { channel: "#general", text: "asks anyway" });
