@@ -160,7 +160,7 @@ export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, se
 
 async function untrustedTurn(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId">) {
   const flagged = outsiderTurn(agent.id) || guestTurn(agent.id) || turnUntrusted(agent.id) || turnWakesFollowup(agent.id);
-  const run = flagged ? null : await runningRun(agent.id);
+  const run = flagged ? null : await turnRun(agent.id);
   return untrustedTurnFor({ ownerId: agent.ownerId, audience: hub.turnAudience(agent.id), flagged: flagged || !turnKnown(agent.id), runTrigger: run?.trigger ?? null });
 }
 
@@ -319,9 +319,10 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         action: z.object({ tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()) }).optional(),
         site: z.string().max(253).optional(),
         reviewerAware: z.boolean().optional(),
+        everyTime: z.boolean().optional(),
       }),
       run: (async (
-        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string; reviewerAware?: boolean },
+        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string; reviewerAware?: boolean; everyTime?: boolean },
         extra: Extra,
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
@@ -354,13 +355,14 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
         const grant = site ? { host: site } : undefined;
-        const reviewable = !joined && !forced && mode === "auto" && !(args.site && !args.reviewerAware);
+        const everyTime = args.everyTime === true;
+        const reviewable = !joined && !forced && !everyTime && mode === "auto" && !(args.site && !args.reviewerAware);
         const reviewed = reviewable ? await autoReview(hub, agent, { summary, fields, runId, stepId: args.stepId }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant }) : null;
         const id =
           joined ??
           (reviewed?.kind === "approved"
             ? reviewed.id
-            : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, Boolean(label) || untrusted || forced, reviewed?.review));
+            : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, Boolean(label) || untrusted || forced || everyTime, reviewed?.review));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },

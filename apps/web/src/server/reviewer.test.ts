@@ -75,13 +75,13 @@ test("a request longer than the reviewer reads in full goes to the person withou
   const reviewer = gatewayReviewer({ apiKey: "test-key", model: "test/model", baseUrl: "https://gateway.test/v1", fetch: gateway.call });
   const recipients = JSON.stringify([...Array.from({ length: 120 }, (_, index) => `client${index}@example.com`), "someone@else.test"]);
   assert.ok(recipients.length > 2000);
-  const longField = await reviewer.review({ ownerRequest: "Email the weekly summary to my clients", action: { summary: "Mail: send_email", fields: [{ label: "to", value: recipients }] } });
+  const longField = await reviewer.review({ ownerRequest: "Email the weekly summary to my clients", action: { summary: "Mail: create_draft", fields: [{ label: "to", value: recipients }] } });
   assert.deepEqual([longField.decision, longField.reason], ["escalate", TOO_LONG_REASON]);
   const longSummary = await reviewer.review({ ...input, action: { ...input.action, summary: "s".repeat(501) } });
   assert.equal(longSummary.reason, TOO_LONG_REASON);
   const many = Array.from({ length: 10 }, (_, index) => ({ label: `field${index}`, value: "x".repeat(1500) }));
-  assert.ok(reviewPrompt({ ...input, action: { summary: "Mail: send_email", fields: many } }).length > PROMPT_LIMIT);
-  const wide = await reviewer.review({ ...input, action: { summary: "Mail: send_email", fields: many } });
+  assert.ok(reviewPrompt({ ...input, action: { summary: "Mail: create_draft", fields: many } }).length > PROMPT_LIMIT);
+  const wide = await reviewer.review({ ...input, action: { summary: "Mail: create_draft", fields: many } });
   assert.equal(wide.reason, TOO_LONG_REASON);
   assert.equal(gateway.seen.length, 0);
 });

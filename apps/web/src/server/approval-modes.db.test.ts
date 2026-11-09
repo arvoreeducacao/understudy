@@ -158,13 +158,13 @@ test("a browser approval offers always allow on its site, and the owner's yes ad
   const { loadPendingApprovals } = await import("@/lib/views");
   const pending = call("request_approval", scriptAsk);
   const approval = await pendingApproval();
-  assert.deepEqual(approval.grant, { host: "social.test" });
+  assert.deepEqual(approval.grant, { host: "www.social.test" });
   const [view] = await loadPendingApprovals(ids.agent, ids.owner);
-  assert.deepEqual(view.alwaysAllow, { host: "social.test" });
+  assert.deepEqual(view.alwaysAllow, { host: "www.social.test" });
   await createHub().answerApproval(approval.id, true, undefined, ids.owner, true);
   assert.match(await pending, /^approved/);
-  assert.deepEqual((await savedPolicy())?.allow, [{ kind: "host", value: "social.test" }]);
-  assert.deepEqual(sent.find((entry) => entry.message.type === "set_approval_policy")?.message, { type: "set_approval_policy", policy: { mode: "on-miss", hosts: ["social.test"], ownerId: ids.owner } });
+  assert.deepEqual((await savedPolicy())?.allow, [{ kind: "host", value: "www.social.test" }]);
+  assert.deepEqual(sent.find((entry) => entry.message.type === "set_approval_policy")?.message, { type: "set_approval_policy", policy: { mode: "on-miss", hosts: ["www.social.test"], ownerId: ids.owner } });
 });
 
 test("only the owner turns an approval into always allow on a site", { skip }, async () => {
@@ -301,7 +301,7 @@ test("in automatic mode the reviewer lets a safe action through at once, and its
   assert.equal(row.status, "approved");
   assert.equal(row.answeredVia, "reviewer");
   assert.deepEqual(row.review, { decision: "allow", reason: "the owner asked to like posts on this site" });
-  assert.deepEqual(row.grant, { host: "social.test" });
+  assert.deepEqual(row.grant, { host: "www.social.test" });
   const activity = await getDb().select().from(schema.messages).where(and(eq(schema.messages.agentId, ids.agent), eq(schema.messages.role, "activity")));
   assert.ok(activity.some((line) => line.text.startsWith("Reviewer let this go ahead: Script sent a POST to www.social.test.")));
 });
@@ -314,7 +314,7 @@ test("an escalation reaches the owner with the reviewer's reason, and three in a
   await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
   await ownerSaid("Read the comments under my last post");
   for (let round = 1; round <= 3; round++) {
-    const pending = call("request_approval", { summary: `Post comment ${round} on forum.test`, fields: [{ label: "Text", value: "Great point!" }] });
+    const pending = call("request_approval", { summary: `Vote in poll ${round} on forum.test`, fields: [{ label: "Choice", value: "Option B" }] });
     const approval = await pendingApproval();
     assert.deepEqual(approval.fields.at(-1), { label: "Reviewer", value: "the owner did not ask for a public comment" });
     assert.deepEqual(approval.review, { decision: "escalate", reason: "the owner did not ask for a public comment" });
@@ -332,7 +332,7 @@ test("an escalation reaches the owner with the reviewer's reason, and three in a
   assert.ok(activity.some((line) => line.text.startsWith("The reviewer asked you 3 times in a row")));
 });
 
-test("step asks, payments and turns that are not the owner's never reach the reviewer", { skip }, async () => {
+test("step asks, payments, every-time asks and turns that are not the owner's never reach the reviewer", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { noteTurn } = await import("./followups");
   const { getDb, schema } = await import("@/lib/db");
@@ -354,6 +354,9 @@ test("step asks, payments and turns that are not the owner's never reach the rev
   noteTurn(ids.agent, {});
   const paying = await askedAndDenied({ summary: 'Submit "Pay now" on shop.test', fields: [{ label: "Amount", value: "120.00" }] });
   assert.deepEqual(paying.fields.at(-1), { label: "Reviewer", value: FOR_THE_PERSON_REASON });
+  const everyTime = await askedAndDenied({ summary: "Script sent a POST to www.social.test", fields: scriptAsk.fields, everyTime: true, reviewerAware: true });
+  assert.equal(everyTime.needsAnswer, true);
+  assert.equal(everyTime.review, null);
   noteTurn(ids.agent, { untrusted: true });
   await askedAndDenied({ ...reviewedScriptAsk });
   assert.equal(reviews.length, 0);
@@ -435,6 +438,29 @@ test("the same request in the same conversation goes to the model once a day", {
   await ownerSaid("Also like the posts from Bruno");
   await call("request_approval", { ...reviewedScriptAsk });
   assert.equal(reviews.length, 2);
+});
+
+test("an ask the computer marks as every time needs a person: going ahead after 30 minutes never settles it", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
+  await db.insert(schema.runs).values({ id: "run_am_every", agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId: "run_am_every" });
+  try {
+    const pending = call("request_approval", { summary: 'Click "Send" on mail.test', fields: [{ label: "Step", value: "Send the report" }, { label: "Page", value: "https://mail.test/inbox" }], runId: "run_am_every", everyTime: true });
+    const asked = await pendingApproval();
+    assert.equal(asked.needsAnswer, true);
+    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
+    await createHub().approvals.settleUnanswered();
+    const [still] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
+    assert.equal(still.status, "pending");
+    await createHub().answerApproval(asked.id, false, undefined, ids.owner);
+    assert.match(await pending, /^denied/);
+  } finally {
+    noteTurn(ids.agent, {});
+  }
 });
 
 test("only a person answers a request from someone else's turn, a forced ask or a stale run, and going ahead never settles one", { skip }, async () => {

@@ -571,3 +571,28 @@ test("an action asked under the admin ceiling waits for a person: going ahead af
     noteTurn(ids.agent, {});
   }
 });
+
+test("a call in a webhook run asks a person even when a newer scheduled run is open and the owner never wants to be asked", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const db = getDb();
+  await db.insert(schema.runs).values([
+    { id: "run_tp_webhook", agentId: ids.agent, trigger: "webhook", status: "running", startedAt: new Date(Date.now() - 10 * 60 * 1000) },
+    { id: "run_tp_newer", agentId: ids.agent, trigger: "schedule", status: "running", startedAt: new Date() },
+  ]);
+  noteTurn(ids.agent, { runId: "run_tp_webhook" });
+  await setApprovalMode("off");
+  try {
+    const pending = call("mail__create_draft", { to: "c@example.com", body: "inside the webhook run" });
+    const approval = await pendingApproval();
+    assert.equal(approval.runId, "run_tp_webhook");
+    assert.equal(approval.needsAnswer, true);
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(calls.length, 0);
+  } finally {
+    await setApprovalMode("on-miss");
+    noteTurn(ids.agent, {});
+  }
+});

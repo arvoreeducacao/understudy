@@ -1,4 +1,4 @@
-import { asksEveryTime, CONFIRMS_ALWAYS } from "@understudy/protocol";
+import { asksEveryTime, confirmsAlways } from "@understudy/protocol";
 
 type Env = Record<string, string | undefined>;
 type Fetch = typeof fetch;
@@ -95,9 +95,9 @@ function plain(text: string) {
 export function needsThePerson(input: Pick<ReviewInput, "action">) {
   const { summary, fields } = input.action;
   const everything = plain([summary, ...fields.flatMap((field) => [field.label, field.value])].join("\n"));
-  const named = plain([summary, ...fields.map((field) => field.label), ...fields.filter((field) => ["request", "page", "action"].includes(labelOf(field))).map((field) => field.value)].join("\n"));
-  if (FOR_THE_PERSON.test(everything) || CONFIRMS_ALWAYS.test(named)) return true;
-  return fields.some((field) => labelOf(field) === "request" && requestUrls(field.value).some(asksEveryTime));
+  const named = plain([summary.replace(/\b(POST|PUT|PATCH)\b/g, " "), ...fields.map((field) => field.label), ...fields.filter((field) => labelOf(field) === "action").map((field) => field.value)].join("\n"));
+  if (FOR_THE_PERSON.test(everything) || confirmsAlways(named)) return true;
+  return fields.some((field) => labelOf(field) === "request" && requestUrls(field.value).some((url) => asksEveryTime(url)));
 }
 
 export function tooLongToReview(input: Pick<ReviewInput, "action">) {

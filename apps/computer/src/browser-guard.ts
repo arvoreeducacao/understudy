@@ -191,7 +191,8 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   if (cover) return { kind: "pass", coveredBy: cover };
   const mode = guardMode(state, policy);
   if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
-  const site = listCoversActions(mode) && !confirmsAlways(`${reason} ${info.name}`) ? siteOf(info.url) : null;
+  const everyTime = confirmsAlways(`${reason} ${info.name}`);
+  const site = listCoversActions(mode) && !everyTime ? siteOf(info.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   let host = info.url;
@@ -209,6 +210,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
       ...info.fields.filter((field) => field.label),
     ].slice(0, 14),
     ...(site ? { site } : {}),
+    ...(everyTime ? { everyTime: true as const } : {}),
   };
 }
 
@@ -399,7 +401,7 @@ export function scriptRequestVerdict(
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
-  const everyTime = asksEveryTime(request.url);
+  const everyTime = asksEveryTime(request.url, request.body);
   const site = listCoversActions(mode) && !everyTime ? siteOf(request.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
@@ -552,12 +554,12 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string }, state: TurnState): Promise<OwnerAnswer> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
     const clean = withoutSecrets(verdict, secrets());
     await notifyMain({ event: "waiting", summary: clean.summary });
     try {
-      const answer = await askOwnerFor(session, asked, { summary: clean.summary, fields: clean.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
+      const answer = await askOwnerFor(session, asked, { summary: clean.summary, fields: clean.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site, ...(verdict.everyTime ? { everyTime: true } : {}) });
       if (answer.approved && !answer.answeredBy) lastApprovedAt = Date.now();
       return answer;
     } finally {
