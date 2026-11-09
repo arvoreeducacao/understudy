@@ -6,6 +6,8 @@ import { parseServerToComputer, PROTOCOL_VERSION, type ComputerToServer, type Se
 import { createAgent } from "./agent.ts";
 import { brainAccountState, setBrainAccount } from "./brain-account.ts";
 import { computerSocketUrl } from "./endpoints.ts";
+import { listRunApprovals, openGatekeeper } from "./gatekeeper-client.ts";
+import { openRunsFile } from "./open-runs.ts";
 import { launchBrowser } from "./browser.ts";
 import { applyInput } from "./input.ts";
 import { desktopEnabled, startDesktop } from "./desktop.ts";
@@ -143,6 +145,8 @@ async function main() {
     settingsFile: join(stateDir, "settings.json"),
     rulesFile: rulesFile(home),
     send: outbox,
+    runApprovals: async (runId, wait, signal) => listRunApprovals(await openGatekeeper(serverUrl, token, signal), runId, wait),
+    openRunsFile: openRunsFile(home),
   });
 
   if (agent.brain() === "codex" && !codexAvailable) agent.setBrain("claude");
@@ -158,6 +162,7 @@ async function main() {
     sendCredentials();
     lastJobs = "";
     bench.send({ op: "job_list", id: "main" });
+    agent.resumeOpenRuns();
   };
 
   let watchQueue: Promise<void> = Promise.resolve();
@@ -326,6 +331,9 @@ async function main() {
         return;
       case "stop":
         agent.stop();
+        return;
+      case "run_stop":
+        agent.stopRun(message.runId, message.reason);
         return;
       default:
         log("main", `ignored message ${(message as { type: string }).type}`);

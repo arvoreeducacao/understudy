@@ -168,6 +168,7 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("credential_set"), name: text, username: text, secret: text, site: optionalText, kind: z.literal("api_key").optional(), sendAs: SendAsSchema.optional(), field: optionalText, tokenPath: optionalText }),
   z.object({ type: z.literal("credential_delete"), name: text }),
   z.object({ type: z.literal("stop") }),
+  z.object({ type: z.literal("run_stop"), runId: id, reason: z.string().max(1000) }),
   z.object({ type: z.literal("ping"), at: time }),
   z.object({
     type: z.literal("profile"),

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AutoRefresh } from "@/components/AutoRefresh";
-import { agentAccess } from "@/lib/access";
+import { agentAccess, canApprove } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
 import { formatTime, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
@@ -20,7 +20,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     .innerJoin(schema.agents, eq(schema.agents.id, schema.runs.agentId))
     .leftJoin(schema.recipes, eq(schema.recipes.id, schema.runs.recipeId))
     .where(eq(schema.runs.id, id));
-  if (!row || !(await agentAccess(user.id, row.agent.id))) redirect("/");
+  const access = row ? await agentAccess(user.id, row.agent.id) : null;
+  if (!row || !access) redirect("/");
+  const answers = canApprove(access);
   const { run, agent, recipe } = row;
   const [record] = await db.select().from(schema.runRecords).where(eq(schema.runRecords.runId, id));
   const approvalIds = (record?.steps ?? []).map((s) => s.approvalId).filter((x): x is string => Boolean(x));
@@ -33,17 +35,26 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     .where(and(eq(schema.toolCalls.agentId, agent.id), eq(schema.toolCalls.runId, id)))
     .orderBy(asc(schema.toolCalls.createdAt))
     .limit(200);
+  const waitingFor =
+    run.status === "running"
+      ? await db
+          .select({ id: schema.approvals.id, summary: schema.approvals.summary, createdAt: schema.approvals.createdAt, expiresAt: schema.approvals.expiresAt })
+          .from(schema.approvals)
+          .where(and(eq(schema.approvals.agentId, agent.id), eq(schema.approvals.runId, id), eq(schema.approvals.status, "pending")))
+          .orderBy(asc(schema.approvals.createdAt))
+      : [];
   const t = messages.run;
   const tc = messages.toolAccess;
   const title = recipe?.recipe.title ?? "";
-  const statusPill = run.status === "ok" ? "g" : run.status === "failed" ? "c" : "s";
+  const waiting = waitingFor.length > 0;
+  const statusPill = run.status === "ok" ? "g" : run.status === "failed" ? "c" : waiting ? "a" : "s";
 
   return (
     <div className="page">
       {run.status === "running" && <AutoRefresh seconds={5} />}
       <div className="top">
         <div className="flex gap-4 items-center">
-          <AgentFigure state={run.status === "running" ? "working" : run.status === "ok" ? "done" : "stuck"} size={54} look={agent.look} />
+          <AgentFigure state={run.status === "running" ? (waiting ? "waiting_you" : "working") : run.status === "ok" ? "done" : "stuck"} size={54} look={agent.look} />
           <div>
             <h1>{t.title(title)}</h1>
             <p>
@@ -54,12 +65,33 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </div>
         <span className={`pill ${statusPill}`}>
           <span className="dot" />
-          {messages.recipe.runStatus[run.status]}
+          {waiting ? (answers ? messages.runList.waiting : t.waitingOwner) : messages.recipe.runStatus[run.status]}
         </span>
       </div>
 
       <div className="grid grid-cols-[1fr_320px] gap-5 py-5 max-[1000px]:grid-cols-1">
         <div className="flex flex-col gap-4 min-w-0">
+          {waiting && (
+            <div className="card p-[18px] flex flex-col gap-2" role="status">
+              <h3 className="m-0 text-[14px] font-semibold flex items-center gap-2">
+                <ShieldAlert size={16} aria-hidden />
+                {answers ? t.waitingTitle : t.waitingOwnerTitle}
+              </h3>
+              <ul className="m-0 pl-5 flex flex-col gap-1 text-[13px]">
+                {waitingFor.map((ask) => (
+                  <li key={ask.id}>{ask.summary}</li>
+                ))}
+              </ul>
+              <p className="m-0 text-[12.5px] text-ash" suppressHydrationWarning>
+                {(answers ? t.waitingSince : t.waitingOwnerSince)(formatWhen(waitingFor[0].createdAt), formatWhen(waitingFor[0].expiresAt))}
+              </p>
+              {answers && (
+                <Link href="/waiting" className="btn pri self-start">
+                  {t.waitingAnswer}
+                </Link>
+              )}
+            </div>
+          )}
           {record && record.unusual.length > 0 && (
             <div className="card p-[18px] border-coral bg-ember/40">
               <h3 className="m-0 mb-2 text-[14px] font-semibold text-coral flex items-center gap-2">

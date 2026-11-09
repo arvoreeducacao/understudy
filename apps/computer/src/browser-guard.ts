@@ -3,7 +3,8 @@ import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { AMOUNT_LABEL, argsSubject, describeRule, findViolation, looksIrreversible, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { CDP_ENDPOINT } from "./browser.ts";
-import { openGatekeeper, requestOwnerApproval, type McpSession } from "./gatekeeper-client.ts";
+import { askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
+import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
 import { openRequestGate, type GatedRequest, type RequestGate } from "./request-gate.ts";
 import { readTurnState, turnStateFile, type TurnState } from "./turn-state.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
@@ -287,9 +288,9 @@ export function droppedNotes(drops: { request: string; pageUrl: string; usageLog
   ];
 }
 
-export type OwnerAnswer = { approved: boolean; text: string; requestId?: string };
+export type OwnerAnswer = { approved: boolean; pending?: boolean; text: string; requestId?: string };
 
-export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => Promise<OwnerAnswer>, notes: string[]) {
+export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => Promise<OwnerAnswer>, notes: string[], again: string | null = "run the same script again") {
   const approvedAddresses = new Set<string>();
   const repeats: string[] = [];
   let denied = false;
@@ -304,7 +305,7 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
       const answer = await ask(verdict).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
       if (!answer.approved) {
         denied = true;
-        notes.push(`blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
+        notes.push(answer.pending ? pendingText(verdict.summary, again, answer) : `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
         return false;
       }
       approvedAddresses.add(address);
@@ -439,6 +440,12 @@ async function serve() {
   const pendingResults = new Map<string | number, (message: Rpc) => Rpc | Promise<Rpc>>();
   let next = 0;
   let gatekeeper: Promise<McpSession> | null = null;
+  const asked = openAskStore(askStoreFile(home));
+  const session = () =>
+    (gatekeeper ??= openGatekeeper(serverUrl, token).catch((error: Error) => {
+      gatekeeper = null;
+      throw error;
+    }));
   let stepApproval: StepApproval | null = null;
   let lastApprovedAt = 0;
   let dialog: PageDialog | null = null;
@@ -460,13 +467,11 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[] }, state: TurnState): Promise<{ approved: boolean; text: string; requestId?: string }> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[] }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
-    gatekeeper ??= openGatekeeper(serverUrl, token);
-    const session = await gatekeeper;
     await notifyMain({ event: "waiting", summary: verdict.summary });
     try {
-      const answer = await requestOwnerApproval(session, { summary: verdict.summary, fields: verdict.fields, runId: state.runId, stepId: verdict.stepId });
+      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId });
       if (answer.approved) lastApprovedAt = Date.now();
       return answer;
     } finally {
@@ -481,7 +486,8 @@ async function serve() {
     const plan = askFirstPlan(state, args);
     if (plan.kind === "answer") return toBrain(textResult(message.id, plan.text, plan.isError));
     stepApproval = null;
-    const answer = await askOwner(plan, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
+    const answer = await askOwner(plan, state).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
+    if (answer.pending) return toBrain(textResult(message.id, pendingText(plan.summary, `call ${ASK_FIRST_TOOL} again with the same stepId, summary and fields`, answer), false));
     if (!answer.approved) return toBrain(textResult(message.id, `denied: the owner did not approve "${plan.summary}" (${answer.text}). Do not do it and do not try another way; skip this item and report it.`, false));
     stepApproval = { runId: state.runId!, stepId: plan.stepId, summary: plan.summary, until: Date.now() + STEP_APPROVAL_MS };
     return toBrain(textResult(message.id, `approved: do exactly this now: "${plan.summary}". The browser does not ask again while you do it. For the next item, call ${ASK_FIRST_TOOL} again.${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""}`, false));
@@ -494,7 +500,7 @@ async function serve() {
     const pending = new Set<Promise<boolean>>();
     let blocked = false;
     let seen = 0;
-    const asks = scriptAsks((verdict) => askOwner(verdict, state), notes);
+    const asks = scriptAsks((verdict) => askOwner(verdict, state), notes, state.mode === "run" ? "run the same script again" : null);
     const stepHint = String(args.element ?? "");
     const judge = async (request: GatedRequest): Promise<boolean> => {
       const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
@@ -602,7 +608,8 @@ async function serve() {
     const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, stepApproval);
     if (verdict.kind === "pass") return passWith(verdict.coveredBy ? coveredSuffix(verdict.coveredBy) : "");
     if (verdict.kind === "block") return toBrain(textResult(message.id, verdict.reason));
-    const answer = await askOwner(verdict, state).catch((error: Error) => ({ approved: false, text: error.message, requestId: undefined }));
+    const answer = await askOwner(verdict, state).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
+    if (answer.pending) return toBrain(textResult(message.id, pendingText(verdict.summary, state.mode === "run" ? "do the same action again" : null, answer)));
     if (!answer.approved) {
       return toBrain(textResult(message.id, `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}). Do not try another way; stop and report.`));
     }
