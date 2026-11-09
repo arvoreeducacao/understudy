@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
-import { allowedHost, AMOUNT_LABEL, argsSubject, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
+import { allowedHost, AMOUNT_LABEL, argsSubject, asksEveryTime, confirmsAlways, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn } from "./approval-policy-store.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
-import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
+import { approvedBy, openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
 import { openRequestGate, type GatedRequest, type RequestGate } from "./request-gate.ts";
 import { readTurnState, turnStateFile, type TurnState } from "./turn-state.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
@@ -45,21 +45,7 @@ export function guardMode(state: TurnState, policy: ComputerApprovalPolicy): Eff
   return mode;
 }
 
-const ASKS_EVERY_TIME = /(log_?in|sign_?in|auth|token|otp|2fa|mfa|verif|password|passwd|senha|checkout|payment|\/pay|purchase|order|delete|remove|transfer|invite|share|publish|comment|send)/;
-
-const CONFIRMS_ALWAYS = /\b(buy|purchase|checkout|check out|place order|pay|payment|delete|remove|permissions?|roles?|grant access|make admin|sign up|create (an |a new )?account|register|comprar|compra|pagar|pagamento|finalizar|excluir|apagar|remover|permiss\w*|criar conta|cadastr\w*)\b/i;
-
-export function confirmsAlways(text: string): boolean {
-  return CONFIRMS_ALWAYS.test(text);
-}
-
-export function asksEveryTime(url: string): boolean {
-  try {
-    return ASKS_EVERY_TIME.test(new URL(url).pathname.toLowerCase());
-  } catch {
-    return true;
-  }
-}
+export { asksEveryTime, confirmsAlways };
 
 function siteOf(url: string): string | null {
   try {
@@ -364,11 +350,11 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
         return false;
       }
       approvedAddresses.add(address);
-      if (bySite) {
+      if (bySite && !answer.answeredBy) {
         local.add(bySite);
         sites.add(bySite);
       }
-      notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+      notes.push(`${verdict.summary} (approved by ${approvedBy(answer)}${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
       return true;
     });
     queue = turn.catch(() => {});
@@ -504,6 +490,10 @@ export function redactSecrets(text: string, secrets: string[]): string {
   return out;
 }
 
+export function withoutSecrets<T extends { summary: string; fields: { label: string; value: string }[] }>(ask: T, secrets: string[]): T {
+  return { ...ask, summary: redactSecrets(ask.summary, secrets), fields: ask.fields.map((field) => ({ label: redactSecrets(field.label, secrets), value: redactSecrets(field.value, secrets) })) };
+}
+
 export function notifyGuardSocket(path: string, event: Record<string, unknown>, timeoutMs = 2000): Promise<void> {
   return new Promise((resolve) => {
     const socket = createConnection(path);
@@ -564,10 +554,11 @@ async function serve() {
 
   const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
-    await notifyMain({ event: "waiting", summary: verdict.summary });
+    const clean = withoutSecrets(verdict, secrets());
+    await notifyMain({ event: "waiting", summary: clean.summary });
     try {
-      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
-      if (answer.approved) lastApprovedAt = Date.now();
+      const answer = await askOwnerFor(session, asked, { summary: clean.summary, fields: clean.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
+      if (answer.approved && !answer.answeredBy) lastApprovedAt = Date.now();
       return answer;
     } finally {
       await notifyMain({ event: "resumed" });
@@ -717,7 +708,7 @@ async function serve() {
     if (!answer.approved) {
       return toBrain(textResult(message.id, `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}). Do not try another way; stop and report.`));
     }
-    passWith(` (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+    passWith(` (approved by ${approvedBy(answer)}${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
   };
 
   createInterface({ input: child.stdout }).on("line", (line) => {

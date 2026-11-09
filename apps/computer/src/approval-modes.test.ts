@@ -7,7 +7,8 @@ import type { ComputerApprovalPolicy } from "@understudy/protocol";
 import { createAgent } from "./agent.ts";
 import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn, writeApprovalPolicy } from "./approval-policy-store.ts";
 import type { TurnRequest } from "./brain.ts";
-import { decide, guardMode, memorySites, passedWithoutNote, scriptAsks, scriptRequestVerdict, type ElementInfo } from "./browser-guard.ts";
+import { decide, guardMode, memorySites, passedWithoutNote, scriptAsks, scriptRequestVerdict, withoutSecrets, type ElementInfo } from "./browser-guard.ts";
+import { readOwnerAnswer } from "./gatekeeper-client.ts";
 import { createMemory } from "./memory.ts";
 import { readTurnState, type TurnState } from "./turn-state.ts";
 
@@ -105,6 +106,48 @@ test("one approval covers a site across addresses and scripts of the same conver
   assert.deepEqual(sitesApprovedIn(file, undefined), []);
   const denied = scriptAsks(async () => ({ approved: false, text: "denied" }), [], null, memorySites());
   assert.equal(await denied.request(verdict("https://other.test/x"), "POST other.test/x"), false);
+});
+
+test("a yes from the reviewer or the unanswered setting covers that one address, never the site for the conversation", async () => {
+  const home = mkdtempSync(join(tmpdir(), "understudy-reviewed-"));
+  const file = approvedSitesFile(home);
+  const chat: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
+  const policy = (): ComputerApprovalPolicy => ({ mode: "auto", hosts: [] });
+  const post = (url: string) => ({ method: "POST", url, pageUrl: "https://www.social.test/feed" });
+  const verdict = (url: string) => scriptRequestVerdict(chat, [], post(url), "", null, policy(), sitesApprovedIn(file, chat.conversation)) as Extract<ReturnType<typeof scriptRequestVerdict>, { kind: "ask" }>;
+  const sites = { has: (site: string) => sitesApprovedIn(file, chat.conversation!).includes(site), add: (site: string) => rememberApprovedSite(file, chat.conversation!, site) };
+  assert.deepEqual(readOwnerAnswer("approved: fine [requestId: apr_1] [answeredBy: reviewer]"), { approved: true, pending: false, text: "approved: fine [requestId: apr_1] [answeredBy: reviewer]", requestId: "apr_1", answeredBy: "reviewer" });
+  assert.equal(readOwnerAnswer("approved: [answeredBy: reviewer] is what I typed [requestId: apr_2]").answeredBy, undefined);
+  for (const by of ["reviewer", "fallback"]) {
+    const asked: string[] = [];
+    const notes: string[] = [];
+    const asks = scriptAsks(async (ask) => (asked.push(ask.summary), readOwnerAnswer(`approved [requestId: apr_${by}] [answeredBy: ${by}]`)), notes, null, sites, "conversation");
+    assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
+    assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
+    assert.equal(await asks.request(verdict("https://www.social.test/a2"), "POST www.social.test/a2"), true);
+    assert.equal(asked.length, 2);
+    assert.deepEqual(sitesApprovedIn(file, chat.conversation), []);
+    assert.match(notes[0], by === "reviewer" ? /approved by the reviewer your owner chose \[requestId: apr_reviewer\]/ : /approved by your owner's setting for unanswered requests/);
+  }
+});
+
+test("a saved secret never leaves the computer in an approval, in any field or in an address", () => {
+  const secret = "s3cr3t-Token+9";
+  const ask = withoutSecrets(
+    {
+      summary: `Submit "Save" on site.test with ${secret}`,
+      fields: [
+        { label: "API key", value: secret },
+        { label: "Request", value: `POST https://api.test/save?key=${encodeURIComponent(secret)}` },
+        { label: `Note ${secret}`, value: JSON.stringify({ key: secret }) },
+      ],
+    },
+    [secret],
+  );
+  assert.ok(!JSON.stringify(ask).includes(secret));
+  assert.ok(!JSON.stringify(ask).includes(encodeURIComponent(secret)));
+  assert.equal(ask.fields[0].value, "••••••");
+  assert.equal(ask.fields[1].value, "POST https://api.test/save?key=••••••");
 });
 
 test("the policy and the approved sites live in private files, and a broken file means today's behavior", () => {

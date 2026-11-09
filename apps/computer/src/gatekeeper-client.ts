@@ -59,11 +59,18 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
 
 export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string; site?: string };
 
-export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string };
+export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string; answeredBy?: "reviewer" | "fallback" };
 
 export function readOwnerAnswer(text: string, knownRequestId?: string): OwnerAnswer {
   const requestId = text.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1] ?? knownRequestId;
-  return { approved: /^\s*approved/i.test(text), pending: /status\W{1,8}pending/i.test(text), text, ...(requestId ? { requestId } : {}) };
+  const answeredBy = text.match(/\[answeredBy: (reviewer|fallback)\]\s*$/)?.[1] as OwnerAnswer["answeredBy"];
+  return { approved: /^\s*approved/i.test(text), pending: /status\W{1,8}pending/i.test(text), text, ...(requestId ? { requestId } : {}), ...(answeredBy ? { answeredBy } : {}) };
+}
+
+export function approvedBy(answer: Pick<OwnerAnswer, "answeredBy">): string {
+  if (answer.answeredBy === "reviewer") return "the reviewer your owner chose";
+  if (answer.answeredBy === "fallback") return "your owner's setting for unanswered requests";
+  return "the owner";
 }
 
 export async function askOwnerOnce(session: McpSession, request: ApprovalRequest, knownRequestId?: string): Promise<OwnerAnswer> {
@@ -71,7 +78,7 @@ export async function askOwnerOnce(session: McpSession, request: ApprovalRequest
     const text = await session.call("wait_for_approval", { requestId: knownRequestId });
     if (!/unknown request/i.test(text)) return readOwnerAnswer(text, knownRequestId);
   }
-  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}), ...(request.site ? { site: request.site } : {}) });
+  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}), ...(request.site ? { site: request.site } : {}), reviewerAware: true });
   return readOwnerAnswer(text);
 }
 

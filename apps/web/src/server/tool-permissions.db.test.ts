@@ -424,6 +424,66 @@ test("in automatic mode a connector call the reviewer allows runs at once, and t
   }
 });
 
+test("an action asked under the admin ceiling waits for a person: the reviewer never answers it, and a yes from the reviewer or the unanswered setting is never used for it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { actionHash } = await import("./gatekeeper");
+  const db = getDb();
+  let reviewed = 0;
+  const reviewer = createServer((_req, res) => {
+    reviewed++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: '{"decision":"allow","reason":"the owner asked for this draft"}' } }] }));
+  });
+  process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewer)}/v1`;
+  process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+  const runId = "run_tp_ceiling";
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId });
+  await setApprovalMode("auto");
+  await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  const args = { to: "client@example.com", body: "Weekly report" };
+  const pendingRows = async (count: number) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, ids.agent), eq(schema.approvals.status, "pending")));
+      if (rows.length >= count) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`fewer than ${count} pending approvals`);
+  };
+  try {
+    const asking = call("request_approval", { summary: "Create the weekly report draft", runId, action: { tool: "mail__create_draft", args } });
+    const [asked] = await pendingRows(1);
+    assert.equal(asked.needsAnswer, true);
+    assert.equal(asked.review, null);
+    assert.equal(reviewed, 0);
+    for (const via of ["reviewer", "fallback"] as const)
+      await db.insert(schema.approvals).values({ id: `apr_tp_${via}`, agentId: ids.agent, runId, summary: "Create the weekly report draft", fields: [], source: "mcp", payloadHash: actionHash("mail__create_draft", args), status: "approved", answeredVia: via, answeredAt: new Date() });
+    const direct = call("mail__create_draft", args);
+    const both = await pendingRows(2);
+    const straight = both.find((row) => row.id !== asked.id)!;
+    assert.equal(straight.needsAnswer, true);
+    assert.equal(calls.length, 0);
+    await createHub().answerApproval(straight.id, false, undefined, ids.owner);
+    assert.match(await direct, /^not called/);
+    assert.equal(calls.length, 0);
+    const machine = await db.select().from(schema.approvals).where(inArray(schema.approvals.id, ["apr_tp_reviewer", "apr_tp_fallback"]));
+    assert.ok(machine.every((row) => row.usedAt === null));
+    await createHub().answerApproval(asked.id, true, undefined, ids.owner);
+    assert.match(await asking, /^approved \[requestId: [^\]]+\]$/);
+    assert.equal(await call("mail__create_draft", args), "create_draft done");
+    assert.equal(calls.length, 1);
+    assert.equal(reviewed, 0);
+  } finally {
+    await setApprovalMode("on-miss");
+    noteTurn(ids.agent, {});
+    delete process.env.UNDERSTUDY_REVIEWER_API_KEY;
+    delete process.env.UNDERSTUDY_REVIEWER_URL;
+    reviewer.close();
+  }
+});
+
 test("going ahead after 30 minutes never runs a cut-off call on its own; the same call repeated in the run uses that yes once", { skip }, async () => {
   const { getDb, schema } = await import("@/lib/db");
   const { createHub } = await import("./hub");

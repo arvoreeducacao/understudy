@@ -1,8 +1,8 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { brainText } from "@/lib/brain-text";
 import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
 import { OWNER_STARTED_TRIGGERS, UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
-import { ESCALATIONS_BEFORE_STEPPING_ASIDE, REVIEWER_FIELD } from "../reviewer";
+import { ESCALATIONS_BEFORE_STEPPING_ASIDE } from "../reviewer";
 import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
 import { storableJson, storableText } from "@/lib/db/storable";
@@ -19,12 +19,14 @@ import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
 import { grantAllowEntry } from "../approval-modes";
 import { allowEntryOf, alwaysAllowOf } from "@/lib/always-allow";
-import type { ApprovalGrant, ApprovalVia, RunTrigger } from "@/lib/db/schema";
+import { MACHINE_ANSWERS, type ApprovalGrant, type ApprovalReview, type ApprovalVia, type RunTrigger } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
 
 const RUN_APPROVALS_LIMIT = 100;
 const UNDATED_APPROVAL_MS = 24 * 60 * 60 * 1000;
+
+const answeredByPerson = or(isNull(schema.approvals.answeredVia), notInArray(schema.approvals.answeredVia, [...MACHINE_ANSWERS]));
 
 export function stillValid(now = new Date()) {
   return or(gt(schema.approvals.expiresAt, now), and(isNull(schema.approvals.expiresAt), gt(schema.approvals.createdAt, new Date(now.getTime() - UNDATED_APPROVAL_MS))));
@@ -46,6 +48,7 @@ export class Approvals {
     payloadHash?: string,
     grant?: ApprovalGrant,
     needsAnswer = false,
+    review?: ApprovalReview,
   ) {
     const db = getDb();
     const id = newId("apr");
@@ -66,6 +69,7 @@ export class Approvals {
       payloadHash: payloadHash ?? null,
       grant: grant ?? null,
       needsAnswer,
+      review: review ?? null,
       askedBy,
       expiresAt,
     };
@@ -96,7 +100,7 @@ export class Approvals {
     return id;
   }
 
-  async createReviewed(agentId: string, request: Partial<ApprovalRequest> & { summary: string }, timeoutSeconds: number, payloadHash: string | undefined, grant: ApprovalGrant | undefined, note: string) {
+  async createReviewed(agentId: string, request: Partial<ApprovalRequest> & { summary: string }, timeoutSeconds: number, payloadHash: string | undefined, grant: ApprovalGrant | undefined, note: string, reason: string) {
     const id = newId("apr");
     const now = new Date();
     const askedBy = request.runId ? null : this.hub.turnAudience(agentId);
@@ -118,6 +122,7 @@ export class Approvals {
         note: storableText(note),
         answeredAt: now,
         answeredVia: "reviewer",
+        review: { decision: "allow", reason },
       });
     log("approval_reviewed", { agentId, approvalId: id });
     return id;
@@ -125,7 +130,7 @@ export class Approvals {
 
   async recentReviews(agentId: string, conversation: { runId: string | null; askedBy: string | null; since: Date }) {
     const rows = await getDb()
-      .select({ via: schema.approvals.answeredVia })
+      .select({ review: schema.approvals.review })
       .from(schema.approvals)
       .where(
         and(
@@ -133,12 +138,12 @@ export class Approvals {
           conversation.runId
             ? eq(schema.approvals.runId, conversation.runId)
             : and(isNull(schema.approvals.runId), conversation.askedBy ? eq(schema.approvals.askedBy, conversation.askedBy) : isNull(schema.approvals.askedBy), gte(schema.approvals.createdAt, conversation.since)),
-          or(eq(schema.approvals.answeredVia, "reviewer"), sql`${schema.approvals.fields} @> ${JSON.stringify([{ label: REVIEWER_FIELD }])}::jsonb`),
+          isNotNull(schema.approvals.review),
         ),
       )
       .orderBy(desc(schema.approvals.createdAt))
       .limit(ESCALATIONS_BEFORE_STEPPING_ASIDE);
-    return rows.map((row) => (row.via === "reviewer" ? ("allow" as const) : ("escalate" as const)));
+    return rows.map((row) => (row.review?.decision === "allow" ? ("allow" as const) : ("escalate" as const)));
   }
 
   async openAsk(agentId: string, request: { runId: string; stepId?: string; summary: string; fields: ApprovalRequest["fields"]; payloadHash?: string }) {
@@ -163,11 +168,12 @@ export class Approvals {
     return row?.id ?? null;
   }
 
-  async reusable(agentId: string, runId: string, payloadHash: string) {
+  async reusable(agentId: string, runId: string, payloadHash: string, byPerson = false) {
+    const personOnly = or(eq(schema.approvals.status, "denied"), and(eq(schema.approvals.status, "pending"), eq(schema.approvals.needsAnswer, true)), and(eq(schema.approvals.status, "approved"), answeredByPerson));
     const [row] = await getDb()
       .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt, createdAt: schema.approvals.createdAt })
       .from(schema.approvals)
-      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"])))
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"]), byPerson ? personOnly : undefined))
       .orderBy(desc(schema.approvals.createdAt))
       .limit(1);
     if (!row) return null;
@@ -244,7 +250,7 @@ export class Approvals {
     return row?.status === "approved" ? row.hash : null;
   }
 
-  async useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
+  async useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
     const db = getDb();
     const fresh = and(
       eq(schema.approvals.agentId, agentId),
@@ -252,6 +258,7 @@ export class Approvals {
       eq(schema.approvals.status, "approved"),
       isNull(schema.approvals.usedAt),
       gt(schema.approvals.answeredAt, new Date(Date.now() - maxAgeMs)),
+      byPerson ? answeredByPerson : undefined,
     );
     const candidate = db
       .select({ id: schema.approvals.id })
@@ -271,7 +278,7 @@ export class Approvals {
 
   async outcome(id: string, agentId: string) {
     const [row] = await getDb()
-      .select({ status: schema.approvals.status, note: schema.approvals.note, runId: schema.approvals.runId })
+      .select({ status: schema.approvals.status, note: schema.approvals.note, runId: schema.approvals.runId, via: schema.approvals.answeredVia })
       .from(schema.approvals)
       .where(and(eq(schema.approvals.id, id), eq(schema.approvals.agentId, agentId)));
     return row ?? null;
@@ -427,7 +434,7 @@ export class Approvals {
     const db = getDb();
     const id = row.id;
     const status = approved ? "approved" : "denied";
-    this.settle(id, { approved, note, status });
+    this.settle(id, { approved, note, status, ...(row.answeredVia ? { via: row.answeredVia } : {}) });
     await this.leaveChannelLists(row.agentId, id);
     if (row.source === "computer") {
       this.hub.sendToComputer(row.agentId, { type: "approval_answer", requestId: row.requestId ?? id, approved, note });

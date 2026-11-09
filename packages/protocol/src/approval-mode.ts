@@ -142,3 +142,19 @@ export function effectiveApprovalMode(mode: ApprovalMode, context: { untrusted?:
 export function listCoversActions(mode: EffectiveApprovalMode): boolean {
   return mode === "on-miss" || mode === "auto";
 }
+
+const ASKS_EVERY_TIME = /(log_?in|sign_?in|auth|token|otp|2fa|mfa|verif|password|passwd|senha|checkout|payment|\/pay|purchase|order|delete|remove|transfer|invite|share|publish|comment|send)/;
+
+export const CONFIRMS_ALWAYS = /\b(buy|purchase|checkout|check out|place order|pay|payment|delete|remove|permissions?|roles?|grant access|make admin|sign up|create (an |a new )?account|register|comprar|compra|pagar|pagamento|finalizar|excluir|apagar|remover|permiss\w*|criar conta|cadastr\w*)\b/i;
+
+export function confirmsAlways(text: string): boolean {
+  return CONFIRMS_ALWAYS.test(text);
+}
+
+export function asksEveryTime(url: string): boolean {
+  try {
+    return ASKS_EVERY_TIME.test(new URL(url).pathname.toLowerCase());
+  } catch {
+    return true;
+  }
+}
