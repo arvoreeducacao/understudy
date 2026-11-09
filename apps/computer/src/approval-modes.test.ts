@@ -173,6 +173,7 @@ test("the script that sent a request goes with the ask, cleaned of saved secrets
   const ask = { kind: "ask" as const, summary: "Script sent a POST to social.test", fields: [{ label: "Page", value: "https://social.test/" }] };
   assert.deepEqual(withScript(ask, "() => 1").fields.at(-1), { label: "Script", value: "() => 1" });
   assert.equal(withScript(ask, " "), ask);
+});
 
 test("a sign-in, code, password, payment, delete or send request asks every time, even on a site approved earlier in the conversation", async () => {
   const { asksEveryTime } = await import("./browser-guard.ts");
