@@ -461,8 +461,8 @@ export class Hub {
     return this.approvals.openAsk(agentId, request);
   }
 
-  reusableApproval(agentId: string, runId: string, payloadHash: string) {
-    return this.approvals.reusable(agentId, runId, payloadHash);
+  reusableApproval(agentId: string, runId: string, payloadHash: string, byPerson = false) {
+    return this.approvals.reusable(agentId, runId, payloadHash, byPerson);
   }
 
   consumeApproval(id: string, agentId: string) {
@@ -481,8 +481,8 @@ export class Hub {
     return this.approvals.payloadHash(id, agentId);
   }
 
-  useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
-    return this.approvals.useActionApproval(agentId, hash, maxAgeMs);
+  useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
+    return this.approvals.useActionApproval(agentId, hash, maxAgeMs, byPerson);
   }
 
   approvalOutcome(id: string, agentId: string) {

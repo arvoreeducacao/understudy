@@ -355,6 +355,8 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "ca
 
 export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback";
 
+export const MACHINE_ANSWERS = ["fallback"] as const satisfies readonly ApprovalVia[];
+
 export type SlackMessageRef = { channel: string; ts: string };
 
 export const approvals = pgTable(

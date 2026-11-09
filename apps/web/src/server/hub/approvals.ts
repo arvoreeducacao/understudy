@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { brainText } from "@/lib/brain-text";
 import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
 import { OWNER_STARTED_TRIGGERS, UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
@@ -18,12 +18,14 @@ import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
 import { grantAllowEntry } from "../approval-modes";
 import { allowEntryOf, alwaysAllowOf } from "@/lib/always-allow";
-import type { ApprovalGrant, ApprovalVia, RunTrigger } from "@/lib/db/schema";
+import { MACHINE_ANSWERS, type ApprovalGrant, type ApprovalVia, type RunTrigger } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
 
 const RUN_APPROVALS_LIMIT = 100;
 const UNDATED_APPROVAL_MS = 24 * 60 * 60 * 1000;
+
+const answeredByPerson = or(isNull(schema.approvals.answeredVia), notInArray(schema.approvals.answeredVia, [...MACHINE_ANSWERS]));
 
 export function stillValid(now = new Date()) {
   return or(gt(schema.approvals.expiresAt, now), and(isNull(schema.approvals.expiresAt), gt(schema.approvals.createdAt, new Date(now.getTime() - UNDATED_APPROVAL_MS))));
@@ -117,11 +119,12 @@ export class Approvals {
     return row?.id ?? null;
   }
 
-  async reusable(agentId: string, runId: string, payloadHash: string) {
+  async reusable(agentId: string, runId: string, payloadHash: string, byPerson = false) {
+    const personOnly = or(eq(schema.approvals.status, "denied"), and(eq(schema.approvals.status, "pending"), eq(schema.approvals.needsAnswer, true)), and(eq(schema.approvals.status, "approved"), answeredByPerson));
     const [row] = await getDb()
       .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt, createdAt: schema.approvals.createdAt })
       .from(schema.approvals)
-      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"])))
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"]), byPerson ? personOnly : undefined))
       .orderBy(desc(schema.approvals.createdAt))
       .limit(1);
     if (!row) return null;
@@ -200,7 +203,7 @@ export class Approvals {
     return row?.status === "approved" ? row.hash : null;
   }
 
-  async useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
+  async useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
     const db = getDb();
     const fresh = and(
       eq(schema.approvals.agentId, agentId),
@@ -208,6 +211,7 @@ export class Approvals {
       eq(schema.approvals.status, "approved"),
       isNull(schema.approvals.usedAt),
       gt(schema.approvals.answeredAt, new Date(Date.now() - maxAgeMs)),
+      byPerson ? answeredByPerson : undefined,
     );
     const candidate = db
       .select({ id: schema.approvals.id })

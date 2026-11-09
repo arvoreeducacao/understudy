@@ -430,3 +430,51 @@ test("going ahead after 30 minutes never runs a cut-off call on its own; the sam
     noteTurn(ids.agent, {});
   }
 });
+
+test("an action asked under the admin ceiling waits for a person: going ahead after 30 minutes never settles it, and a yes from that setting is never used for it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { actionHash } = await import("./gatekeeper");
+  const db = getDb();
+  const runId = "run_tp_ceiling_fallback";
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId });
+  await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "allow" } }).where(eq(schema.agents.id, ids.agent));
+  await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  const args = { to: "client@example.com", body: "Weekly report" };
+  const pendingRows = async (count: number) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, ids.agent), eq(schema.approvals.status, "pending")));
+      if (rows.length >= count) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`fewer than ${count} pending approvals`);
+  };
+  try {
+    const asking = call("request_approval", { summary: "Create the weekly report draft", runId, action: { tool: "mail__create_draft", args } });
+    const [asked] = await pendingRows(1);
+    assert.equal(asked.needsAnswer, true);
+    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
+    await createHub().approvals.settleUnanswered();
+    const [still] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
+    assert.equal(still.status, "pending");
+    await db.insert(schema.approvals).values({ id: "apr_tp_fallback_yes", agentId: ids.agent, runId, summary: "Create the weekly report draft", fields: [], source: "mcp", payloadHash: actionHash("mail__create_draft", args), status: "approved", answeredVia: "fallback", answeredAt: new Date() });
+    const direct = call("mail__create_draft", args);
+    const both = await pendingRows(2);
+    const straight = both.find((row) => row.id !== asked.id)!;
+    assert.equal(straight.needsAnswer, true);
+    await createHub().answerApproval(straight.id, false, undefined, ids.owner);
+    assert.match(await direct, /^not called/);
+    assert.equal(calls.length, 0);
+    const [unused] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, "apr_tp_fallback_yes"));
+    assert.equal(unused.usedAt, null);
+    await createHub().answerApproval(asked.id, true, undefined, ids.owner);
+    assert.match(await asking, /^approved \[requestId: [^\]]+\]$/);
+    assert.equal(await call("mail__create_draft", args), "create_draft done");
+    assert.equal(calls.length, 1);
+  } finally {
+    await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "wait" } }).where(eq(schema.agents.id, ids.agent));
+    noteTurn(ids.agent, {});
+  }
+});

@@ -326,6 +326,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         const site = offered && sitesInFields(args.fields ?? []).includes(offered) ? offered : null;
         let fields = args.fields ?? [];
         let hash: string | undefined;
+        let forced = false;
         if (args.action) {
           const tool = actionToolName(args.action.tool);
           if (!(await actionAllowed(tool))) return text(`not asked: ${tool} is not one of your gatekeeper tools; ask without action`, true);
@@ -334,6 +335,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           fields = [...fields, { label: "Action", value: tool }, ...shown.fields];
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
+          forced = await actionForced(tool);
         }
         const asked = args.runId && !outsider() ? args.runId : undefined;
         const closed = await closedRunText(hub, agent.id, asked);
@@ -342,7 +344,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         const runId = asked && expected === asked && (await hub.runs.runState(agent.id, asked)) === "running" ? asked : undefined;
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted));
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined, Boolean(label) || untrusted || forced));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -449,6 +451,14 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   const splitProxied = (name: string) => {
     const [slug, ...rest] = name.split(PROXY_SEPARATOR);
     return { upstream: upstreams.find((u) => u.slug === slug), toolName: rest.join(PROXY_SEPARATOR) };
+  };
+  const actionForced = async (tool: string) => {
+    const handedOff = (await turnRun(agent.id))?.trigger === "handoff";
+    if (builtins.some((b) => b.name === tool)) return handedOff;
+    const { upstream, toolName } = splitProxied(tool);
+    const found = upstream && toolName ? await findTool(upstream, toolName) : undefined;
+    if (!upstream || !found) return true;
+    return !canAlwaysAllow(ceilings.get(upstream.id) ?? {}, toolName, found.annotations) || (handedOff && !isReadOnly(found.annotations));
   };
   const actionAllowed = async (tool: string) => {
     if (tool === "request_approval" || tool === "wait_for_approval" || tool === "run_approvals") return false;
@@ -560,12 +570,13 @@ async function guardOutward(
     if (asked) return { ok: false, text: brainText.askedNotApproved(asked.status, asked.id) };
     return skipped ? { ok: true, skipped } : { ok: true };
   }
-  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
+  const forced = Boolean(approval.forced);
+  if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS, forced))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
-  const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash) : null;
+  const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash, forced) : null;
   if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
   const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
-  const id = earlier?.id ?? (await hub.createApproval(agent.id, { summary, fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, Boolean(approval.forced) || untrusted));
+  const id = earlier?.id ?? (await hub.createApproval(agent.id, { summary, fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, forced || untrusted));
   const outcome = await waitOutcome(id, extra);
   if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
   if (outcome.kind === "pending") return { ok: false, asked: true, pending: true, text: runId ? brainText.callPending(id) : brainText.callPendingOutsideRun(id) };
