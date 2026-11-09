@@ -959,6 +959,7 @@ test("an ask-first step asks the owner for the exact item, and the approval cove
       { label: "Step", value: "Asked in chat" },
       { label: "Page", value: "" },
     ],
+    everyTime: true,
   });
   assert.equal(describeTool("mcp__browser__browser_ask_first", { summary: "Remove X" }), "Asking for approval: Remove X");
   assert.ok(isApprovalTool("mcp__browser__browser_ask_first"));

@@ -200,7 +200,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   if (cover) return { kind: "pass", coveredBy: cover };
   const mode = guardMode(state, policy);
   if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
-  const everyTime = confirmsAlways(`${reason} ${info.name}`);
+  const everyTime = confirmsAlways(`${reason} ${info.name}`) || Boolean(info.url && asksEveryTime(info.url)) || info.fields.some((field) => confirmsAlways(field.label));
   const site = listCoversActions(mode) && !everyTime ? siteOf(info.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
@@ -414,7 +414,7 @@ export function scriptRequestVerdict(
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
-  const everyTime = asksEveryTime(request.url, request.body);
+  const everyTime = method === "DELETE" || asksEveryTime(request.url, request.body);
   const site = listCoversActions(mode) && !everyTime ? siteOf(request.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };

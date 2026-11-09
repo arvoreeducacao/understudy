@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const APPROVAL_MODES = ["always", "on-miss", "auto", "off"] as const;
-export const APPROVAL_FALLBACKS = ["wait", "deny", "allow"] as const;
+export const APPROVAL_FALLBACKS = ["wait", "deny"] as const;
 export const APPROVAL_ALLOW_KINDS = ["host", "tool"] as const;
 export const APPROVAL_ALLOW_LIMIT = 200;
 
@@ -33,7 +33,8 @@ const SHARED_SECOND_LEVELS = new Set([
 ]);
 
 export const SHARED_HOSTING_SUFFIXES: readonly string[] = [
-  "amazonaws.com", "appspot.com", "azureedge.net", "azurestaticapps.net", "azurewebsites.net", "b-cdn.net", "backblazeb2.com", "blogspot.com", "cloudflarestorage.com",
+  "amazonaws.com", "appspot.com", "azureedge.net", "blogspot.com.br", "bubbleapps.io", "carrd.co", "framer.website", "gitbook.io", "glide.page", "godaddysites.com", "hf.space",
+  "notion.site", "readthedocs.io", "squarespace.com", "streamlit.app", "substack.com", "webflow.io", "weebly.com", "azurestaticapps.net", "azurewebsites.net", "b-cdn.net", "backblazeb2.com", "blogspot.com", "cloudflarestorage.com",
   "cloudfront.net", "cloudfunctions.net", "core.windows.net", "deno.dev", "digitaloceanspaces.com", "duckdns.org", "firebaseapp.com", "firebasestorage.app", "fly.dev", "github.io",
   "githubusercontent.com", "gitlab.io", "glitch.me", "googleapis.com", "googleusercontent.com", "herokuapp.com", "linodeobjects.com", "myshopify.com", "netlify.app", "ngrok-free.app",
   "ngrok.io", "no-ip.org", "now.sh", "onrender.com", "ondigitalocean.app", "pages.dev", "r2.dev", "railway.app", "repl.co", "replit.dev", "run.app", "sharepoint.com", "supabase.co",
@@ -149,16 +150,29 @@ export function listCoversActions(mode: EffectiveApprovalMode): boolean {
 }
 
 const SENSITIVE_WORDS = new Set([
-  "buy", "purchase", "checkout", "order", "orders", "pay", "payment", "payments", "delete", "remove", "destroy", "permission", "permissions", "role", "roles", "grantaccess", "makeadmin",
-  "signup", "signin", "login", "logon", "register", "createaccount", "newaccount", "send", "post", "publish", "share", "invite", "comment", "reply", "createtweet", "createretweet", "createpost", "transfer",
-  "transaction", "transactions", "pix", "boleto", "withdraw", "donate", "auth", "oauth", "token", "otp", "2fa", "mfa", "password", "passwd", "senha", "comprar", "compra", "pagar",
-  "pagamento", "finalizar", "excluir", "apagar", "remover", "criarconta", "entrar", "enviar", "envio", "publicar", "postar", "compartilhar", "convidar", "comentar", "responder",
-  "transferir", "transferencia", "sacar", "saque", "doar", "permissao", "permissoes",
+  "buy", "order", "orders", "pay", "delete", "destroy", "role", "roles", "grantaccess", "makeadmin", "signup", "signin", "login", "logon", "register", "createaccount", "newaccount",
+  "closeaccount", "deleteaccount", "send", "share", "invite", "comment", "reply", "transaction", "transactions", "pix", "boleto", "withdraw", "donate", "auth", "oauth", "token",
+  "otp", "2fa", "mfa", "password", "passwd", "senha", "finalizar", "criarconta", "entrar", "transferencia", "sacar", "saque", "doar", "permissao", "permissoes", "amount",
+  "valor", "quantia", "topup", "revoke", "paid", "paying", "payer", "payout", "payouts", "sent", "bought", "ordered", "ordering", "sharing", "shared", "borrar", "lixeira", "doacao",
+  "doacoes",
 ]);
 
-const SENSITIVE_PREFIXES = ["verif", "authent", "authori", "otp", "permiss", "cadastr", "transfer", "purchas", "checkout", "payment", "pagament", "publish", "publica", "comment", "comenta", "delet", "invit", "convid", "compartilh"];
+const SENSITIVE_PREFIXES = [
+  "verif", "authent", "authori", "otp", "permiss", "cadastr", "transfer", "purchas", "checkout", "payment", "pagament", "publish", "comment", "comenta", "delet", "invit",
+  "convid", "compartilh", "envi", "pag", "exclu", "apag", "remov", "compr", "post", "publi", "encaminh", "forward", "confirm", "pedido", "assin", "subscri", "unsubscri", "revog",
+  "revok", "admin", "membr", "member", "messag", "tweet", "charge", "trash", "suppr", "envoy", "losch", "kauf", "bezahl", "zahlung", "elimin", "deactiv", "desativ", "encerr",
+  "resgat", "withdraw", "sell", "vend", "excluir", "send", "respond", "contrat", "aprov", "approv", "achet", "deposit", "retweet", "repost", "archiv",
+];
+
+const NOT_SENSITIVE_PREFIXES = ["environ", "page", "pagin", "compress", "comprehen", "compromis", "postal", "postcode", "postgres", "sendgrid"];
+
+const NOT_SENSITIVE_WORDS = new Set(["public", "publico", "publicos", "publicly"]);
 
 const OPERATION_NAMES = /"operationName"\s*:\s*"([A-Za-z_]\w{0,99})"|operationName=([A-Za-z_]\w{0,99})|\bmutation\s+([A-Za-z_]\w{0,99})/g;
+
+const GRAPHQL_MUTATION = /\bmutation\b/;
+
+const BODY_VALUE = /^[^\s]{1,64}$/;
 
 function words(text: string): string[] {
   return text
@@ -171,13 +185,47 @@ function words(text: string): string[] {
     .filter(Boolean);
 }
 
+function sensitiveWord(word: string): boolean {
+  if (SENSITIVE_WORDS.has(word)) return true;
+  if (NOT_SENSITIVE_WORDS.has(word) || NOT_SENSITIVE_PREFIXES.some((prefix) => word.startsWith(prefix))) return false;
+  return SENSITIVE_PREFIXES.some((prefix) => word.startsWith(prefix));
+}
+
 function sensitiveWords(tokens: string[]): boolean {
-  const joined = [...tokens, ...tokens.slice(1).map((token, index) => tokens[index] + token)];
-  return joined.some((word) => SENSITIVE_WORDS.has(word) || SENSITIVE_PREFIXES.some((prefix) => word.startsWith(prefix)));
+  return tokens.some(sensitiveWord) || tokens.slice(1).some((token, index) => SENSITIVE_WORDS.has(tokens[index] + token));
 }
 
 export function confirmsAlways(text: string): boolean {
   return sensitiveWords(words(text));
+}
+
+function bodyParts(body: string): string[] {
+  const parts: string[] = [];
+  const visit = (value: unknown, depth: number) => {
+    if (parts.length > 500 || depth > 8) return;
+    if (typeof value === "string") {
+      if (BODY_VALUE.test(value)) parts.push(value);
+      return;
+    }
+    if (Array.isArray(value)) return value.forEach((item) => visit(item, depth + 1));
+    if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        parts.push(key);
+        visit(item, depth + 1);
+      }
+    }
+  };
+  try {
+    visit(JSON.parse(body), 0);
+    return parts;
+  } catch {}
+  if (/^[^\s{}[\]]*=/.test(body)) {
+    for (const [key, value] of new URLSearchParams(body)) {
+      parts.push(key);
+      if (BODY_VALUE.test(value)) parts.push(value);
+    }
+  }
+  return parts;
 }
 
 export function asksEveryTime(url: string, body?: string): boolean {
@@ -194,5 +242,8 @@ export function asksEveryTime(url: string, body?: string): boolean {
   } catch {}
   if (sensitiveWords(words(`${path} ${query}`))) return true;
   if (!body) return false;
-  return [...body.slice(0, 20_000).matchAll(OPERATION_NAMES)].some((match) => sensitiveWords(words(match[1] ?? match[2] ?? match[3] ?? "")));
+  const head = body.slice(0, 20_000);
+  if (GRAPHQL_MUTATION.test(head)) return true;
+  if ([...head.matchAll(OPERATION_NAMES)].some((match) => sensitiveWords(words(match[1] ?? match[2] ?? match[3] ?? "")))) return true;
+  return bodyParts(head).some((part) => sensitiveWords(words(part)));
 }

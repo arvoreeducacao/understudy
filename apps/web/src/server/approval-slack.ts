@@ -25,7 +25,7 @@ export async function rememberApprovalMessage(approvalId: string, posted: { ok: 
 export function approvalClosedLine(row: Pick<ApprovalRow, "status" | "answeredVia" | "answeredAt">, who: string) {
   const closed = copy.slackApp.approvalClosed;
   const via = closed.via[row.answeredVia ?? "panel"] ?? closed.via.panel;
-  const unanswered = row.answeredVia === "fallback" ? (row.status === "approved" ? closed.unansweredApproved(UNANSWERED_AFTER_MS / 60_000) : closed.unansweredDenied(UNANSWERED_AFTER_MS / 60_000)) : null;
+  const unanswered = row.answeredVia === "fallback" && row.status === "denied" ? closed.unansweredDenied(UNANSWERED_AFTER_MS / 60_000) : null;
   const base = unanswered ?? (row.status === "approved" ? closed.approved(who, via) : row.status === "denied" ? closed.denied(who, via) : row.status === "expired" ? closed.expired : closed.cancelled);
   const at = row.answeredAt ?? new Date();
   const fallback = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;

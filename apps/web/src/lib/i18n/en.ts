@@ -156,7 +156,6 @@ export const en = {
       approved: (who: string, via: string) => `:white_check_mark: Approved by ${who} ${via}`,
       denied: (who: string, via: string) => `:no_entry: Denied by ${who} ${via}`,
       expired: ":hourglass: Expired before anyone answered, so it was not done",
-      unansweredApproved: (minutes: number) => `:fast_forward: Nobody answered in ${minutes} minutes, so it went ahead as the owner chose`,
       unansweredDenied: (minutes: number) => `:no_entry: Nobody answered in ${minutes} minutes, so it counted as a no`,
       cancelled: ":octagonal_sign: Stopped before anyone answered, so it was not done",
       via: { panel: "in the panel", slack: "in Slack", whatsapp: "on WhatsApp", telegram: "on Telegram" } as Record<string, string>,
@@ -269,9 +268,8 @@ export const en = {
     fallbacks: {
       wait: { name: "Wait", hint: "The work waits for your answer, for up to 24 hours." },
       deny: { name: "Count it as a no", hint: "After 30 minutes without an answer, the request counts as a no and the work goes on without that step." },
-      allow: { name: "Go ahead", hint: "After 30 minutes without an answer, a task you or a schedule started goes ahead. Everything else keeps waiting." },
     },
-    unanswered: (summary: string, approved: boolean, minutes: number) => (approved ? `Nobody answered "${summary}" in ${minutes} minutes, so it went ahead, as you chose in Approvals.` : `Nobody answered "${summary}" in ${minutes} minutes, so it counted as a no, as you chose in Approvals.`),
+    unanswered: (summary: string, minutes: number) => `Nobody answered "${summary}" in ${minutes} minutes, so it counted as a no, as you chose in Approvals.`,
     saved: "Saved",
     failed: "Could not save. Try again.",
   },

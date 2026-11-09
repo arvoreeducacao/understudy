@@ -167,7 +167,7 @@ async function untrustedTurn(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId">) 
 async function approvalMode(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId" | "approvalPolicy">) {
   const policy = cleanApprovalPolicy(agent.approvalPolicy);
   const untrusted = await untrustedTurn(hub, agent);
-  return { policy, untrusted, mode: effectiveApprovalMode(policy.mode, { untrusted }) };
+  return { policy, mode: effectiveApprovalMode(policy.mode, { untrusted }) };
 }
 
 export function sitesInFields(fields: { label: string; value: string }[]) {
@@ -329,7 +329,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
         if (label && !outsiderLimiter.allow(`outsider:${agent.id}`, 1 / 60, 3)) return text(brainText.outsiderBusy, true);
-        const { mode, untrusted } = await approvalMode(hub, agent);
+        const { mode } = await approvalMode(hub, agent);
         if (!label && mode === "off" && !args.runId && !(await runningRun(agent.id))) {
           console.log(JSON.stringify({ at: new Date().toISOString(), event: "approval_skipped", agentId: agent.id, mode }));
           return text(brainText.approvalsOff);
@@ -375,7 +375,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           joined ??
           (reviewed?.kind === "approved"
             ? reviewed.id
-            : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, Boolean(label) || untrusted || forced || everyTime, reviewed?.review));
+            : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, reviewed?.review));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -596,7 +596,7 @@ async function guardOutward(
   const closed = await closedRunText(hub, agent.id, runId);
   if (closed) return { ok: false, text: closed.replace(/^not asked:/, "not done:") };
   const tool = extra.call ? actionToolName(extra.call.name) : null;
-  const { policy, mode, untrusted } = ask && !approval.forced ? await approvalMode(hub, agent) : { policy: null, mode: "always" as const, untrusted: true };
+  const { policy, mode } = ask && !approval.forced ? await approvalMode(hub, agent) : { policy: null, mode: "always" as const };
   const skipped = !ask || !policy ? undefined : mode === "off" ? ("mode" as const) : listCoversActions(mode) && tool && toolListed(tool, policy.allow) ? ("listed" as const) : undefined;
   if (!ask || skipped) {
     const asked = tool ? await unapprovedAsk(agent.id, tool) : null;
@@ -609,7 +609,7 @@ async function guardOutward(
   if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
   const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
   const reviewed = earlier || forced || mode !== "auto" ? null : await autoReview(hub, agent, { summary, fields, runId: runId ?? undefined, ...(approval.panelSummary ? { source: "panel" as const } : {}) }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant });
-  const id = earlier?.id ?? (reviewed?.kind === "approved" ? reviewed.id : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, forced || untrusted, reviewed?.review));
+  const id = earlier?.id ?? (reviewed?.kind === "approved" ? reviewed.id : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant, reviewed?.review));
   const outcome = await waitOutcome(id, extra);
   if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
   if (outcome.kind === "pending") return { ok: false, asked: true, pending: true, text: runId ? brainText.callPending(id) : brainText.callPendingOutsideRun(id) };

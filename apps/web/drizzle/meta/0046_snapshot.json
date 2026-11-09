@@ -1,6 +1,6 @@
 {
-  "id": "6fc8fbde-a53a-4e75-a603-4ce8dbedc7e7",
-  "prevId": "08cca6bc-4ce2-4f30-85c4-539d21ca566c",
+  "id": "9f2b933a-85e8-4109-9460-21e152813fff",
+  "prevId": "23a662d8-500f-4498-a645-0e8331844059",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -938,13 +938,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "needs_answer": {
-          "name": "needs_answer",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "answered_via": {
           "name": "answered_via",

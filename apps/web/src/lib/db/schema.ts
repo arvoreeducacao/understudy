@@ -355,7 +355,7 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "ca
 
 export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback" | "reviewer";
 
-export const MACHINE_ANSWERS = ["fallback", "reviewer"] as const satisfies readonly ApprovalVia[];
+export const MACHINE_ANSWERS = ["reviewer"] as const satisfies readonly ApprovalVia[];
 
 export type ApprovalReview = { decision: "allow" | "escalate"; reason: string };
 
@@ -384,7 +384,6 @@ export const approvals = pgTable(
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     usedAt: timestamp("used_at", { withTimezone: true }),
     grant: jsonb("tool_grant").$type<ApprovalGrant | null>(),
-    needsAnswer: boolean("needs_answer").notNull().default(false),
     answeredVia: text("answered_via").$type<ApprovalVia>(),
     review: jsonb("review").$type<ApprovalReview>(),
     slackMessages: jsonb("slack_messages").$type<SlackMessageRef[]>(),

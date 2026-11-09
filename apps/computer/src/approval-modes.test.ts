@@ -110,7 +110,7 @@ test("one approval covers a site across addresses and scripts of the same conver
   assert.equal(await denied.request(verdict("https://other.test/x"), "POST other.test/x"), false);
 });
 
-test("a yes from the reviewer or the unanswered setting covers that one request, never the address again nor the site for the conversation", async () => {
+test("a yes from the reviewer covers that one request, never the address again nor the site for the conversation", async () => {
   const home = mkdtempSync(join(tmpdir(), "understudy-reviewed-"));
   const file = approvedSitesFile(home);
   const chat: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
@@ -120,16 +120,17 @@ test("a yes from the reviewer or the unanswered setting covers that one request,
   const sites = { has: (site: string) => sitesApprovedIn(file, chat.conversation!).includes(site), add: (site: string) => rememberApprovedSite(file, chat.conversation!, site) };
   assert.deepEqual(readOwnerAnswer("approved: fine [requestId: apr_1] [answeredBy: reviewer]"), { approved: true, pending: false, text: "approved: fine [requestId: apr_1] [answeredBy: reviewer]", requestId: "apr_1", answeredBy: "reviewer" });
   assert.equal(readOwnerAnswer("approved: [answeredBy: reviewer] is what I typed [requestId: apr_2]").answeredBy, undefined);
-  for (const by of ["reviewer", "fallback"]) {
+  assert.equal(readOwnerAnswer("approved [requestId: apr_3] [answeredBy: fallback]").answeredBy, undefined);
+  {
     const asked: string[] = [];
     const notes: string[] = [];
-    const asks = scriptAsks(async (ask) => (asked.push(ask.summary), readOwnerAnswer(`approved [requestId: apr_${by}] [answeredBy: ${by}]`)), notes, null, sites, "conversation");
+    const asks = scriptAsks(async (ask) => (asked.push(ask.summary), readOwnerAnswer("approved [requestId: apr_reviewer] [answeredBy: reviewer]")), notes, null, sites, "conversation");
     assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
     assert.equal(await asks.request(verdict("https://www.social.test/a1"), "POST www.social.test/a1"), true);
     assert.equal(await asks.request(verdict("https://www.social.test/a2"), "POST www.social.test/a2"), true);
     assert.equal(asked.length, 3);
     assert.deepEqual(sitesApprovedIn(file, chat.conversation), []);
-    assert.match(notes[0], by === "reviewer" ? /approved by the reviewer your owner chose \[requestId: apr_reviewer\]/ : /approved by your owner's setting for unanswered requests/);
+    assert.match(notes[0], /approved by the reviewer your owner chose \[requestId: apr_reviewer\]/);
   }
 });
 
@@ -272,7 +273,7 @@ test("the script that sent a request goes with the ask, cleaned of saved secrets
 test("a sign-in, code, password, payment, delete or send request asks every time, even on a site approved earlier in the conversation", async () => {
   const { asksEveryTime } = await import("./browser-guard.ts");
   for (const url of ["https://books.test/api/totp/verify-code", "https://books.test/api/auth/google", "https://shop.test/checkout/confirm", "https://mail.test/api/send", "https://files.test/v1/delete", "https://site.test/signin/_/batchexecute", "not a url"]) assert.equal(asksEveryTime(url), true, url);
-  for (const url of ["https://www.social.test/voyager/api/feed", "https://chat.test/u/1/api/list_members", "https://mail.test/sync/u/1/i/bv"]) assert.equal(asksEveryTime(url), false, url);
+  for (const url of ["https://www.social.test/voyager/api/feed", "https://chat.test/u/1/api/list_channels", "https://mail.test/sync/u/1/i/bv"]) assert.equal(asksEveryTime(url), false, url);
   const verify = scriptRequestVerdict(chat, [], { ...post("https://books.test/api/totp/verify-code"), body: '{"code":"000000"}' }, "", null, policy(), ["books.test"]);
   assert.equal(verify.kind, "ask");
   assert.equal(verify.kind === "ask" && verify.everyTime, true);
@@ -306,14 +307,18 @@ test("buying, deleting, changing permissions or creating an account asks even on
   assert.equal(confirmsAlways('submit "Save" Save'), false);
 });
 
-test("an ask that asks every time tells the panel so, and other asks do not", async () => {
-  const { askOwnerOnce } = await import("./gatekeeper-client.ts");
-  const seen: Record<string, unknown>[] = [];
-  const session = { call: async (_name: string, args: Record<string, unknown>) => (seen.push(args), "approved [requestId: apr_1]") };
-  await askOwnerOnce(session, { summary: 'Click "Send" on mail.test', fields: [], everyTime: true });
-  await askOwnerOnce(session, { summary: 'Submit "Save" on mail.test', fields: [] });
-  assert.equal(seen[0].everyTime, true);
-  assert.equal("everyTime" in seen[1], false);
+test("an action asks every time when its page address or a field's label is sensitive, and a DELETE or a GraphQL mutation always does", () => {
+  const chatTurn: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
+  const listedBank = policy({ hosts: ["www.bank.test", "github.com"] });
+  const confirm = decide(chatTurn, 'submit "Continuar"', element({ name: "Continuar", url: "https://www.bank.test/pix/transferir/confirmacao" }), null, listedBank);
+  assert.equal(confirm.kind === "ask" && confirm.everyTime, true);
+  const fields = decide(chatTurn, 'submit "Continuar"', element({ name: "Continuar", url: "https://www.bank.test/conta", fields: [{ label: "Chave Pix", value: "ana@example.com" }, { label: "Valor", value: "500" }] }), null, listedBank);
+  assert.equal(fields.kind === "ask" && fields.everyTime, true);
+  assert.equal(decide(chatTurn, 'submit "Continuar"', element({ name: "Continuar", url: "https://www.bank.test/conta" }), null, listedBank).kind, "pass");
+  const removal = scriptRequestVerdict(chatTurn, [], { method: "DELETE", url: "https://api.github.com/repos/acme/app", pageUrl: "https://github.com/acme/app" }, "", null, listedBank);
+  assert.equal(removal.kind === "ask" && removal.everyTime, true);
+  const mutation = scriptRequestVerdict(chatTurn, [], { method: "POST", url: "https://github.com/graphql", body: JSON.stringify({ query: "mutation { addStar(input: {}) { clientMutationId } }" }), pageUrl: "https://github.com/acme/app" }, "", null, listedBank);
+  assert.equal(mutation.kind === "ask" && mutation.everyTime, true);
 });
 
 test("in a run, a script request outside the steps is dropped before any site shortcut", () => {

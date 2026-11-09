@@ -59,17 +59,16 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
 
 export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string; site?: string; everyTime?: boolean; cut?: boolean; contentHash?: string };
 
-export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string; answeredBy?: "reviewer" | "fallback" };
+export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string; answeredBy?: "reviewer" };
 
 export function readOwnerAnswer(text: string, knownRequestId?: string): OwnerAnswer {
   const requestId = text.match(/request_?id\W{1,8}([A-Za-z0-9_-]{4,})/i)?.[1] ?? knownRequestId;
-  const answeredBy = text.match(/\[answeredBy: (reviewer|fallback)\]\s*$/)?.[1] as OwnerAnswer["answeredBy"];
+  const answeredBy = /\[answeredBy: reviewer\]\s*$/.test(text) ? ("reviewer" as const) : undefined;
   return { approved: /^\s*approved/i.test(text), pending: /status\W{1,8}pending/i.test(text), text, ...(requestId ? { requestId } : {}), ...(answeredBy ? { answeredBy } : {}) };
 }
 
 export function approvedBy(answer: Pick<OwnerAnswer, "answeredBy">): string {
   if (answer.answeredBy === "reviewer") return "the reviewer your owner chose";
-  if (answer.answeredBy === "fallback") return "your owner's setting for unanswered requests";
   return "the owner";
 }
 

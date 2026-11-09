@@ -114,7 +114,8 @@ const FOR_THE_PERSON_NAMED = /\b(resgat\w*|retir\w*|withdraw\w*|encerrar|close (
 export function needsThePerson(input: Pick<ReviewInput, "action">) {
   const { summary, fields } = input.action;
   const everything = plain([summary, ...fields.flatMap((field) => [field.label, field.value])].join("\n"));
-  const named = plain([summary.replace(/\b(POST|PUT|PATCH)\b/g, " "), ...fields.map((field) => field.label), ...fields.filter((field) => labelOf(field) === "action").map((field) => field.value)].join("\n"));
+  const spoken = SCRIPT_SUMMARY.test(summary) ? "" : summary.replace(/\b(POST|PUT|PATCH)\b/g, " ");
+  const named = plain([spoken, ...fields.map((field) => field.label), ...fields.filter((field) => labelOf(field) === "action").map((field) => field.value)].join("\n"));
   if (FOR_THE_PERSON.test(everything) || confirmsAlways(named) || FOR_THE_PERSON_NAMED.test(unaccented(named))) return true;
   return fields.some((field) => labelOf(field) === "request" && requestUrls(field.value).some((url) => asksEveryTime(url)));
 }
