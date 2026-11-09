@@ -341,3 +341,25 @@ test("outside a run, one ask waits once and a pending answer does nothing and sa
   assert.deepEqual(calls.map((call) => call.name), ["request_approval"]);
   assert.match(pendingText("Click Send on mail.example.com", null, answer), /^pending: [\s\S]*nothing was done\. Tell your owner it waits for their answer/);
 });
+
+test("a no that arrives while the run waits is not handed to the main model to ask again", async () => {
+  const before = process.env.UNDERSTUDY_RUN_MODEL;
+  process.env.UNDERSTUDY_RUN_MODEL = "haiku";
+  try {
+    const desk = ownerDesk();
+    desk.ask("apr_board", "Send the board update", "s2");
+    const { agent, requests, sent } = harness((_request, index) =>
+      index === 0 ? gaveUp : { events: [], result: { ok: true, text: 'RESULT {"ok": false, "summary": "Skipped the board update: the owner said no"}', sessionId: "session-1" } },
+    desk.lookup);
+    agent.setModel("opus");
+    agent.enqueue({ kind: "run", runId: "run_board", recipe, approvalsRequired: true });
+    await until(() => desk.calls.some((call) => call.wait), "the wait");
+    desk.answer("apr_board", "denied", "not this week");
+    await until(() => sent.some((message) => message.type === "run_finished"), "the run to finish");
+    assert.deepEqual(requests.map((request) => request.model ?? null), ["haiku", "haiku"]);
+    assert.match(requests[1].prompt, /: denied, with the note "not this week"/);
+  } finally {
+    if (before === undefined) delete process.env.UNDERSTUDY_RUN_MODEL;
+    else process.env.UNDERSTUDY_RUN_MODEL = before;
+  }
+});

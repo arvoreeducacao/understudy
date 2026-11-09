@@ -605,6 +605,7 @@ export function createAgent(options: {
           current.reason = PANEL_CLOSED_SUMMARY;
         }
         if (!waited.answers.length || cancelled()) break;
+        if (waited.answers.some((answer) => answer.status !== "approved")) ownerBlocked = true;
         options.send({ type: "activity", runId: job.runId, text: "Your owner answered; carrying on with the task" });
         setState("working");
         const next = await turn({ job, prompt: ownerAnsweredPrompt(waited.answers), resume: latest.sessionId, runId: job.runId, transcript, observe, ...(model ? { model } : {}) });

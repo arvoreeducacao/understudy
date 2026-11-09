@@ -20,6 +20,7 @@ const agents = {
   undelivered: "agt_stall_undelivered",
   slow: "agt_stall_slow",
   hourly: "agt_stall_hourly",
+  undated: "agt_stall_undated",
 };
 const minutes = (count: number) => new Date(Date.now() - count * 60_000);
 const day = 24 * 60;
@@ -75,6 +76,8 @@ before(async () => {
     { id: "run_stall_undelivered", agentId: agents.undelivered, trigger: "schedule", status: "running", startedAt: minutes(50) },
     { id: "run_stall_slow", agentId: agents.slow, trigger: "schedule", status: "running", startedAt: minutes(60) },
     { id: "run_stall_hourly", agentId: agents.hourly, recipeId: "rcp_stall_hourly", trigger: "schedule", status: "running", startedAt: minutes(65) },
+    { id: "run_stall_undated", agentId: agents.undated, trigger: "schedule", status: "running", startedAt: minutes(26 * 60) },
+    { id: "run_stall_undated_queued", agentId: agents.undated, trigger: "schedule", status: "running", startedAt: minutes(50) },
   ]);
   await db.insert(schema.messages).values([
     { id: "msg_stall_1", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Reading the page", createdAt: minutes(50) },
@@ -88,6 +91,7 @@ before(async () => {
     { id: "msg_stall_9", agentId: agents.old, runId: "run_stall_old", role: "activity", text: "Opening the report", createdAt: minutes(3 * day - 1) },
     { id: "msg_stall_10", agentId: agents.expired, runId: "run_stall_expired", role: "activity", text: "Asking for approval: Pay the invoice", createdAt: minutes(day + 110) },
     { id: "msg_stall_11", agentId: agents.slow, runId: "run_stall_slow", role: "activity", text: "evaluate", createdAt: minutes(30) },
+    { id: "msg_stall_13", agentId: agents.undated, runId: "run_stall_undated", role: "activity", text: "Asking for approval: Export the report", createdAt: minutes(25 * 60) },
     { id: "msg_stall_12", agentId: agents.hourly, runId: "run_stall_hourly", role: "activity", text: "Asking for approval: Post the digest", createdAt: minutes(60) },
   ]);
   await db.insert(schema.approvals).values([
@@ -95,6 +99,7 @@ before(async () => {
     { id: "apr_stall_wait", agentId: agents.waiting, runId: "run_stall_waiting", stepId: "s2", summary: "Send the board update", source: "mcp", status: "pending", createdAt: minutes(100), expiresAt: later },
     { id: "apr_stall_late", agentId: agents.late, runId: "run_stall_late", stepId: "s2", summary: "Send the board update", source: "mcp", status: "approved", createdAt: minutes(100), answeredAt: minutes(50), expiresAt: later },
     { id: "apr_stall_expired", agentId: agents.expired, runId: "run_stall_expired", stepId: "s2", summary: "Pay the invoice", source: "mcp", status: "expired", createdAt: minutes(day + 110), answeredAt: minutes(50), expiresAt: minutes(50) },
+    { id: "apr_stall_undated", agentId: agents.undated, runId: "run_stall_undated", stepId: "s2", summary: "Export the report", source: "computer", status: "pending", createdAt: minutes(25 * 60), expiresAt: null },
     { id: "apr_stall_hourly", agentId: agents.hourly, runId: "run_stall_hourly", stepId: "s1", summary: "Post the digest", source: "mcp", status: "pending", createdAt: minutes(60), expiresAt: later },
   ]);
   await db.insert(schema.inboundQueue).values({ id: "inq_stall_1", agentId: agents.undelivered, message: { type: "run_recipe", runId: "run_stall_undelivered" }, source: "run", runId: "run_stall_undelivered", expiresAt: new Date(Date.now() + 5 * 60_000) });
@@ -192,6 +197,36 @@ test("the computer's late word on a closed run changes nothing and gets the stop
   assert.equal(stops(), first + 1);
   runs.noteRunSign("agt_someone_else", "run_stall_quiet");
   assert.equal(stops(), first + 1);
+});
+
+test("a request with no expiry that is more than a day old no longer holds a run open", { skip }, async () => {
+  await sweepOnce();
+  assert.equal((await runRow("run_stall_undated")).status, "failed");
+  assert.equal((await runRow("run_stall_undated_queued")).status, "failed");
+});
+
+test("a computer that comes back gets the stop orders for its closed runs again", { skip }, async () => {
+  const { runs, toComputer } = await sweepOnce();
+  const before = toComputer.filter((sent) => sent.agentId === agents.quiet).length;
+  assert.equal(runs.resendStopsFor(agents.quiet), 1);
+  const resent = toComputer.filter((sent) => sent.agentId === agents.quiet);
+  assert.equal(resent.length, before + 1);
+  assert.deepEqual(resent.at(-1)!.message, { type: "run_stop", runId: "run_stall_quiet", reason: (await runRow("run_stall_quiet")).summary });
+});
+
+test("a run's approvals come with the pending ones first, however many it has", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { Approvals } = await import("./hub/approvals");
+  const many = Array.from({ length: 105 }, (_, index) => ({ id: `apr_stall_many_${index}`, agentId: agents.busy, runId: "run_stall_busy", summary: `Item ${index}`, source: "mcp" as const, status: "approved" as const, createdAt: minutes(200 - index), answeredAt: minutes(199 - index) }));
+  await getDb().insert(schema.approvals).values([...many, { id: "apr_stall_newest", agentId: agents.busy, runId: "run_stall_busy", summary: "Newest item", source: "mcp", status: "pending", createdAt: minutes(1), expiresAt: later }]);
+  try {
+    const rows = await new Approvals({} as never).forRun(agents.busy, "run_stall_busy");
+    assert.equal(rows.length, 100);
+    assert.equal(rows[0].id, "apr_stall_newest");
+    assert.equal(rows[1].id, "apr_stall_many_104");
+  } finally {
+    await getDb().delete(schema.approvals).where(inArray(schema.approvals.id, [...many.map((row) => row.id), "apr_stall_newest"]));
+  }
 });
 
 test("a scheduled run of a task that still has an open run is skipped and noted, not queued", { skip }, async () => {

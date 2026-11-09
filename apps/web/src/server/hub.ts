@@ -464,6 +464,10 @@ export class Hub {
     return this.approvals.consume(id, agentId);
   }
 
+  releaseApproval(id: string, agentId: string) {
+    return this.approvals.release(id, agentId);
+  }
+
   runApprovals(agentId: string, runId: string) {
     return this.approvals.forRun(agentId, runId);
   }

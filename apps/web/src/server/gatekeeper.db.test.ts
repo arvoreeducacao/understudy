@@ -431,6 +431,93 @@ test("a connector call cut off while it waits never runs on its own, and the sam
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
 });
 
+test("while another run of the same understudy is open, a call in the running turn still sees that turn's refusal and is logged on that run", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const { noteTurn, forgetTurnWake } = await import("./followups");
+  const db = getDb();
+  const hub = createHub();
+  const [agent] = await db.select().from(schema.agents).where(eq(schema.agents.id, ids.agent));
+  await db.update(schema.mcpServers).set({ askAll: false }).where(eq(schema.mcpServers.id, ids.server));
+  await db.update(schema.agents).set({ tools: { ...agent.tools, toolPolicy: { [ids.server]: { send: "allow" } } } }).where(eq(schema.agents.id, ids.agent));
+  const older = "run_gk_overlap_a";
+  const newer = "run_gk_overlap_b";
+  try {
+    await db.delete(schema.runs).where(inArray(schema.runs.id, [older, newer]));
+    await db.insert(schema.runs).values({ id: older, agentId: ids.agent, trigger: "schedule", status: "running", startedAt: new Date(Date.now() - 60 * 60_000) });
+    const asked = rpc("request_approval", { summary: "Post the summary", runId: older, stepId: "s2", action: { tool: "mail__send", args: { to: "team@example.com", body: "summary" } } });
+    const approval = await pendingApproval();
+    await db.insert(schema.runs).values({ id: newer, agentId: ids.agent, trigger: "schedule", status: "running", startedAt: new Date() });
+    await hub.answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await asked, /^denied/);
+    const before = calls.length;
+
+    noteTurn(ids.agent, { runId: older });
+    assert.match(await rpc("mail__send", { to: "team@example.com", body: "summary" }), /^not called: you asked your owner to approve this in this run and they have not \(denied\)/);
+    assert.equal(calls.length, before);
+    const [logged] = await db.select().from(schema.toolCalls).where(eq(schema.toolCalls.agentId, ids.agent)).orderBy(desc(schema.toolCalls.createdAt)).limit(1);
+    assert.equal(logged.runId, older);
+
+    forgetTurnWake(ids.agent);
+    await db.insert(schema.messages).values({ id: "msg_gk_overlap", agentId: ids.agent, runId: older, role: "activity", text: "Posting the summary", createdAt: new Date() });
+    assert.match(await rpc("mail__send", { to: "team@example.com", body: "summary" }), /^not called: you asked your owner to approve this in this run/);
+    assert.equal(calls.length, before);
+  } finally {
+    forgetTurnWake(ids.agent);
+    await db.delete(schema.messages).where(eq(schema.messages.id, "msg_gk_overlap"));
+    await db.delete(schema.runs).where(inArray(schema.runs.id, [older, newer]));
+    await db.update(schema.agents).set({ tools: agent.tools }).where(eq(schema.agents.id, ids.agent));
+    await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  }
+});
+
+async function cancelRequest(requestId: number) {
+  await fetch(`${panelUrl}/api/mcp`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId, reason: "timed out" } }),
+  });
+}
+
+test("a call the client cancels from another request stops waiting, never runs later, and a wait outside a run says to end the turn", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  const hub = createHub();
+  const runId = "run_gk_cancelled";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  try {
+    const before = calls.length;
+    const call = rpc("mail__send", { to: "board@example.com", body: "cancelled" });
+    const asked = await pendingApproval();
+    await cancelRequest(1);
+    assert.match(await call, /^not called: the call was cut off/);
+    await hub.answerApproval(asked.id, true, undefined, ids.owner);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(calls.length, before);
+    assert.equal(await rpc("mail__send", { to: "board@example.com", body: "cancelled" }), "sent to board@example.com");
+    assert.equal(calls.length, before + 1);
+
+    const outside = rpc("request_approval", { summary: "Reply to the visitor" });
+    const visitor = await pendingApproval();
+    await cancelRequest(1);
+    const pendingOutside = JSON.parse(await outside);
+    assert.equal(pendingOutside.status, "pending");
+    assert.match(pendingOutside.note, /or end your turn saying it waits for your owner/);
+    assert.doesNotMatch(pendingOutside.note, /never end it/);
+    await hub.answerApproval(visitor.id, false, undefined, ids.owner);
+
+    const inRun = rpc("request_approval", { summary: "Send the board update", runId, stepId: "s2" });
+    const step = await pendingApproval();
+    await cancelRequest(1);
+    assert.match(JSON.parse(await inRun).note, /keep waiting\. A task run stays open and paused until your owner answers/);
+    await hub.answerApproval(step.id, false, undefined, ids.owner);
+  } finally {
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  }
+});
+
 test("a run the panel already closed gets no new approvals and its computer is told to stop", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");

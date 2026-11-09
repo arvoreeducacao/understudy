@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
 import { env } from "@/lib/env";
@@ -20,6 +20,11 @@ import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack
 import { guestTurn } from "../slack-askers";
 
 const RUN_APPROVALS_LIMIT = 100;
+const UNDATED_APPROVAL_MS = 24 * 60 * 60 * 1000;
+
+export function stillValid(now = new Date()) {
+  return or(gt(schema.approvals.expiresAt, now), and(isNull(schema.approvals.expiresAt), gt(schema.approvals.createdAt, new Date(now.getTime() - UNDATED_APPROVAL_MS))));
+}
 const REMIND_AFTER_MS = 60 * 60 * 1000;
 const REMIND_WINDOW_MS = 10 * 60 * 1000;
 
@@ -94,7 +99,7 @@ export class Approvals {
           eq(schema.approvals.agentId, agentId),
           eq(schema.approvals.runId, request.runId),
           eq(schema.approvals.status, "pending"),
-          or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date())),
+          stillValid(),
           request.stepId ? eq(schema.approvals.stepId, request.stepId) : isNull(schema.approvals.stepId),
           eq(schema.approvals.summary, storableText(request.summary)),
           sql`${schema.approvals.fields} = ${JSON.stringify(storableJson(request.fields))}::jsonb`,
@@ -109,13 +114,13 @@ export class Approvals {
 
   async reusable(agentId: string, runId: string, payloadHash: string) {
     const [row] = await getDb()
-      .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt })
+      .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt, createdAt: schema.approvals.createdAt })
       .from(schema.approvals)
       .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"])))
       .orderBy(desc(schema.approvals.createdAt))
       .limit(1);
     if (!row) return null;
-    if (row.status === "pending" && row.expiresAt && row.expiresAt <= new Date()) return null;
+    if (row.status === "pending" && (row.expiresAt ? row.expiresAt <= new Date() : Date.now() - row.createdAt.getTime() > UNDATED_APPROVAL_MS)) return null;
     if (row.status === "approved" && row.usedAt) return null;
     return { id: row.id, status: row.status };
   }
@@ -130,6 +135,14 @@ export class Approvals {
     return Boolean(row);
   }
 
+  async release(id: string, agentId: string) {
+    await getDb()
+      .update(schema.approvals)
+      .set({ usedAt: null })
+      .where(and(eq(schema.approvals.id, id), eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "approved")));
+    log("approval_released", { agentId, approvalId: id });
+  }
+
   forRun(agentId: string, runId: string) {
     return getDb()
       .select({
@@ -142,7 +155,7 @@ export class Approvals {
       })
       .from(schema.approvals)
       .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId)))
-      .orderBy(asc(schema.approvals.createdAt))
+      .orderBy(sql`case when ${schema.approvals.status} = 'pending' then 0 else 1 end`, desc(schema.approvals.createdAt))
       .limit(RUN_APPROVALS_LIMIT);
   }
 
@@ -158,7 +171,7 @@ export class Approvals {
           isNotNull(schema.approvals.runId),
           lte(schema.approvals.createdAt, new Date(now - REMIND_AFTER_MS)),
           gte(schema.approvals.createdAt, new Date(now - REMIND_AFTER_MS - REMIND_WINDOW_MS)),
-          or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date(now))),
+          stillValid(new Date(now)),
         ),
       )
       .limit(100);
@@ -207,7 +220,7 @@ export class Approvals {
 
   async outcome(id: string, agentId: string) {
     const [row] = await getDb()
-      .select({ status: schema.approvals.status, note: schema.approvals.note })
+      .select({ status: schema.approvals.status, note: schema.approvals.note, runId: schema.approvals.runId })
       .from(schema.approvals)
       .where(and(eq(schema.approvals.id, id), eq(schema.approvals.agentId, agentId)));
     return row ?? null;

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
@@ -48,13 +48,13 @@ function decision(approved: boolean, note: string | undefined, requestId: string
   return text(`${note ? `${verdict}: ${note}` : verdict} [requestId: ${requestId}]`);
 }
 
-type Outcome = { kind: "unknown" } | { kind: "pending" } | { kind: "decided"; approved: boolean; note?: string; stopped?: boolean };
+type Outcome = { kind: "unknown" } | { kind: "pending"; inRun: boolean } | { kind: "decided"; approved: boolean; note?: string; stopped?: boolean };
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
 function outcomeText(id: string, outcome: Outcome): ToolResult {
   if (outcome.kind === "unknown") return text("denied: unknown request");
-  if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id, note: brainText.pendingNote }));
+  if (outcome.kind === "pending") return text(JSON.stringify({ status: "pending", requestId: id, note: outcome.inRun ? brainText.pendingNote : brainText.pendingNoteOutsideRun }));
   return decision(outcome.approved, outcome.note, id, outcome.stopped);
 }
 
@@ -70,10 +70,13 @@ function text(value: unknown, isError = false): ToolResult {
 
 export async function runningRun(agentId: string) {
   const [run] = await getDb()
-    .select({ id: schema.runs.id, trigger: schema.runs.trigger, startedAt: schema.runs.startedAt })
+    .select({ id: schema.runs.id, trigger: schema.runs.trigger, startedAt: schema.runs.startedAt, status: schema.runs.status })
     .from(schema.runs)
     .where(and(eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
-    .orderBy(desc(schema.runs.startedAt))
+    .orderBy(
+      sql`greatest("runs"."started_at", coalesce((select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.run_id = "runs"."id" and m.role in ('activity', 'agent')), "runs"."started_at")) desc`,
+      desc(schema.runs.startedAt),
+    )
     .limit(1);
   return run ?? null;
 }
@@ -82,8 +85,31 @@ export async function runningRunId(agentId: string) {
   return (await runningRun(agentId))?.id ?? null;
 }
 
+export async function turnRun(agentId: string) {
+  const runId = await turnRunId(agentId, runningRunId);
+  if (!runId) return null;
+  const [run] = await getDb()
+    .select({ id: schema.runs.id, trigger: schema.runs.trigger, startedAt: schema.runs.startedAt, status: schema.runs.status })
+    .from(schema.runs)
+    .where(and(eq(schema.runs.id, runId), eq(schema.runs.agentId, agentId)));
+  return run ?? null;
+}
+
+const cancels = new Map<string, AbortController>();
+
+function cancelKey(agentId: string, requestId: unknown) {
+  return `${agentId}:${String(requestId)}`;
+}
+
+export function cancelRequests(agentId: string, body: unknown) {
+  for (const message of Array.isArray(body) ? body : [body]) {
+    const notice = message as { method?: string; params?: { requestId?: unknown } } | null;
+    if (notice?.method === "notifications/cancelled" && notice.params?.requestId !== undefined) cancels.get(cancelKey(agentId, notice.params.requestId))?.abort();
+  }
+}
+
 async function unapprovedAsk(agentId: string, tool: string) {
-  const run = await runningRun(agentId);
+  const run = await turnRun(agentId);
   if (!run) return null;
   const [latest] = await getDb()
     .select({ id: schema.approvals.id, status: schema.approvals.status })
@@ -91,7 +117,7 @@ async function unapprovedAsk(agentId: string, tool: string) {
     .where(
       and(
         eq(schema.approvals.agentId, agentId),
-        gte(schema.approvals.createdAt, run.startedAt),
+        or(eq(schema.approvals.runId, run.id), and(isNull(schema.approvals.runId), gte(schema.approvals.createdAt, run.startedAt))),
         sql`${schema.approvals.fields} @> ${JSON.stringify([{ label: "Action", value: tool }])}::jsonb`,
       ),
     )
@@ -194,7 +220,7 @@ function outcomeWaiter(hub: Hub, agentId: string) {
       if (existing.status === "cancelled") return { kind: "decided", approved: false, note: brainText.stoppedNote, stopped: true };
       if (existing.status !== "pending") return { kind: "decided", approved: existing.status === "approved", note: existing.note ?? undefined };
       const answer = await Promise.race([hub.waitForApproval(id, APPROVAL_CALL_CAP_MS), untilAborted(extra.signal)]);
-      if (!answer) return { kind: "pending" };
+      if (!answer) return { kind: "pending", inRun: Boolean(existing.runId) };
       return { kind: "decided", approved: answer.approved, note: answer.note, stopped: answer.status === "cancelled" };
     });
 }
@@ -364,10 +390,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   builtins.push(...(followupTools(hub, agent, { outsider: () => outsider() || guestTurn(agent.id), untrusted: () => turnUntrusted(agent.id), runId: () => turnRunId(agent.id, runningRunId) }) as Builtin[]));
 
   const guard = async (input: GuardInput) => {
-    const run = input.toOwner ? null : await runningRun(agent.id);
+    const run = input.toOwner ? null : await turnRun(agent.id);
     const handedOff = run?.trigger === "handoff";
-    const runId = input.toOwner ? null : await turnRunId(agent.id, async () => run?.id ?? null);
-    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId });
+    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId: run?.id ?? null });
   };
 
   if (await slackEnabled()) {
@@ -429,8 +454,11 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     const builtin = builtins.find((b) => b.name === name);
-    const callExtra = { ...(extra as unknown as Extra), call: { name } };
-    const run = builtin ? null : await runningRun(agent.id);
+    const cancel = new AbortController();
+    const key = cancelKey(agent.id, (extra as { requestId?: unknown }).requestId);
+    cancels.set(key, cancel);
+    const callExtra = { ...(extra as unknown as Extra), signal: AbortSignal.any([extra.signal, cancel.signal]), call: { name } };
+    const run = builtin ? null : await turnRun(agent.id);
     const runId = run?.id ?? null;
     try {
       let result: ToolResult;
@@ -458,6 +486,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
       console.error(JSON.stringify({ at: new Date().toISOString(), event: "gatekeeper_call_error", agentId: agent.id, tool: name, error: errorLine(error) }));
       await logCall(agent.id, name, args, String(error), false, undefined, runId);
       return text(String(error), true);
+    } finally {
+      if (cancels.get(key) === cancel) cancels.delete(key);
     }
   });
 
@@ -475,35 +505,35 @@ async function guardOutward(
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
   approval: { runId?: string | null; grant?: ApprovalGrant } = {},
-): Promise<GuardResult & { asked?: boolean; pending?: boolean }> {
+): Promise<GuardResult & { asked?: boolean; pending?: boolean; approvalId?: string }> {
   const violation = findViolation(agent.rules ?? [], argsSubject(args));
   if (violation) {
     const rule = describeRule(violation.rule);
     await reportRuleBlock(hub, agent.id, rule, violation.reason).catch(() => {});
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
+  const runId = approval.runId ?? null;
+  const closed = await closedRunText(hub, agent.id, runId);
+  if (closed) return { ok: false, text: closed.replace(/^not asked:/, "not done:") };
   if (!ask) {
     const asked = extra.call ? await unapprovedAsk(agent.id, actionToolName(extra.call.name)) : null;
     if (asked) return { ok: false, text: brainText.askedNotApproved(asked.status, asked.id) };
     return { ok: true };
   }
   if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
-  const runId = approval.runId ?? null;
-  const closed = await closedRunText(hub, agent.id, runId);
-  if (closed) return { ok: false, asked: true, text: closed.replace(/^not asked:/, "not done:") };
   const hash = payloadHash(target, args);
   const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash) : null;
   if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
   const id = earlier?.id ?? (await hub.createApproval(agent.id, { summary, fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant));
-  let outcome = await waitOutcome(id, extra);
-  while (!runId && outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
+  const outcome = await waitOutcome(id, extra);
   if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
-  if (outcome.kind === "pending") return { ok: false, asked: true, pending: true, text: brainText.callPending(id) };
+  if (outcome.kind === "pending") return { ok: false, asked: true, pending: true, text: runId ? brainText.callPending(id) : brainText.callPendingOutsideRun(id) };
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
   const approvedHash = await hub.approvalPayloadHash(id, agent.id);
   if (!approvedHash || approvedHash !== hash) return { ok: false, asked: true, text: "not done: the arguments differ from what the owner approved" };
+  if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
   if (!(await hub.consumeApproval(id, agent.id))) return { ok: false, asked: true, text: `not done: that approval was already used by the same call [requestId: ${id}]` };
-  return { ok: true, asked: true };
+  return { ok: true, asked: true, approvalId: id };
 }
 
 export function connectorApprovalFields(connector: string, tool: Pick<UpstreamTool, "name" | "description" | "annotations">, args: Record<string, unknown>) {
@@ -548,9 +578,12 @@ async function proxyCall(
   }
   const grant = canAlwaysAllow(ceiling, toolName, tool.annotations) ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
-  const runId = await turnRunId(agent.id, async () => run?.id ?? null);
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId, grant });
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant });
   if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.pending ? undefined : allowed.asked ? "denied" : "blocked" };
+  if (extra.signal?.aborted) {
+    if (allowed.approvalId) await hub.releaseApproval(allowed.approvalId, agent.id);
+    return text("not called: the call was cut off before it could go through", true);
+  }
   const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];
   const parts = content.map((part: { type: string; text?: string }) => (part.type === "text" ? part.text ?? "" : JSON.stringify(part)));
@@ -596,6 +629,7 @@ export async function handleGatekeeper(hub: Hub, req: IncomingMessage, res: Serv
   } catch {
     return reject(res, 400, "invalid json");
   }
+  cancelRequests(agent.id, body);
   const server = await buildServer(hub, agent, agent.ownerEmail, restricted);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
@@ -630,8 +664,8 @@ export async function gateGitPush(hub: Hub, agent: ComputerAgent, push: GitPush,
   if (outsiderTurn(agent.id)) return { ok: false, reason: brainText.outsiderTool };
   const github = await githubConnection(agent);
   if (!github || github.push === "never") return { ok: false, reason: "your owner turned off pushing to GitHub for you" };
-  const run = await runningRun(agent.id);
-  const runId = await turnRunId(agent.id, async () => run?.id ?? null);
+  const run = await turnRun(agent.id);
+  const runId = run?.id ?? null;
   const t = messages.toolAccess;
   const { ask, fields } = gitPushApproval(push, github.push, run?.trigger === "handoff", github.upstream.name, {
     connector: t.fieldConnector,

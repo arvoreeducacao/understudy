@@ -45,6 +45,7 @@ export const computerHandlers: Handlers = {
         hub.sendToComputer(agentId, { type: "set_brain", brain: agent.brain });
       }
     }
+    hub.runs.resendStopsFor(agentId);
     await hub.inbound.flush(agentId);
   },
 

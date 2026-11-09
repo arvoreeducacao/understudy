@@ -82,6 +82,15 @@ export class Runs {
     return this.hub.sendToComputer(agentId, { type: "run_stop", runId, reason: reason.slice(0, 1000) });
   }
 
+  resendStopsFor(agentId: string, now = Date.now()) {
+    let sent = 0;
+    for (const [runId, stop] of this.stopsSent) {
+      if (stop.agentId !== agentId || now - stop.at > STOP_MEMORY_MS) continue;
+      if (this.hub.sendToComputer(agentId, { type: "run_stop", runId, reason: stop.reason.slice(0, 1000) })) sent += 1;
+    }
+    return sent;
+  }
+
   noteRunSign(agentId: string, runId: string) {
     const stopped = this.stopsSent.get(runId);
     if (stopped && stopped.agentId === agentId) this.resendStop(agentId, runId, stopped.reason);
@@ -228,8 +237,8 @@ export class Runs {
           (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.role in ('activity', 'agent')),
           (select max(coalesce(a.answered_at, a.created_at)) from approvals a where a.agent_id = "runs"."agent_id" and coalesce(a.answered_at, a.created_at) >= "runs"."started_at")
         )`,
-        runWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status = 'pending' and (a.expires_at is null or a.expires_at > now()))`,
-        agentWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.status = 'pending' and (a.expires_at is null or a.expires_at > now()))`,
+        runWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status = 'pending' and (a.expires_at > now() or (a.expires_at is null and a.created_at > now() - interval '24 hours')))`,
+        agentWaiting: sql<boolean>`exists (select 1 from approvals a where a.agent_id = "runs"."agent_id" and a.status = 'pending' and (a.expires_at > now() or (a.expires_at is null and a.created_at > now() - interval '24 hours')))`,
         undelivered: sql<boolean>`exists (select 1 from inbound_queue q where q.agent_id = "runs"."agent_id" and q.run_id = "runs"."id")`,
         lastActivity: sql<string | null>`(select m.text from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id" and m.role in ('activity', 'agent') order by m.created_at desc limit 1)`,
         lateSummary: sql<string | null>`(select a.summary from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id" and a.status in ('approved', 'denied') order by a.answered_at desc nulls last limit 1)`,
