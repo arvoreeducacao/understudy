@@ -123,17 +123,18 @@ export const ELEMENT_INFO = `(el) => {
   const tag = (element.tagName || "").toLowerCase();
   const type = (element.getAttribute && element.getAttribute("type") || "").toLowerCase();
   const role = (element.getAttribute && element.getAttribute("role") || "").toLowerCase();
-  const name = ((element.getAttribute && element.getAttribute("aria-label")) || element.innerText || element.value || element.title || "").trim().replace(/\\s+/g, " ").slice(0, 200);
+  const name = ((element.getAttribute && element.getAttribute("aria-label")) || element.innerText || element.value || element.title || "").trim().replace(/\\s+/g, " ").slice(0, 2000);
   const label = ((element.labels && element.labels[0] && element.labels[0].innerText) || (element.getAttribute && (element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || element.id)) || "").trim().replace(/\s+/g, " ").slice(0, 120);
   const isSubmit = (tag === "button" && (type === "" || type === "submit") && !!form) || (tag === "input" && (type === "submit" || type === "image"));
   const editable = tag === "textarea" || element.isContentEditable === true;
   const named = form ? Array.from(form.elements).filter((f) => (f.name || f.id) && f.type !== "submit" && f.tagName !== "BUTTON") : [];
   const visible = named.filter((f) => f.type !== "hidden");
+  const labelOf = (f) => ((f.labels && f.labels[0] && f.labels[0].innerText) || f.getAttribute("aria-label") || f.getAttribute("placeholder") || f.name || f.id || "").trim();
   const fields = visible.slice(0, 12).map((f) => ({
-    label: ((f.labels && f.labels[0] && f.labels[0].innerText) || f.getAttribute("aria-label") || f.getAttribute("placeholder") || f.name || f.id || "").trim().slice(0, 80),
+    label: labelOf(f).slice(0, 80),
     value: f.type === "password" ? "••••••" : (f.type === "checkbox" || f.type === "radio") ? String(f.checked) : String(f.value == null ? "" : f.value).slice(0, 300),
   }));
-  const cut = visible.length > 12 || visible.some((f) => f.type !== "password" && String(f.value == null ? "" : f.value).length > 300) || named.some((f) => f.type === "hidden" && String(f.value == null ? "" : f.value) !== "");
+  const cut = visible.length > 12 || visible.some((f) => labelOf(f).length > 80 || (f.type !== "password" && String(f.value == null ? "" : f.value).length > 300)) || named.some((f) => f.type === "hidden" && String(f.value == null ? "" : f.value) !== "");
   return { tag, type, role, name, label, isSubmit, inForm: !!form, editable, url: location.href, fields, cut };
 }`;
 
@@ -192,6 +193,9 @@ export function matchStep(name: string, steps: { id: string; text: string }[]): 
   return best;
 }
 
+const NAME_LIMIT = 2000;
+const SHOWN_NAME_LIMIT = 200;
+
 export function decide(state: TurnState, reason: string | null, info: ElementInfo | null, approval: StepApproval | null = null, policy: ComputerApprovalPolicy = DEFAULT_COMPUTER_POLICY): Verdict {
   if (!reason || !info) return { kind: "pass" };
   if (state.mode === "recipe") return { kind: "block", reason: "blocked: while learning a task nothing is submitted or sent" };
@@ -200,15 +204,15 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   if (cover) return { kind: "pass", coveredBy: cover };
   const mode = guardMode(state, policy);
   if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
-  const everyTime = confirmsAlways(`${reason} ${info.name}`) || Boolean(info.url && asksEveryTime(info.url)) || info.fields.some((field) => confirmsAlways(field.label));
-  const site = listCoversActions(mode) && !everyTime ? siteOf(info.url) : null;
+  const everyTime = !/\p{L}/u.test(info.name) || info.name.length >= NAME_LIMIT || confirmsAlways(`${reason} ${info.name}`) || Boolean(info.url && asksEveryTime(info.url)) || info.fields.some((field) => confirmsAlways(field.label));
+  const step = matchStep(info.name, state.askSteps ?? []);
+  const site = listCoversActions(mode) && !everyTime && !step ? siteOf(info.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   let host = info.url;
   try {
     host = new URL(info.url).host;
   } catch {}
-  const step = matchStep(info.name, state.askSteps ?? []);
   return {
     kind: "ask",
     summary: `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${host ? ` on ${host}` : ""}`.slice(0, 480),
@@ -220,7 +224,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
     ].slice(0, 14),
     ...(site ? { site } : {}),
     ...(everyTime ? { everyTime: true as const } : {}),
-    ...(info.cut || info.url.length > 300 || info.fields.length > 12 ? { cut: true as const } : {}),
+    ...(info.cut || info.name.length > SHOWN_NAME_LIMIT || info.url.length > 300 || info.fields.length > 12 ? { cut: true as const } : {}),
     contentHash: contentHash("action", reason, info.name, info.url, info.fields),
   };
 }
@@ -352,7 +356,8 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
     const turn = queue.then(async () => {
       if (denied) return false;
       const bySite = verdict.site && !verdict.everyTime ? verdict.site : null;
-      if (approvedAddresses.has(address) || (bySite && (local.has(bySite) || sites.has(bySite)))) {
+      const byAddress = !verdict.everyTime;
+      if ((byAddress && approvedAddresses.has(address)) || (bySite && (local.has(bySite) || sites.has(bySite)))) {
         repeats.push(address);
         return true;
       }
@@ -362,7 +367,7 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
         notes.push(answer.pending ? pendingText(verdict.summary, again, answer) : `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
         return false;
       }
-      if (!answer.answeredBy) approvedAddresses.add(address);
+      if (byAddress && !answer.answeredBy) approvedAddresses.add(address);
       if (bySite && !answer.answeredBy) {
         local.add(bySite);
         sites.add(bySite);
@@ -415,7 +420,7 @@ export function scriptRequestVerdict(
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
   const everyTime = method === "DELETE" || asksEveryTime(request.url, request.body);
-  const site = listCoversActions(mode) && !everyTime ? siteOf(request.url) : null;
+  const site = listCoversActions(mode) && !everyTime && !step ? siteOf(request.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   if (site && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };

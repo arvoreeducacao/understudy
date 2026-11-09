@@ -89,7 +89,16 @@ export function reviewPrompt(input: ReviewInput) {
   if (tool) facts.push(`Tool: ${escapeTags(clip(tool, LABEL_LIMIT))}`);
   for (const field of fields) {
     const label = labelOf(field);
-    if (source === "computer" && label === "request" && REQUEST_FACT.test(field.value.trim())) facts.push(`Request: ${escapeTags(clip(field.value.trim(), FIELD_LIMIT))}`);
+    if (source === "computer" && label === "request" && REQUEST_FACT.test(field.value.trim())) {
+      const [method, address] = field.value.trim().split(" ");
+      try {
+        const url = new URL(address);
+        facts.push(`Request: ${escapeTags(`${method} ${url.origin}${url.pathname}`)}`);
+        if (url.search) content.push(`Request query: ${escapeTags(clip(url.search, FIELD_LIMIT))}`);
+      } catch {
+        content.push(line(field));
+      }
+    }
     else if (source === "computer" && label === "page") facts.push(`Page host: ${escapeTags(hostOf(field.value))}`);
     else content.push(line(field));
   }
@@ -131,7 +140,7 @@ export function ruleVerdict(input: ReviewInput): Omit<ReviewVerdict, "model"> | 
   return null;
 }
 
-const LOOKALIKES: Record<string, string> = { а: "a", е: "e", ё: "e", і: "i", ї: "i", о: "o", р: "p", с: "c", у: "y", х: "x", ѕ: "s", ԁ: "d", г: "r", ѵ: "v", ԝ: "w", ν: "v", ο: "o", ι: "i", ε: "e", ω: "w", ρ: "p", ʀ: "r", ꭱ: "r", ꮃ: "w", ꮩ: "v", ꭼ: "e", ɪ: "i", ᴇ: "e", ᴠ: "v", ᴡ: "w", ᴏ: "o", ᴘ: "p", ᴄ: "c" };
+const LOOKALIKES: Record<string, string> = { а: "a", е: "e", ё: "e", і: "i", ї: "i", о: "o", р: "p", с: "c", у: "y", х: "x", ѕ: "s", ԁ: "d", г: "r", ѵ: "v", ԝ: "w", ν: "v", ο: "o", ι: "i", ε: "e", ω: "w", ρ: "p", ʀ: "r", ꭱ: "r", ꮃ: "w", ꮩ: "v", ꭼ: "e", ɪ: "i", ᴇ: "e", ᴠ: "v", ᴡ: "w", ᴏ: "o", ᴘ: "p", ᴄ: "c", l: "i", "1": "i", ı: "i", ӏ: "i", "|": "i", "!": "i" };
 
 function foldedLetters(label: string) {
   return [...label.normalize("NFKD").toLowerCase().replace(/\p{M}/gu, "")].map((char) => LOOKALIKES[char] ?? char).join("").replace(/[^a-z]/g, "");
@@ -140,7 +149,7 @@ function foldedLetters(label: string) {
 export function withoutForeignReviewer<T extends ReviewField>(fields: T[]): T[] {
   return fields.map((field) => {
     const folded = foldedLetters(field.label);
-    return ["review", "revisor", "parecer"].some((word) => folded.includes(word)) ? { ...field, label: `${field.label.slice(0, 150)} (sent by the assistant)` } : field;
+    return ["review", "revisor", "parecer"].some((word) => folded.includes(word)) ? { ...field, label: `${field.label.slice(0, 150)} (from the assistant)` } : field;
   });
 }
 
