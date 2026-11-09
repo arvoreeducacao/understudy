@@ -355,8 +355,6 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "ca
 
 export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback";
 
-export const MACHINE_ANSWERS = ["fallback"] as const satisfies readonly ApprovalVia[];
-
 export type SlackMessageRef = { channel: string; ts: string };
 
 export const approvals = pgTable(
@@ -382,7 +380,6 @@ export const approvals = pgTable(
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     usedAt: timestamp("used_at", { withTimezone: true }),
     grant: jsonb("tool_grant").$type<ApprovalGrant | null>(),
-    needsAnswer: boolean("needs_answer").notNull().default(false),
     answeredVia: text("answered_via").$type<ApprovalVia>(),
     slackMessages: jsonb("slack_messages").$type<SlackMessageRef[]>(),
   },

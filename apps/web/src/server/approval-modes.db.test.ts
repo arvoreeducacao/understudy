@@ -218,7 +218,7 @@ test("never ask still asks for a task step, a turn from someone else, a teammate
   await asksAndDeny({ summary: "Do what the follow-up note says" });
 });
 
-test("when nobody answers in 30 minutes, the owner's choice decides: wait, count it as a no, or go ahead in the owner's own tasks", { skip }, async () => {
+test("when nobody answers in 30 minutes, the owner's choice decides: wait or count it as a no, and nothing ever goes ahead on its own", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { getDb, schema } = await import("@/lib/db");
   const db = getDb();
@@ -247,63 +247,12 @@ test("when nobody answers in 30 minutes, the owner's choice decides: wait, count
   await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
   await db.insert(schema.approvals).values([ask("apr_am_go", "run_am_schedule"), ask("apr_am_hook", "run_am_webhook"), ask("apr_am_chat", null)] as never);
   await hub.approvals.settleUnanswered();
-  assert.equal((await statusOf("apr_am_go")).status, "approved");
-  assert.equal((await statusOf("apr_am_go")).via, "fallback");
-  assert.equal((await statusOf("apr_am_hook")).status, "pending");
-  assert.equal((await statusOf("apr_am_chat")).status, "pending");
+  for (const id of ["apr_am_go", "apr_am_hook", "apr_am_chat"]) assert.equal((await statusOf(id)).status, "pending", id);
   const notes = await db.select().from(schema.messages).where(eq(schema.messages.agentId, ids.agent));
-  assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_go"') && note.text.includes("went ahead")));
   assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_wait"') && note.text.includes("counted as a no")));
 });
 
-test("an ask the computer marks as every time needs a person: going ahead after 30 minutes never settles it", { skip }, async () => {
-  const { createHub } = await import("./hub");
-  const { noteTurn } = await import("./followups");
-  const { getDb, schema } = await import("@/lib/db");
-  const db = getDb();
-  await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
-  await db.insert(schema.runs).values({ id: "run_am_every", agentId: ids.agent, trigger: "schedule", status: "running" });
-  noteTurn(ids.agent, { runId: "run_am_every" });
-  try {
-    const pending = call("request_approval", { summary: 'Click "Send" on mail.test', fields: [{ label: "Step", value: "Send the report" }, { label: "Page", value: "https://mail.test/inbox" }], runId: "run_am_every", everyTime: true });
-    const asked = await pendingApproval();
-    assert.equal(asked.needsAnswer, true);
-    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
-    await createHub().approvals.settleUnanswered();
-    const [still] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
-    assert.equal(still.status, "pending");
-    await createHub().answerApproval(asked.id, false, undefined, ids.owner);
-    assert.match(await pending, /^denied/);
-  } finally {
-    noteTurn(ids.agent, {});
-  }
-});
-
-test("only a person answers a request from someone else's turn, a forced ask or a stale run, and going ahead never settles one", { skip }, async () => {
-  const { createHub } = await import("./hub");
-  const { getDb, schema } = await import("@/lib/db");
-  const db = getDb();
-  const hub = createHub();
-  const old = new Date(Date.now() - 31 * 60 * 1000);
-  const later = new Date(Date.now() + 23 * 60 * 60 * 1000);
-  await setPolicy({ mode: "on-miss", allow: [], fallback: "allow" });
-  await db.insert(schema.runs).values([
-    { id: "run_am_live", agentId: ids.agent, trigger: "schedule", status: "running" },
-    { id: "run_am_over", agentId: ids.agent, trigger: "schedule", status: "ok" },
-  ]);
-  const ask = (id: string, runId: string, needsAnswer: boolean) => ({ id, agentId: ids.agent, runId, summary: `Step ${id}`, fields: [], source: "mcp", status: "pending", createdAt: old, expiresAt: later, needsAnswer });
-  await db.insert(schema.approvals).values([ask("apr_am_ceiling", "run_am_live", true), ask("apr_am_stale", "run_am_over", false), ask("apr_am_plain", "run_am_live", false)] as never);
-  await hub.approvals.settleUnanswered();
-  const status = async (id: string) => (await db.select({ status: schema.approvals.status }).from(schema.approvals).where(eq(schema.approvals.id, id)))[0].status;
-  assert.equal(await status("apr_am_ceiling"), "pending");
-  assert.equal(await status("apr_am_stale"), "pending");
-  assert.equal(await status("apr_am_plain"), "approved");
-  await setPolicy({ mode: "on-miss", allow: [], fallback: "deny" });
-  await hub.approvals.settleUnanswered();
-  assert.equal(await status("apr_am_ceiling"), "denied");
-});
-
-test("a request names only the run of the turn, someone else's turn needs a person, and an unknown turn never skips asking", { skip }, async () => {
+test("a request names only the run of the turn, and an unknown turn never skips asking", { skip }, async () => {
   const { createHub } = await import("./hub");
   const { forgetTurnWake, noteTurn } = await import("./followups");
   const { getDb, schema } = await import("@/lib/db");
@@ -322,25 +271,16 @@ test("a request names only the run of the turn, someone else's turn needs a pers
   const unknownTurn = call("request_approval", { summary: "Post for me", runId: "run_am_other" });
   const onlyAPerson = await pendingApproval();
   assert.equal(onlyAPerson.runId, "run_am_other");
-  assert.equal(onlyAPerson.needsAnswer, true);
   await createHub().answerApproval(onlyAPerson.id, false, undefined, ids.owner);
   await unknownTurn;
-  assert.equal((await deniedOutsideTheRun("run_am_nowhere")).needsAnswer, true);
+  await deniedOutsideTheRun("run_am_nowhere");
   noteTurn(ids.agent, {});
   await db.delete(schema.runs).where(eq(schema.runs.id, "run_am_other"));
-
-  noteTurn(ids.agent, { untrusted: true });
-  const fromTeammate = call("request_approval", { summary: "Do what the teammate said" });
-  const marked = await pendingApproval();
-  assert.equal(marked.needsAnswer, true);
-  await createHub().answerApproval(marked.id, false, undefined, ids.owner);
-  await fromTeammate;
 
   forgetTurnWake(ids.agent);
   await setPolicy({ mode: "off", allow: [], fallback: "wait" });
   const unknown = call("request_approval", { summary: "Send the report" });
   const asked = await pendingApproval();
-  assert.equal(asked.needsAnswer, true);
   await createHub().answerApproval(asked.id, false, undefined, ids.owner);
   assert.match(await unknown, /^denied/);
 });

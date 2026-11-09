@@ -382,7 +382,6 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
   try {
     const pending = call("mail__create_draft", { to: "client@example.com", body: "Hello" });
     const approval = await pendingApproval();
-    assert.equal(approval.needsAnswer, true);
     await createHub().answerApproval(approval.id, false, undefined, ids.owner);
     assert.match(await pending, /^not called/);
     assert.equal(calls.length, 0);
@@ -391,95 +390,7 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
   }
 });
 
-test("going ahead after 30 minutes never runs a cut-off call on its own; the same call repeated in the run uses that yes once", { skip }, async () => {
-  const { getDb, schema } = await import("@/lib/db");
-  const { createHub } = await import("./hub");
-  const { noteTurn } = await import("./followups");
-  const db = getDb();
-  const runId = "run_tp_fallback";
-  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
-  noteTurn(ids.agent, { runId });
-  await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "allow" } }).where(eq(schema.agents.id, ids.agent));
-  const args = { to: "client@example.com", body: "Weekly report" };
-  try {
-    const cut = new AbortController();
-    const first = fetch(`${panelUrl}/api/mcp`, {
-      method: "POST",
-      signal: cut.signal,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "mail__create_draft", arguments: args } }),
-    }).then((res) => res.text()).catch((error: Error) => `cut off: ${error.name}`);
-    const asked = await pendingApproval();
-    assert.equal(asked.needsAnswer, false);
-    cut.abort();
-    assert.match(await first, /^cut off/);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
-    await createHub().approvals.settleUnanswered();
-    const [settled] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
-    assert.equal(settled.status, "approved");
-    assert.equal(settled.answeredVia, "fallback");
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    assert.equal(calls.length, 0);
-    assert.equal(await call("mail__create_draft", args), "create_draft done");
-    assert.equal(calls.length, 1);
-    const [used] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
-    assert.ok(used.usedAt);
-  } finally {
-    await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "wait" } }).where(eq(schema.agents.id, ids.agent));
-    noteTurn(ids.agent, {});
-  }
-});
-
-test("an action asked under the admin ceiling waits for a person: going ahead after 30 minutes never settles it, and a yes from that setting is never used for it", { skip }, async () => {
-  const { getDb, schema } = await import("@/lib/db");
-  const { createHub } = await import("./hub");
-  const { noteTurn } = await import("./followups");
-  const { actionHash } = await import("./gatekeeper");
-  const db = getDb();
-  const runId = "run_tp_ceiling_fallback";
-  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
-  noteTurn(ids.agent, { runId });
-  await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "allow" } }).where(eq(schema.agents.id, ids.agent));
-  await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
-  const args = { to: "client@example.com", body: "Weekly report" };
-  const pendingRows = async (count: number) => {
-    for (let i = 0; i < 100; i++) {
-      const rows = await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, ids.agent), eq(schema.approvals.status, "pending")));
-      if (rows.length >= count) return rows;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    throw new Error(`fewer than ${count} pending approvals`);
-  };
-  try {
-    const asking = call("request_approval", { summary: "Create the weekly report draft", runId, action: { tool: "mail__create_draft", args } });
-    const [asked] = await pendingRows(1);
-    assert.equal(asked.needsAnswer, true);
-    await db.update(schema.approvals).set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) }).where(eq(schema.approvals.id, asked.id));
-    await createHub().approvals.settleUnanswered();
-    const [still] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, asked.id));
-    assert.equal(still.status, "pending");
-    await db.insert(schema.approvals).values({ id: "apr_tp_fallback_yes", agentId: ids.agent, runId, summary: "Create the weekly report draft", fields: [], source: "mcp", payloadHash: actionHash("mail__create_draft", args), status: "approved", answeredVia: "fallback", answeredAt: new Date() });
-    const direct = call("mail__create_draft", args);
-    const both = await pendingRows(2);
-    const straight = both.find((row) => row.id !== asked.id)!;
-    assert.equal(straight.needsAnswer, true);
-    await createHub().answerApproval(straight.id, false, undefined, ids.owner);
-    assert.match(await direct, /^not called/);
-    assert.equal(calls.length, 0);
-    const [unused] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, "apr_tp_fallback_yes"));
-    assert.equal(unused.usedAt, null);
-    await createHub().answerApproval(asked.id, true, undefined, ids.owner);
-    assert.match(await asking, /^approved \[requestId: [^\]]+\]$/);
-    assert.equal(await call("mail__create_draft", args), "create_draft done");
-    assert.equal(calls.length, 1);
-  } finally {
-    await db.update(schema.agents).set({ approvalPolicy: { mode: "on-miss", allow: [], fallback: "wait" } }).where(eq(schema.agents.id, ids.agent));
-    noteTurn(ids.agent, {});
-  }
-});
-
-test("a call in a webhook run asks a person even when a newer scheduled run is open and the owner never wants to be asked", { skip }, async () => {
+test("a call in a webhook run asks even when a newer scheduled run is open and the owner never wants to be asked", { skip }, async () => {
   const { getDb, schema } = await import("@/lib/db");
   const { createHub } = await import("./hub");
   const { noteTurn } = await import("./followups");
@@ -494,7 +405,6 @@ test("a call in a webhook run asks a person even when a newer scheduled run is o
     const pending = call("mail__create_draft", { to: "c@example.com", body: "inside the webhook run" });
     const approval = await pendingApproval();
     assert.equal(approval.runId, "run_tp_webhook");
-    assert.equal(approval.needsAnswer, true);
     await createHub().answerApproval(approval.id, false, undefined, ids.owner);
     assert.match(await pending, /^not called/);
     assert.equal(calls.length, 0);

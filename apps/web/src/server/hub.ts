@@ -452,17 +452,16 @@ export class Hub {
     timeoutSeconds?: number,
     payloadHash?: string,
     grant?: ApprovalGrant,
-    needsAnswer = false,
   ) {
-    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant, needsAnswer);
+    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant);
   }
 
   openApprovalAsk(agentId: string, request: Parameters<Approvals["openAsk"]>[1]) {
     return this.approvals.openAsk(agentId, request);
   }
 
-  reusableApproval(agentId: string, runId: string, payloadHash: string, byPerson = false) {
-    return this.approvals.reusable(agentId, runId, payloadHash, byPerson);
+  reusableApproval(agentId: string, runId: string, payloadHash: string) {
+    return this.approvals.reusable(agentId, runId, payloadHash);
   }
 
   consumeApproval(id: string, agentId: string) {
@@ -481,8 +480,8 @@ export class Hub {
     return this.approvals.payloadHash(id, agentId);
   }
 
-  useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
-    return this.approvals.useActionApproval(agentId, hash, maxAgeMs, byPerson);
+  useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
+    return this.approvals.useActionApproval(agentId, hash, maxAgeMs);
   }
 
   approvalOutcome(id: string, agentId: string) {

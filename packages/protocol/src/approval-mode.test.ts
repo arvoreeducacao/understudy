@@ -21,6 +21,7 @@ test("a missing or broken policy is today's behavior: ask what is not allowed, n
   assert.deepEqual(cleanApprovalPolicy(undefined), DEFAULT_APPROVAL_POLICY);
   assert.deepEqual(cleanApprovalPolicy({ mode: "yolo", fallback: "later", allow: "everything" }), { mode: "on-miss", allow: [], fallback: "wait" });
   assert.deepEqual(DEFAULT_APPROVAL_POLICY, { mode: "on-miss", allow: [], fallback: "wait" });
+  assert.equal(cleanApprovalPolicy({ mode: "on-miss", allow: [], fallback: "allow" }).fallback, "wait");
 });
 
 test("allowed sites are stored as the exact host name and tools as gatekeeper names", () => {
@@ -69,26 +70,33 @@ test("adding and removing entries keeps the list clean and bounded", () => {
   assert.equal(full.allow[0].value, "site5.test");
 });
 
-test("sending, transfers, payments, sign-ins and deletes are asked every time, in a button, an address, a query or a GraphQL operation", () => {
-  for (const text of ["submit Send", "click Enviar", "click Publicar", "click Post", "click Transferir", "click Confirmar transferência", "click Enviar Pix", "click Pay now", "submit Place order", "click Delete repository", "click Sign in", "click Criar conta", "click Share", "click Reply"])
-    assert.equal(confirmsAlways(text), true, text);
-  for (const text of ["click Like", "click Next", "submit Search", "click Show more posts", "click Save draft"]) assert.equal(confirmsAlways(text), false, text);
+test("sending, transfers, payments, sign-ins and deletes are asked every time, by stem, in a button, an address, a query or a request body", () => {
+  for (const text of ["Send", "Enviar", "Envie", "Publicar", "Post", "Postagem", "Transferir", "Confirmar", "Confirmar transferência", "Enviar Pix", "Pay now", "Pague", "Place order", "Fazer pedido", "Compre", "Delete repository", "Exclua", "Apague", "Eliminar", "Encaminhar", "Sign in", "Criar conta", "Close account", "Share", "Reply", "Revoke", "Unsubscribe", "Tornar administrador", "Adicionar membro", "Supprimer", "Envoyer", "Löschen", "Kaufen", "Bezahlen"])
+    assert.equal(confirmsAlways(`click ${text}`), true, text);
+  for (const text of ["Like", "Next", "Next page", "Search", "Save draft", "Show public profile", "Compress image", "Postal code", "Environment", "Cancel", "Filter"]) assert.equal(confirmsAlways(`click ${text}`), false, text);
   for (const url of [
     "https://x.com/i/api/graphql/abc/CreateTweet",
     "https://app.slack.com/api/chat.postMessage",
     "https://www.notion.so/api/v3/submitTransaction",
     "https://mail.google.com/sync/u/0/i/s?action=send",
     "https://bank.example/api/pix",
-    "https://bank.example/api/transfer",
-    "https://x.com/i/api/graphql/abc/DeleteTweet",
+    "https://bank.example/pix/transferir/confirmacao",
+    "https://chat.test/channels/x/messages",
+    "https://api.x.test/2/tweets",
+    "https://api.pay.test/v1/charges",
+    "https://www.social.test/api/posts",
+    "https://drive.test/files/x/trash",
     "https://app.test/api/v2/session/verify-code",
   ])
     assert.equal(asksEveryTime(url), true, url);
-  for (const url of ["https://www.social.test/api/like", "https://x.com/i/api/graphql/abc/FavoriteTweet", "https://app.test/api/posts/123/like", "https://app.test/api/%E0%A4%A"]) assert.equal(asksEveryTime(url), false, url);
+  for (const url of ["https://www.social.test/api/like", "https://app.test/api/catalog/search", "https://app.test/api/page/2", "https://app.test/api/%E0%A4%A"]) assert.equal(asksEveryTime(url), false, url);
   assert.equal(asksEveryTime("not a url"), true);
-  assert.equal(asksEveryTime("https://api.github.com/graphql", '{"query":"mutation AddComment($id: ID!) { addComment(input: {subjectId: $id}) { clientMutationId } }"}'), true);
-  assert.equal(asksEveryTime("https://api.github.com/graphql", '{"operationName":"SubmitTransaction","variables":{}}'), true);
-  assert.equal(asksEveryTime("https://api.github.com/graphql", '{"operationName":"AddReaction","query":"mutation AddReaction { addReaction }"}'), false);
+  assert.equal(asksEveryTime("https://app.test/api/do", "action=delete&id=3"), true);
+  assert.equal(asksEveryTime("https://app.test/api/do", JSON.stringify({ op: "send_message", id: 3 })), true);
+  assert.equal(asksEveryTime("https://api.github.com/graphql", JSON.stringify({ query: "mutation { addStar(input: {}) { clientMutationId } }" })), true);
+  assert.equal(asksEveryTime("https://api.github.com/graphql", JSON.stringify({ operationName: "SubmitTransaction", variables: {} })), true);
+  assert.equal(asksEveryTime("https://api.github.com/graphql", JSON.stringify({ query: "query { viewer { login } }" })), false);
+  assert.equal(asksEveryTime("https://app.test/api/save", JSON.stringify({ text: "please pay me later", draft: true })), false);
 });
 
 test("turns that are not the owner's ask as before, ignoring the list", () => {

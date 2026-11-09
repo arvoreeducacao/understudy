@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { brainText } from "@/lib/brain-text";
-import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
-import { OWNER_STARTED_TRIGGERS, UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
+import type { ApprovalRequest } from "@understudy/protocol";
+import { UNANSWERED_AFTER_MS } from "@/lib/run-policy";
 import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
 import { storableJson, storableText } from "@/lib/db/storable";
@@ -18,14 +18,12 @@ import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
 import { grantAllowEntry } from "../approval-modes";
 import { allowEntryOf, alwaysAllowOf } from "@/lib/always-allow";
-import { MACHINE_ANSWERS, type ApprovalGrant, type ApprovalVia, type RunTrigger } from "@/lib/db/schema";
+import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
 
 const RUN_APPROVALS_LIMIT = 100;
 const UNDATED_APPROVAL_MS = 24 * 60 * 60 * 1000;
-
-const answeredByPerson = or(isNull(schema.approvals.answeredVia), notInArray(schema.approvals.answeredVia, [...MACHINE_ANSWERS]));
 
 export function stillValid(now = new Date()) {
   return or(gt(schema.approvals.expiresAt, now), and(isNull(schema.approvals.expiresAt), gt(schema.approvals.createdAt, new Date(now.getTime() - UNDATED_APPROVAL_MS))));
@@ -46,7 +44,6 @@ export class Approvals {
     timeoutSeconds?: number,
     payloadHash?: string,
     grant?: ApprovalGrant,
-    needsAnswer = false,
   ) {
     const db = getDb();
     const id = newId("apr");
@@ -66,7 +63,6 @@ export class Approvals {
       requestId,
       payloadHash: payloadHash ?? null,
       grant: grant ?? null,
-      needsAnswer,
       askedBy,
       expiresAt,
     };
@@ -119,12 +115,11 @@ export class Approvals {
     return row?.id ?? null;
   }
 
-  async reusable(agentId: string, runId: string, payloadHash: string, byPerson = false) {
-    const personOnly = or(eq(schema.approvals.status, "denied"), and(eq(schema.approvals.status, "pending"), eq(schema.approvals.needsAnswer, true)), and(eq(schema.approvals.status, "approved"), answeredByPerson));
+  async reusable(agentId: string, runId: string, payloadHash: string) {
     const [row] = await getDb()
       .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt, createdAt: schema.approvals.createdAt })
       .from(schema.approvals)
-      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"]), byPerson ? personOnly : undefined))
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"])))
       .orderBy(desc(schema.approvals.createdAt))
       .limit(1);
     if (!row) return null;
@@ -203,7 +198,7 @@ export class Approvals {
     return row?.status === "approved" ? row.hash : null;
   }
 
-  async useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
+  async useActionApproval(agentId: string, hash: string, maxAgeMs: number) {
     const db = getDb();
     const fresh = and(
       eq(schema.approvals.agentId, agentId),
@@ -211,7 +206,6 @@ export class Approvals {
       eq(schema.approvals.status, "approved"),
       isNull(schema.approvals.usedAt),
       gt(schema.approvals.answeredAt, new Date(Date.now() - maxAgeMs)),
-      byPerson ? answeredByPerson : undefined,
     );
     const candidate = db
       .select({ id: schema.approvals.id })
@@ -342,44 +336,31 @@ export class Approvals {
   async settleUnanswered(now = Date.now()) {
     const db = getDb();
     const due = await db
-      .select({ approval: schema.approvals, policy: schema.agents.approvalPolicy, trigger: schema.runs.trigger, runStatus: schema.runs.status })
+      .select({ approval: schema.approvals })
       .from(schema.approvals)
       .innerJoin(schema.agents, eq(schema.agents.id, schema.approvals.agentId))
-      .leftJoin(schema.runs, and(eq(schema.runs.id, schema.approvals.runId), eq(schema.runs.agentId, schema.approvals.agentId)))
       .where(
         and(
           eq(schema.approvals.status, "pending"),
           lte(schema.approvals.createdAt, new Date(now - UNANSWERED_AFTER_MS)),
           or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date(now))),
-          or(
-            sql`${schema.agents.approvalPolicy}->>'fallback' = 'deny'`,
-            and(
-              sql`${schema.agents.approvalPolicy}->>'fallback' = 'allow'`,
-              eq(schema.approvals.needsAnswer, false),
-              isNull(schema.approvals.askedBy),
-              eq(schema.runs.status, "running"),
-              inArray(schema.runs.trigger, [...OWNER_STARTED_TRIGGERS] as RunTrigger[]),
-            ),
-          ),
+          sql`${schema.agents.approvalPolicy}->>'fallback' = 'deny'`,
         ),
       )
       .orderBy(asc(schema.approvals.createdAt))
       .limit(100);
     const minutes = UNANSWERED_AFTER_MS / 60_000;
-    for (const { approval, policy, trigger, runStatus } of due) {
-      const outcome = unansweredOutcome({ fallback: cleanApprovalPolicy(policy).fallback, askedBy: approval.askedBy, needsAnswer: approval.needsAnswer, runTrigger: trigger, runRunning: runStatus === "running" });
-      if (!outcome) continue;
-      const approved = outcome === "allow";
-      const note = brainText.unanswered(approved, minutes);
+    for (const { approval } of due) {
+      const note = brainText.unanswered(minutes);
       const [row] = await db
         .update(schema.approvals)
-        .set({ status: approved ? "approved" : "denied", note, answeredAt: new Date(now), answeredVia: "fallback" })
+        .set({ status: "denied", note, answeredAt: new Date(now), answeredVia: "fallback" })
         .where(and(eq(schema.approvals.id, approval.id), eq(schema.approvals.status, "pending")))
         .returning();
       if (!row) continue;
-      log("approval_unanswered", { approvalId: row.id, agentId: row.agentId, outcome });
-      await this.hub.addMessage(row.agentId, "system", copy.approvalModes.unanswered(row.summary, approved, minutes), row.runId).catch((error) => log("approval_unanswered_note_error", { approvalId: row.id, error: String(error) }));
-      await this.closed(row, approved, note);
+      log("approval_unanswered", { approvalId: row.id, agentId: row.agentId });
+      await this.hub.addMessage(row.agentId, "system", copy.approvalModes.unanswered(row.summary, minutes), row.runId).catch((error) => log("approval_unanswered_note_error", { approvalId: row.id, error: String(error) }));
+      await this.closed(row, false, note);
     }
   }
 

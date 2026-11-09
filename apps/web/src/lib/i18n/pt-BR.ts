@@ -156,7 +156,6 @@ export const ptBR: Messages = {
       approved: (who: string, via: string) => `:white_check_mark: Aprovado por ${who} ${via}`,
       denied: (who: string, via: string) => `:no_entry: Negado por ${who} ${via}`,
       expired: ":hourglass: Expirou sem resposta, então não foi feito",
-      unansweredApproved: (minutes: number) => `:fast_forward: Ninguém respondeu em ${minutes} minutos, então seguiu, como o dono escolheu`,
       unansweredDenied: (minutes: number) => `:no_entry: Ninguém respondeu em ${minutes} minutos, então contou como não`,
       cancelled: ":octagonal_sign: Interrompido antes da resposta, então não foi feito",
       via: { panel: "no painel", slack: "no Slack", whatsapp: "no WhatsApp", telegram: "no Telegram" } as Record<string, string>,
@@ -269,9 +268,8 @@ export const ptBR: Messages = {
     fallbacks: {
       wait: { name: "Esperar", hint: "O trabalho espera a sua resposta, por até 24 horas." },
       deny: { name: "Contar como não", hint: "Depois de 30 minutos sem resposta, o pedido conta como não e o trabalho segue sem esse passo." },
-      allow: { name: "Seguir", hint: "Depois de 30 minutos sem resposta, uma tarefa que você ou um agendamento começou segue em frente. O resto continua esperando." },
     },
-    unanswered: (summary: string, approved: boolean, minutes: number) => (approved ? `Ninguém respondeu "${summary}" em ${minutes} minutos, então seguiu, como você escolheu em Aprovações.` : `Ninguém respondeu "${summary}" em ${minutes} minutos, então contou como não, como você escolheu em Aprovações.`),
+    unanswered: (summary: string, minutes: number) => `Ninguém respondeu "${summary}" em ${minutes} minutos, então contou como não, como você escolheu em Aprovações.`,
     saved: "Salvo",
     failed: "Não deu para salvar. Tente de novo.",
   },
