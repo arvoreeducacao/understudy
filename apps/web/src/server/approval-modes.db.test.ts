@@ -235,7 +235,9 @@ test("when nobody answers in 30 minutes, the owner's choice decides: wait, count
 
   await setPolicy({ mode: "on-miss", allow: [], fallback: "deny" });
   await db.insert(schema.approvals).values([ask("apr_am_fresh", "run_am_schedule", new Date())] as never);
+  const waitingRun = hub.waitForApproval("apr_am_wait", 10_000);
   await hub.approvals.settleUnanswered();
+  assert.equal((await waitingRun)?.approved, false);
   assert.deepEqual(await statusOf("apr_am_wait"), { status: "denied", via: "fallback", note: "nobody answered in 30 minutes, and your owner chose to count that as a no. Skip this item and report it" });
   assert.equal((await statusOf("apr_am_fresh")).status, "pending");
 
