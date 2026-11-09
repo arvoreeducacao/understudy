@@ -107,6 +107,29 @@ export class Approvals {
     return row?.id ?? null;
   }
 
+  async reusable(agentId: string, runId: string, payloadHash: string) {
+    const [row] = await getDb()
+      .select({ id: schema.approvals.id, status: schema.approvals.status, usedAt: schema.approvals.usedAt, expiresAt: schema.approvals.expiresAt })
+      .from(schema.approvals)
+      .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId), eq(schema.approvals.payloadHash, payloadHash), inArray(schema.approvals.status, ["pending", "approved", "denied"])))
+      .orderBy(desc(schema.approvals.createdAt))
+      .limit(1);
+    if (!row) return null;
+    if (row.status === "pending" && row.expiresAt && row.expiresAt <= new Date()) return null;
+    if (row.status === "approved" && row.usedAt) return null;
+    return { id: row.id, status: row.status };
+  }
+
+  async consume(id: string, agentId: string) {
+    const [row] = await getDb()
+      .update(schema.approvals)
+      .set({ usedAt: new Date() })
+      .where(and(eq(schema.approvals.id, id), eq(schema.approvals.agentId, agentId), eq(schema.approvals.status, "approved"), isNull(schema.approvals.usedAt)))
+      .returning({ id: schema.approvals.id });
+    if (row) log("approval_used", { agentId, approvalId: id });
+    return Boolean(row);
+  }
+
   forRun(agentId: string, runId: string) {
     return getDb()
       .select({

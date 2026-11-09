@@ -75,15 +75,9 @@ export async function askOwnerOnce(session: McpSession, request: ApprovalRequest
   return readOwnerAnswer(text);
 }
 
-export async function requestOwnerApproval(session: McpSession, request: ApprovalRequest): Promise<OwnerAnswer> {
-  let answer = await askOwnerOnce(session, request);
-  while (answer.pending && answer.requestId) answer = await askOwnerOnce(session, request, answer.requestId);
-  return answer;
-}
-
 export type RunApproval = { requestId: string; stepId?: string | null; summary: string; status?: string; note?: string; expiresAt?: string | null };
 
-export type RunApprovalList = { pending: RunApproval[]; answered: RunApproval[] };
+export type RunApprovalList = { pending: RunApproval[]; answered: RunApproval[]; open?: boolean };
 
 export async function listRunApprovals(session: McpSession, runId: string, wait: boolean): Promise<RunApprovalList> {
   const text = await session.call("run_approvals", { runId, ...(wait ? { wait: true } : {}) });
@@ -96,5 +90,5 @@ export async function listRunApprovals(session: McpSession, runId: string, wait:
   }
   const list = parsed as Partial<RunApprovalList>;
   if (!Array.isArray(list.pending) || !Array.isArray(list.answered)) throw new Error("the panel sent an unexpected list of approvals");
-  return { pending: list.pending, answered: list.answered };
+  return { pending: list.pending, answered: list.answered, ...(typeof list.open === "boolean" ? { open: list.open } : {}) };
 }

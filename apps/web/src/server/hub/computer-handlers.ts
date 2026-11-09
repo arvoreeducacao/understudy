@@ -65,6 +65,7 @@ export const computerHandlers: Handlers = {
 
   async chat(hub, agentId, message) {
     if (message.roomId) return hub.rooms.agentSaid(agentId, message.roomId, String(message.text ?? ""));
+    if (message.runId) hub.runs.noteRunSign(agentId, message.runId);
     const text = String(message.text ?? "").slice(0, 8000);
     const streamId = message.runId ? undefined : message.streamId;
     const origin = message.runId ? null : currentTurn(agentId);
@@ -137,6 +138,7 @@ export const computerHandlers: Handlers = {
   async activity(hub, agentId, message) {
     const text = String(message.text ?? "").slice(0, 2000);
     if (message.roomId) return hub.rooms.activity(agentId, message.roomId, text);
+    if (message.runId) hub.runs.noteRunSign(agentId, message.runId);
     const audience = message.runId ? null : hub.turnAudience(agentId);
     await hub.addMessage(agentId, "activity", text, message.runId, undefined, undefined, undefined, undefined, undefined, undefined, audience);
     if (audience && !(await hub.relaysToChannels(agentId))) return;

@@ -172,6 +172,19 @@ async function withHeartbeat<T>(extra: Extra, work: () => Promise<T>): Promise<T
   }
 }
 
+function untilAborted(signal: AbortSignal | undefined) {
+  return new Promise<null>((resolve) => {
+    if (signal?.aborted) return resolve(null);
+    signal?.addEventListener("abort", () => resolve(null), { once: true });
+  });
+}
+
+async function closedRunText(hub: Hub, agentId: string, runId: string | null | undefined) {
+  if (!runId) return null;
+  const summary = await hub.runs.closedRun(agentId, runId);
+  return summary === null ? null : brainText.runClosed(summary);
+}
+
 function outcomeWaiter(hub: Hub, agentId: string) {
   return (id: string, extra: Extra): Promise<Outcome> =>
     withHeartbeat(extra, async () => {
@@ -180,7 +193,7 @@ function outcomeWaiter(hub: Hub, agentId: string) {
       if (existing.status === "expired") return { kind: "decided", approved: false, note: brainText.expiredNote };
       if (existing.status === "cancelled") return { kind: "decided", approved: false, note: brainText.stoppedNote, stopped: true };
       if (existing.status !== "pending") return { kind: "decided", approved: existing.status === "approved", note: existing.note ?? undefined };
-      const answer = await hub.waitForApproval(id, APPROVAL_CALL_CAP_MS);
+      const answer = await Promise.race([hub.waitForApproval(id, APPROVAL_CALL_CAP_MS), untilAborted(extra.signal)]);
       if (!answer) return { kind: "pending" };
       return { kind: "decided", approved: answer.approved, note: answer.note, stopped: answer.status === "cancelled" };
     });
@@ -205,11 +218,7 @@ export async function waitForRunAnswer(hub: Hub, agentId: string, runId: string,
   const answers = waiting.map((row) => hub.waitForApproval(row.id, capMs));
   const now = await hub.runApprovals(agentId, runId);
   if (!now.some((row) => row.status === "pending" && waiting.some((open) => open.id === row.id))) return now;
-  const aborted = new Promise<void>((resolve) => {
-    if (signal?.aborted) return resolve();
-    signal?.addEventListener("abort", () => resolve(), { once: true });
-  });
-  await Promise.race([...answers, aborted]);
+  await Promise.race([...answers, untilAborted(signal)]);
   return hub.runApprovals(agentId, runId);
 }
 
@@ -272,6 +281,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
         }
+        const closed = await closedRunText(hub, agent.id, args.runId);
+        if (closed) return text(closed, true);
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
         const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash));
@@ -290,8 +301,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         "List the approvals asked during a task run: the ones your owner has not answered yet, and the answers to the others. With wait: true, first wait (up to 30 minutes) until one of the unanswered ones gets an answer.",
       schema: z.object({ runId: z.string().min(1).max(200), wait: z.boolean().optional() }),
       run: (async (args: { runId: string; wait?: boolean }, extra: Extra) => {
-        const rows = args.wait ? await withHeartbeat(extra, () => waitForRunAnswer(hub, agent.id, args.runId, extra.signal)) : await hub.runApprovals(agent.id, args.runId);
-        return text(runApprovalsView(args.runId, rows));
+        const open = (await hub.runs.runState(agent.id, args.runId)) === "running";
+        const rows = args.wait && open ? await withHeartbeat(extra, () => waitForRunAnswer(hub, agent.id, args.runId, extra.signal)) : await hub.runApprovals(agent.id, args.runId);
+        return text({ ...runApprovalsView(args.runId, rows), open });
       }) as Builtin["run"],
     },
   ];
@@ -354,7 +366,8 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   const guard = async (input: GuardInput) => {
     const run = input.toOwner ? null : await runningRun(agent.id);
     const handedOff = run?.trigger === "handoff";
-    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId: handedOff ? run?.id : undefined });
+    const runId = input.toOwner ? null : await turnRunId(agent.id, async () => run?.id ?? null);
+    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId });
   };
 
   if (await slackEnabled()) {
@@ -462,7 +475,7 @@ async function guardOutward(
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
   approval: { runId?: string | null; grant?: ApprovalGrant } = {},
-): Promise<GuardResult & { asked?: boolean }> {
+): Promise<GuardResult & { asked?: boolean; pending?: boolean }> {
   const violation = findViolation(agent.rules ?? [], argsSubject(args));
   if (violation) {
     const rule = describeRule(violation.rule);
@@ -475,14 +488,21 @@ async function guardOutward(
     return { ok: true };
   }
   if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
+  const runId = approval.runId ?? null;
+  const closed = await closedRunText(hub, agent.id, runId);
+  if (closed) return { ok: false, asked: true, text: closed.replace(/^not asked:/, "not done:") };
   const hash = payloadHash(target, args);
-  const joined = approval.runId ? await hub.openApprovalAsk(agent.id, { runId: approval.runId, summary, fields, payloadHash: hash }) : null;
-  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant));
+  const earlier = runId ? await hub.reusableApproval(agent.id, runId, hash) : null;
+  if (earlier?.status === "denied") return { ok: false, asked: true, text: brainText.alreadyDenied(earlier.id) };
+  const id = earlier?.id ?? (await hub.createApproval(agent.id, { summary, fields, runId: runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant));
   let outcome = await waitOutcome(id, extra);
-  while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
+  while (!runId && outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
+  if (extra.signal?.aborted) return { ok: false, asked: true, text: "not done: the call was cut off before it could go through" };
+  if (outcome.kind === "pending") return { ok: false, asked: true, pending: true, text: brainText.callPending(id) };
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
   const approvedHash = await hub.approvalPayloadHash(id, agent.id);
-  if (!approvedHash || approvedHash !== payloadHash(target, args)) return { ok: false, asked: true, text: "not done: the arguments differ from what the owner approved" };
+  if (!approvedHash || approvedHash !== hash) return { ok: false, asked: true, text: "not done: the arguments differ from what the owner approved" };
+  if (!(await hub.consumeApproval(id, agent.id))) return { ok: false, asked: true, text: `not done: that approval was already used by the same call [requestId: ${id}]` };
   return { ok: true, asked: true };
 }
 
@@ -528,8 +548,9 @@ async function proxyCall(
   }
   const grant = canAlwaysAllow(ceiling, toolName, tool.annotations) ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant });
-  if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.asked ? "denied" : "blocked" };
+  const runId = await turnRunId(agent.id, async () => run?.id ?? null);
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId, grant });
+  if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.pending ? undefined : allowed.asked ? "denied" : "blocked" };
   const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];
   const parts = content.map((part: { type: string; text?: string }) => (part.type === "text" ? part.text ?? "" : JSON.stringify(part)));
@@ -610,7 +631,7 @@ export async function gateGitPush(hub: Hub, agent: ComputerAgent, push: GitPush,
   const github = await githubConnection(agent);
   if (!github || github.push === "never") return { ok: false, reason: "your owner turned off pushing to GitHub for you" };
   const run = await runningRun(agent.id);
-  const runId = run?.id ?? null;
+  const runId = await turnRunId(agent.id, async () => run?.id ?? null);
   const t = messages.toolAccess;
   const { ask, fields } = gitPushApproval(push, github.push, run?.trigger === "handoff", github.upstream.name, {
     connector: t.fieldConnector,
