@@ -8,7 +8,7 @@ import { Radio } from "@/components/ui/controls";
 import { Segmented } from "@/components/ui/Segmented";
 import { messages } from "@/lib/messages";
 
-export const OFFERED_MODES: ApprovalMode[] = ["always", "on-miss", "off"];
+export const OFFERED_MODES: ApprovalMode[] = ["always", "on-miss", "auto", "off"];
 
 type Change = { mode?: ApprovalMode; fallback?: ApprovalFallback; remove?: ApprovalAllow };
 

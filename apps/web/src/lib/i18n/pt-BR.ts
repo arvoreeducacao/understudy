@@ -258,7 +258,7 @@ export const ptBR: Messages = {
     modes: {
       always: { name: "Perguntar sempre", hint: "Pergunta antes de toda ação que envia, confirma ou apaga, mesmo nos sites que você sempre permite. As tarefas continuam perguntando depois das primeiras vezes." },
       "on-miss": { name: "Perguntar o que não está liberado", hint: "Pergunta antes dessas ações, menos nos sites e ferramentas que você sempre permite. As requisições que a própria página faz perguntam uma vez por site em cada conversa ou execução." },
-      auto: { name: "Automático", hint: "Um revisor confere cada ação com o que você pediu e libera as seguras. O resto ele pergunta para você." },
+      auto: { name: "Automático", hint: "Um modelo de IA pequeno confere cada ação com o que você pediu e libera as seguras; pagamento, conta, cartão e senha sempre vêm para você. Depois de perguntar para você 3 vezes seguidas, você responde tudo até a conversa ou execução terminar." },
       off: { name: "Nunca perguntar", hint: "Age sem perguntar nas suas conversas e tarefas. Mensagens de outras pessoas, webhooks, e-mails e retornos agendados continuam perguntando." },
     },
     listLabel: "Sempre permitidos",
@@ -274,6 +274,11 @@ export const ptBR: Messages = {
     unanswered: (summary: string, approved: boolean, minutes: number) => (approved ? `Ninguém respondeu "${summary}" em ${minutes} minutos, então seguiu, como você escolheu em Aprovações.` : `Ninguém respondeu "${summary}" em ${minutes} minutos, então contou como não, como você escolheu em Aprovações.`),
     saved: "Salvo",
     failed: "Não deu para salvar. Tente de novo.",
+  },
+  reviewer: {
+    allowed: (summary: string, reason: string) => `O revisor liberou: ${summary}. ${reason}`,
+    escalated: (summary: string, reason: string) => `O revisor perguntou para você: ${summary}. ${reason}`,
+    steppedAside: "O revisor perguntou para você 3 vezes seguidas, então você responde todos os pedidos até esta conversa ou execução terminar.",
   },
   brainAccount: {
     either: "Sua assinatura Pro ou Max, ou uma chave só dele",

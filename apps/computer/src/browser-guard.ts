@@ -441,6 +441,17 @@ export function scriptRequestVerdict(
   };
 }
 
+export const SCRIPT_FIELD_LIMIT = 2000;
+
+export function scriptSource(args: Record<string, unknown>, secrets: string[]): string {
+  const code = typeof args.function === "string" ? args.function : typeof args.code === "string" ? args.code : "";
+  return redactSecrets(code, secrets).slice(0, SCRIPT_FIELD_LIMIT);
+}
+
+export function withScript<T extends { fields: { label: string; value: string }[] }>(verdict: T, source: string): T {
+  return source.trim() ? { ...verdict, fields: [...verdict.fields, { label: "Script", value: source }] } : verdict;
+}
+
 export function passedWithoutNote(passed: { request: string; why: string }[]): string[] {
   const byWhy = new Map<string, string[]>();
   for (const entry of passed) byWhy.set(entry.why, [...(byWhy.get(entry.why) ?? []), entry.request]);
@@ -601,6 +612,7 @@ async function serve() {
     };
     const asks = scriptAsks((verdict) => askOwner(verdict, state), notes, conversationSites, state.mode === "run" ? "run" : "conversation");
     const stepHint = String(args.element ?? "");
+    const source = scriptSource(args, secrets());
     const judge = async (request: GatedRequest): Promise<boolean> => {
       const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
       const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint, stepApproval, policy, sitesApprovedIn(sitesFile, state.conversation));
@@ -624,7 +636,7 @@ async function serve() {
         drops.push({ request: verdict.request, pageUrl: verdict.pageUrl, usageLog: verdict.usageLog });
         return false;
       }
-      const approved = await asks.request(verdict, `${request.method.toUpperCase()} ${bareUrl(request.url)}`);
+      const approved = await asks.request(withScript(verdict, source), `${request.method.toUpperCase()} ${bareUrl(request.url)}`);
       if (!approved) blocked = true;
       return approved;
     };

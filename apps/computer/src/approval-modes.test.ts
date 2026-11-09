@@ -163,3 +163,14 @@ test("the turn records whose it is and which conversation it belongs to", async 
     { untrusted: false, conversation: "run:r1" },
   ]);
 });
+
+test("the script that sent a request goes with the ask, cleaned of saved secrets and cut short", async () => {
+  const { scriptSource, withScript, SCRIPT_FIELD_LIMIT } = await import("./browser-guard.ts");
+  assert.equal(scriptSource({ function: "() => fetch('/api', { headers: { token: 's3cr3t-value' } })" }, ["s3cr3t-value"]), "() => fetch('/api', { headers: { token: '••••••' } })");
+  assert.equal(scriptSource({ code: "await page.click('#send')" }, []), "await page.click('#send')");
+  assert.equal(scriptSource({ function: "x".repeat(5000) }, []).length, SCRIPT_FIELD_LIMIT);
+  assert.equal(scriptSource({}, []), "");
+  const ask = { kind: "ask" as const, summary: "Script sent a POST to social.test", fields: [{ label: "Page", value: "https://social.test/" }] };
+  assert.deepEqual(withScript(ask, "() => 1").fields.at(-1), { label: "Script", value: "() => 1" });
+  assert.equal(withScript(ask, " "), ask);
+});

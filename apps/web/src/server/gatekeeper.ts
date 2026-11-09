@@ -21,6 +21,7 @@ import { taskTools } from "./task-tools";
 import { followupTools } from "./followup-tools";
 import { turnRunId, turnUntrusted, turnWakesFollowup } from "./followups";
 import { untrustedTurnFor } from "./approval-modes";
+import { autoReview } from "./auto-review";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { SLACK_LIMITS, slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
@@ -293,7 +294,9 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         }
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined));
+        const grant = site ? { host: site } : undefined;
+        const reviewed = joined || mode !== "auto" ? null : await autoReview(hub, agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant });
+        const id = joined ?? (reviewed?.kind === "approved" ? reviewed.id : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -506,7 +509,8 @@ async function guardOutward(
   const hash = payloadHash(target, args);
   const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
   const joined = approval.runId ? await hub.openApprovalAsk(agent.id, { runId: approval.runId, summary, fields, payloadHash: hash }) : null;
-  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant));
+  const reviewed = joined || mode !== "auto" ? null : await autoReview(hub, agent.id, { summary, fields, runId: approval.runId ?? undefined }, { lifetimeSeconds: APPROVAL_LIFETIME_SECONDS, payloadHash: hash, grant });
+  const id = joined ?? (reviewed?.kind === "approved" ? reviewed.id : await hub.createApproval(agent.id, { summary, fields: reviewed?.fields ?? fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant));
   let outcome = await waitOutcome(id, extra);
   while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };

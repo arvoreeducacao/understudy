@@ -45,6 +45,9 @@ FAKE_FRAME_JPEG=/path/to/any.jpg npx tsx scripts/fake-host.ts
 | `UNDERSTUDY_TRANSCRIBE_API_KEY` | Key for the transcriber. For `gateway` it falls back to `AI_GATEWAY_API_KEY` |
 | `UNDERSTUDY_TRANSCRIBE_MODEL` | Optional. Defaults to `openai/whisper-1` (gateway) or `whisper-1` (openai). Use a model that returns segment timestamps so narration lines up with the steps |
 | `UNDERSTUDY_TRANSCRIBE_URL` | Optional. Base URL of the transcriber (`https://ai-gateway.vercel.sh` or `https://api.openai.com/v1` by default) |
+| `UNDERSTUDY_REVIEWER_API_KEY` | Optional. Vercel AI Gateway key for the reviewer of the automatic approval mode. Falls back to `AI_GATEWAY_API_KEY`; without either, the automatic mode asks the owner like "ask unless allowed" |
+| `UNDERSTUDY_REVIEWER_MODEL` | Optional. Defaults to `anthropic/claude-haiku-5.5` |
+| `UNDERSTUDY_REVIEWER_URL` | Optional. OpenAI-compatible base URL of the reviewer, `https://ai-gateway.vercel.sh/v1` by default |
 | `UNDERSTUDY_TRANSCRIBE_LANGUAGE` | Optional. ISO language hint for the transcriber, e.g. `pt` |
 | `UNDERSTUDY_EXTENSION_DIR` | Optional. Folder with the built extension that `/api/extension/package.zip` serves. Defaults to `../extension/dist` next to the app |
 | `UNDERSTUDY_COMPUTER_IMAGE` | Image sent in `computer_ensure` (the host may override it) |

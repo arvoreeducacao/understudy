@@ -388,3 +388,35 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
     await setApprovalMode("on-miss");
   }
 });
+
+test("in automatic mode a connector call the reviewer allows runs at once, and the admin ceiling still goes to the owner", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  let reviewed = 0;
+  const reviewer = createServer((_req, res) => {
+    reviewed++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: '{"decision":"allow","reason":"the owner asked for this draft"}' } }] }));
+  });
+  process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewer)}/v1`;
+  process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+  await setApprovalMode("auto");
+  try {
+    assert.equal(await call("mail__create_draft", { to: "client@example.com", body: "Hello" }), "create_draft done");
+    assert.equal((await lastCall())?.verdict, "approved");
+    const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.agentId, ids.agent));
+    assert.equal(row.answeredVia, "reviewer");
+    assert.equal(reviewed, 1);
+    await getDb().update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+    const pending = call("mail__create_draft", { to: "client@example.com", body: "Second" });
+    const approval = await pendingApproval();
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(reviewed, 1);
+  } finally {
+    await setApprovalMode("on-miss");
+    delete process.env.UNDERSTUDY_REVIEWER_API_KEY;
+    delete process.env.UNDERSTUDY_REVIEWER_URL;
+    reviewer.close();
+  }
+});

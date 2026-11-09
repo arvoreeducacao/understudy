@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, o
 import { brainText } from "@/lib/brain-text";
 import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
 import { UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
+import { ESCALATIONS_BEFORE_STEPPING_ASIDE, REVIEWER_FIELD } from "../reviewer";
 import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
 import { storableJson, storableText } from "@/lib/db/storable";
@@ -86,6 +87,51 @@ export class Approvals {
     if (askedBy && roomId) this.hub.rooms.approvalRaised(agentId, roomId, id, request.summary, askedBy).catch((error) => log("room_approval_error", { agentId, error: String(error) }));
     this.notify(agentId, view, askedBy, guest).catch((error) => log("approval_notify_error", { error: String(error) }));
     return id;
+  }
+
+  async createReviewed(agentId: string, request: Partial<ApprovalRequest> & { summary: string }, timeoutSeconds: number, payloadHash: string | undefined, grant: ApprovalGrant | undefined, note: string) {
+    const id = newId("apr");
+    const now = new Date();
+    const askedBy = request.runId ? null : this.hub.turnAudience(agentId);
+    await getDb()
+      .insert(schema.approvals)
+      .values({
+        id,
+        agentId,
+        runId: request.runId || null,
+        stepId: request.stepId ?? null,
+        summary: storableText(request.summary),
+        fields: storableJson(request.fields ?? []),
+        source: "mcp",
+        payloadHash: payloadHash ?? null,
+        grant: grant ?? null,
+        askedBy,
+        expiresAt: new Date(now.getTime() + timeoutSeconds * 1000),
+        status: "approved",
+        note: storableText(note),
+        answeredAt: now,
+        answeredVia: "reviewer",
+      });
+    log("approval_reviewed", { agentId, approvalId: id });
+    return id;
+  }
+
+  async recentReviews(agentId: string, conversation: { runId: string | null; askedBy: string | null; since: Date }) {
+    const rows = await getDb()
+      .select({ via: schema.approvals.answeredVia })
+      .from(schema.approvals)
+      .where(
+        and(
+          eq(schema.approvals.agentId, agentId),
+          conversation.runId
+            ? eq(schema.approvals.runId, conversation.runId)
+            : and(isNull(schema.approvals.runId), conversation.askedBy ? eq(schema.approvals.askedBy, conversation.askedBy) : isNull(schema.approvals.askedBy), gte(schema.approvals.createdAt, conversation.since)),
+          or(eq(schema.approvals.answeredVia, "reviewer"), sql`${schema.approvals.fields} @> ${JSON.stringify([{ label: REVIEWER_FIELD }])}::jsonb`),
+        ),
+      )
+      .orderBy(desc(schema.approvals.createdAt))
+      .limit(ESCALATIONS_BEFORE_STEPPING_ASIDE);
+    return rows.map((row) => (row.via === "reviewer" ? ("allow" as const) : ("escalate" as const)));
   }
 
   async openAsk(agentId: string, request: { runId: string; stepId?: string; summary: string; fields: ApprovalRequest["fields"]; payloadHash?: string }) {

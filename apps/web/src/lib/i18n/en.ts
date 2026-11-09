@@ -258,7 +258,7 @@ export const en = {
     modes: {
       always: { name: "Always ask", hint: "Asks before every action that sends, submits or deletes, even on sites you always allow. Tasks keep asking after their first runs." },
       "on-miss": { name: "Ask unless allowed", hint: "Asks before those actions, except on the sites and tools you always allow. A page's own background requests ask once per site in each conversation or task run." },
-      auto: { name: "Automatic", hint: "A reviewer checks each action against what you asked and lets the safe ones through. It asks you about the rest." },
+      auto: { name: "Automatic", hint: "A small AI model checks each action against what you asked and lets the safe ones through; payments, accounts, cards and passwords always come to you. After it asks you 3 times in a row, you answer everything until that conversation or task run ends." },
       off: { name: "Never ask", hint: "Acts without asking in your own conversations and tasks. Messages from other people, webhooks, emails and follow-ups still ask." },
     },
     listLabel: "Always allowed",
@@ -274,6 +274,11 @@ export const en = {
     unanswered: (summary: string, approved: boolean, minutes: number) => (approved ? `Nobody answered "${summary}" in ${minutes} minutes, so it went ahead, as you chose in Approvals.` : `Nobody answered "${summary}" in ${minutes} minutes, so it counted as a no, as you chose in Approvals.`),
     saved: "Saved",
     failed: "Could not save. Try again.",
+  },
+  reviewer: {
+    allowed: (summary: string, reason: string) => `Reviewer let this go ahead: ${summary}. ${reason}`,
+    escalated: (summary: string, reason: string) => `Reviewer asked you: ${summary}. ${reason}`,
+    steppedAside: "The reviewer asked you 3 times in a row, so you answer every request until this conversation or task run ends.",
   },
   brainAccount: {
     either: "Your Pro or Max subscription, or a key of its own",

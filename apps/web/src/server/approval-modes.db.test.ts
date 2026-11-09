@@ -123,6 +123,7 @@ after(async () => {
   const { getDb, schema, getPool } = await import("@/lib/db");
   await getDb().delete(schema.user).where(inArray(schema.user.id, [ids.owner, ids.member]));
   panel.close();
+  reviewerServer?.close();
   await getPool().end();
   setTimeout(() => process.exit(0), 100).unref();
 });
@@ -249,4 +250,97 @@ test("when nobody answers in 30 minutes, the owner's choice decides: wait, count
   const notes = await db.select().from(schema.messages).where(eq(schema.messages.agentId, ids.agent));
   assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_go"') && note.text.includes("went ahead")));
   assert.ok(notes.some((note) => note.role === "system" && note.text.includes('"Step apr_am_wait"') && note.text.includes("counted as a no")));
+});
+
+const reviews: { content: string }[] = [];
+let reviewerServer: Server | null = null;
+
+async function fakeReviewer() {
+  if (reviewerServer) return;
+  reviewerServer = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as { messages: { role: string; content: string }[] };
+    const content = body.messages.find((message) => message.role === "user")?.content ?? "";
+    reviews.push({ content });
+    const decision = /POST to www\.social\.test/.test(content) ? '{"decision":"allow","reason":"the owner asked to like posts on this site"}' : '{"decision":"escalate","reason":"the owner did not ask for a public comment"}';
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: decision } }] }));
+  });
+  process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewerServer)}/v1`;
+  process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+}
+
+async function ownerSaid(text: string) {
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().insert(schema.messages).values({ id: `msg_am_${Math.random().toString(36).slice(2)}`, agentId: ids.agent, role: "user", text, authorId: ids.owner });
+}
+
+test("in automatic mode the reviewer lets a safe action through at once, and its decision is kept", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  await ownerSaid("Like Ana's three newest posts on the social site");
+  const answer = await call("request_approval", { ...scriptAsk, fields: [...scriptAsk.fields, { label: "Script", value: "() => document.querySelector('#like').click()" }] });
+  assert.match(answer, /^approved: the reviewer your owner chose checked this against their request \(the owner asked to like posts on this site\)/);
+  assert.equal(reviews.length, 1);
+  assert.match(reviews[0].content, /<owner_request>\nLike Ana's three newest posts on the social site\n<\/owner_request>/);
+  assert.match(reviews[0].content, /Script: \(\) =› document\.querySelector\('#like'\)\.click\(\)/);
+  const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.agentId, ids.agent));
+  assert.equal(row.status, "approved");
+  assert.equal(row.answeredVia, "reviewer");
+  assert.deepEqual(row.grant, { host: "social.test" });
+  const activity = await getDb().select().from(schema.messages).where(and(eq(schema.messages.agentId, ids.agent), eq(schema.messages.role, "activity")));
+  assert.ok(activity.some((line) => line.text.startsWith("Reviewer let this go ahead: Script sent a POST to www.social.test.")));
+});
+
+test("an escalation reaches the owner with the reviewer's reason, and three in a row make the reviewer step aside", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  await ownerSaid("Read the comments under my last post");
+  for (let round = 1; round <= 3; round++) {
+    const pending = call("request_approval", { summary: `Post comment ${round} on forum.test`, fields: [{ label: "Text", value: "Great point!" }] });
+    const approval = await pendingApproval();
+    assert.deepEqual(approval.fields.at(-1), { label: "Reviewer", value: "the owner did not ask for a public comment" });
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^denied/);
+  }
+  assert.equal(reviews.length, 3);
+  const fourth = call("request_approval", { ...scriptAsk });
+  const approval = await pendingApproval();
+  assert.equal(reviews.length, 3);
+  assert.ok(!approval.fields.some((field) => field.label === "Reviewer"));
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  await fourth;
+  const activity = await getDb().select().from(schema.messages).where(and(eq(schema.messages.agentId, ids.agent), eq(schema.messages.role, "activity")));
+  assert.ok(activity.some((line) => line.text.startsWith("The reviewer asked you 3 times in a row")));
+});
+
+test("step asks, payments and turns that are not the owner's never reach the reviewer", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { getDb, schema } = await import("@/lib/db");
+  await fakeReviewer();
+  reviews.length = 0;
+  await setPolicy({ mode: "auto", allow: [], fallback: "wait" });
+  const hub = createHub();
+  const askedAndDenied = async (args: Record<string, unknown>) => {
+    const pending = call("request_approval", args);
+    const approval = await pendingApproval();
+    await hub.answerApproval(approval.id, false, undefined, ids.owner);
+    await pending;
+    return approval;
+  };
+  await getDb().insert(schema.runs).values({ id: "run_am_auto", agentId: ids.agent, trigger: "schedule", status: "running" });
+  await askedAndDenied({ summary: "Remove the book from the shelf", runId: "run_am_auto", stepId: "s2" });
+  await getDb().delete(schema.runs).where(eq(schema.runs.id, "run_am_auto"));
+  const paying = await askedAndDenied({ summary: 'Submit "Pay now" on shop.test', fields: [{ label: "Amount", value: "120.00" }] });
+  assert.deepEqual(paying.fields.at(-1), { label: "Reviewer", value: "payments, accounts, cards and passwords always go to the owner" });
+  noteTurn(ids.agent, { untrusted: true });
+  await askedAndDenied({ ...scriptAsk });
+  assert.equal(reviews.length, 0);
 });

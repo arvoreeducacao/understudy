@@ -353,7 +353,7 @@ export type ApprovalGrant = ConnectorGrant | { host: string } | { gatekeeperTool
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 
-export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback";
+export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback" | "reviewer";
 
 export type SlackMessageRef = { channel: string; ts: string };
 

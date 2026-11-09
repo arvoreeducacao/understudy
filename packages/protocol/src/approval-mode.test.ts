@@ -71,8 +71,10 @@ test("turns that are not the owner's never go below asking what is not allowed",
   assert.equal(effectiveApprovalMode("off", { untrusted: true }), "on-miss");
   assert.equal(effectiveApprovalMode("on-miss", { untrusted: true }), "on-miss");
   assert.equal(effectiveApprovalMode("always", { untrusted: true }), "always");
-  assert.equal(effectiveApprovalMode("auto"), "on-miss");
+  assert.equal(effectiveApprovalMode("auto"), "auto");
+  assert.equal(effectiveApprovalMode("auto", { untrusted: true }), "on-miss");
   assert.equal(listCoversActions("on-miss"), true);
+  assert.equal(listCoversActions("auto"), true);
   assert.equal(listCoversActions("always"), false);
 });
 
