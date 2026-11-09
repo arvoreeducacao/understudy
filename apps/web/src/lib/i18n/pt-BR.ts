@@ -257,7 +257,7 @@ export const ptBR: Messages = {
     modeLabel: "Quando perguntar",
     modes: {
       always: { name: "Perguntar sempre", hint: "Pergunta antes de toda ação que envia, confirma ou apaga, mesmo nos sites que você sempre permite. As tarefas continuam perguntando depois das primeiras vezes." },
-      "on-miss": { name: "Perguntar o que não está liberado", hint: "Pergunta antes dessas ações, menos nos sites e ferramentas que você sempre permite. As requisições que a própria página faz perguntam uma vez por site em cada conversa ou execução." },
+      "on-miss": { name: "Perguntar o que não está liberado", hint: "Pergunta antes dessas ações, menos nos sites e ferramentas que você sempre permite. Comprar, apagar, mudar permissão e criar conta perguntam sempre. As requisições que a própria página faz perguntam uma vez por site em cada conversa ou execução." },
       auto: { name: "Automático", hint: "Um revisor confere cada ação com o que você pediu e libera as seguras. O resto ele pergunta para você." },
       off: { name: "Nunca perguntar", hint: "Age sem perguntar nas suas conversas e tarefas. Mensagens de outras pessoas, webhooks, e-mails e retornos agendados continuam perguntando." },
     },
@@ -1781,7 +1781,7 @@ export const ptBR: Messages = {
     approveAlwaysTool: (tool: string) => `Sempre permitir ${tool}`,
     approveAlwaysHint: (tool: string) => `Aprova esta chamada e deixa ${tool} rodar sem perguntar daqui em diante. Dá para mudar nas configurações do understudy.`,
     approveAlwaysOn: (host: string) => `Sempre permitir em ${host}`,
-    approveAlwaysOnHint: (host: string) => `Aprova este pedido e deixa o understudy agir em ${host} sem perguntar daqui em diante. Dá para tirar nas configurações do understudy, em Aprovações.`,
+    approveAlwaysOnHint: (host: string) => `Aprova este pedido e deixa o understudy agir em ${host} sem perguntar daqui em diante, menos para comprar, apagar, mudar permissão ou criar conta. Dá para tirar nas configurações do understudy, em Aprovações.`,
     showActions: (n: number) => (n === 1 ? "Ver 1 ação" : `Ver ${n} ações`),
     hideActions: "Esconder ações",
     counts: (allow: number, ask: number, never: number) => `${allow} liberadas · ${ask} perguntam antes · ${never} desligadas`,
