@@ -71,9 +71,10 @@ test("the reviewer calls the gateway with its own model and key, and a failure e
   assert.equal((await broken.review(input)).decision, "escalate");
 });
 
-test("the reviewer has its own key and falls back to the panel's gateway key", () => {
+test("the reviewer runs only on a key of its own, never on another feature's gateway key", () => {
   assert.equal(reviewerFromEnv({}), null);
-  assert.equal(reviewerFromEnv({ AI_GATEWAY_API_KEY: "shared" })?.model, REVIEWER_DEFAULT_MODEL);
+  assert.equal(reviewerFromEnv({ AI_GATEWAY_API_KEY: "transcription-key" }), null);
+  assert.equal(reviewerFromEnv({ UNDERSTUDY_REVIEWER_API_KEY: "own" })?.model, REVIEWER_DEFAULT_MODEL);
   assert.equal(reviewerFromEnv({ UNDERSTUDY_REVIEWER_API_KEY: "own", UNDERSTUDY_REVIEWER_MODEL: "test/other" })?.model, "test/other");
 });
 

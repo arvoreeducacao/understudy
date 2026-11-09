@@ -105,7 +105,7 @@ function value(env: Env, key: string) {
 }
 
 export function reviewerFromEnv(env: Env = process.env, call?: Fetch): Reviewer | null {
-  const apiKey = value(env, "UNDERSTUDY_REVIEWER_API_KEY") ?? value(env, "AI_GATEWAY_API_KEY");
+  const apiKey = value(env, "UNDERSTUDY_REVIEWER_API_KEY");
   if (!apiKey) return null;
   return gatewayReviewer({ apiKey, model: value(env, "UNDERSTUDY_REVIEWER_MODEL") ?? REVIEWER_DEFAULT_MODEL, baseUrl: value(env, "UNDERSTUDY_REVIEWER_URL") ?? REVIEWER_DEFAULT_URL, ...(call ? { fetch: call } : {}) });
 }
