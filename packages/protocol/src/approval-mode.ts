@@ -155,15 +155,18 @@ const SENSITIVE_WORDS = new Set([
   "closeaccount", "deleteaccount", "send", "share", "invite", "comment", "reply", "transaction", "transactions", "pix", "boleto", "withdraw", "donate", "auth", "oauth", "token",
   "otp", "2fa", "mfa", "password", "passwd", "senha", "finalizar", "criarconta", "entrar", "transferencia", "sacar", "saque", "doar", "permissao", "permissoes", "amount",
   "valor", "quantia", "topup", "revoke", "paid", "paying", "payer", "payout", "payouts", "sent", "bought", "ordered", "ordering", "sharing", "shared", "borrar", "lixeira", "doacao",
-  "doacoes",
+  "doacoes", "card", "cartao", "cvv", "cvc", "mandar", "erase", "discard", "refund", "redeem", "cashout", "wire", "checkout", "crearcuenta", "iniciarsesion", "quitar",
 ]);
 
 const SENSITIVE_PREFIXES = [
   "verif", "authent", "authori", "otp", "permiss", "cadastr", "transfer", "purchas", "checkout", "payment", "pagament", "publish", "comment", "comenta", "delet", "invit",
   "convid", "compartilh", "envi", "pag", "exclu", "apag", "remov", "compr", "post", "publi", "encaminh", "forward", "confirm", "pedido", "assin", "subscri", "unsubscri", "revog",
   "revok", "admin", "membr", "member", "messag", "tweet", "charge", "trash", "suppr", "envoy", "losch", "kauf", "bezahl", "zahlung", "elimin", "deactiv", "desativ", "encerr",
-  "resgat", "withdraw", "sell", "vend", "excluir", "send", "respond", "contrat", "aprov", "approv", "achet", "deposit", "retweet", "repost", "archiv",
+  "resgat", "withdraw", "sell", "vend", "excluir", "send", "respond", "contrat", "aprov", "approv", "achet", "deposit", "retweet", "repost", "archiv", "suprim", "retir",
+  "compart", "reenvi", "aprob", "descart",
 ];
+
+const LOOSE_WORDS = new Set(["order", "orders", "token", "sent"]);
 
 const NOT_SENSITIVE_PREFIXES = ["environ", "page", "pagin", "compress", "comprehen", "compromis", "postal", "postcode", "postgres", "sendgrid"];
 
@@ -171,7 +174,9 @@ const NOT_SENSITIVE_WORDS = new Set(["public", "publico", "publicos", "publicly"
 
 const OPERATION_NAMES = /"operationName"\s*:\s*"([A-Za-z_]\w{0,99})"|operationName=([A-Za-z_]\w{0,99})|\bmutation\s+([A-Za-z_]\w{0,99})/g;
 
-const GRAPHQL_MUTATION = /\bmutation\b/;
+const GRAPHQL_MUTATION = /mutation/i;
+
+const PERSISTED_QUERY = /persistedQuery|"doc_id"|(?:^|&)doc_id=/;
 
 const BODY_VALUE = /^[^\s]{1,64}$/;
 
@@ -192,8 +197,9 @@ function sensitiveWord(word: string): boolean {
   return SENSITIVE_PREFIXES.some((prefix) => word.startsWith(prefix));
 }
 
-function sensitiveWords(tokens: string[]): boolean {
-  return tokens.some(sensitiveWord) || tokens.slice(1).some((token, index) => SENSITIVE_WORDS.has(tokens[index] + token));
+function sensitiveWords(tokens: string[], loose = false): boolean {
+  const kept = loose ? tokens.filter((token) => !LOOSE_WORDS.has(token)) : tokens;
+  return kept.some(sensitiveWord) || kept.slice(1).some((token, index) => SENSITIVE_WORDS.has(kept[index] + token));
 }
 
 export function confirmsAlways(text: string): boolean {
@@ -210,10 +216,7 @@ function bodyParts(body: string): string[] {
     }
     if (Array.isArray(value)) return value.forEach((item) => visit(item, depth + 1));
     if (value && typeof value === "object") {
-      for (const [key, item] of Object.entries(value)) {
-        parts.push(key);
-        visit(item, depth + 1);
-      }
+      for (const item of Object.values(value)) visit(item, depth + 1);
     }
   };
   try {
@@ -221,10 +224,7 @@ function bodyParts(body: string): string[] {
     return parts;
   } catch {}
   if (/^[^\s{}[\]]*=/.test(body)) {
-    for (const [key, value] of new URLSearchParams(body)) {
-      parts.push(key);
-      if (BODY_VALUE.test(value)) parts.push(value);
-    }
+    for (const value of new URLSearchParams(body).values()) if (BODY_VALUE.test(value)) parts.push(value);
   }
   return parts;
 }
@@ -236,15 +236,15 @@ export function asksEveryTime(url: string, body?: string): boolean {
   } catch {
     return true;
   }
-  const query = [...parsed.searchParams].flat().join(" ");
   let path = parsed.pathname;
   try {
     path = decodeURIComponent(path);
   } catch {}
-  if (sensitiveWords(words(`${path} ${query}`))) return true;
+  if (sensitiveWords(words(path))) return true;
+  if ([...parsed.searchParams.values()].some((value) => BODY_VALUE.test(value) && sensitiveWords(words(value), true))) return true;
   if (!body) return false;
   const head = body.slice(0, 20_000);
-  if (GRAPHQL_MUTATION.test(head)) return true;
+  if (GRAPHQL_MUTATION.test(head) || PERSISTED_QUERY.test(head)) return true;
   if ([...head.matchAll(OPERATION_NAMES)].some((match) => sensitiveWords(words(match[1] ?? match[2] ?? match[3] ?? "")))) return true;
-  return bodyParts(head).some((part) => sensitiveWords(words(part)));
+  return bodyParts(head).some((part) => sensitiveWords(words(part), true));
 }

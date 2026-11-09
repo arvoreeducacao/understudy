@@ -97,6 +97,13 @@ test("sending, transfers, payments, sign-ins and deletes are asked every time, b
   assert.equal(asksEveryTime("https://api.github.com/graphql", JSON.stringify({ operationName: "SubmitTransaction", variables: {} })), true);
   assert.equal(asksEveryTime("https://api.github.com/graphql", JSON.stringify({ query: "query { viewer { login } }" })), false);
   assert.equal(asksEveryTime("https://app.test/api/save", JSON.stringify({ text: "please pay me later", draft: true })), false);
+  assert.equal(asksEveryTime("https://x.test/graphql", JSON.stringify({ extensions: { persistedQuery: { sha256Hash: "abc" } }, variables: {} })), true);
+  assert.equal(asksEveryTime("https://social.test/api/graphql/", "doc_id=123&variables=%7B%7D"), true);
+  assert.equal(asksEveryTime("https://social.test/api/graphql/", "fb_api_req_friendly_name=useAddReactionMutation&variables=%7B%7D"), true);
+  assert.equal(asksEveryTime("https://x.test/gql", JSON.stringify({ query: "MUTATION Save { save }" })), true);
+  assert.equal(asksEveryTime("https://x.test/api/list?order=desc&sort_order=asc&token=abc", JSON.stringify({ order: "desc", token: "abc", authenticity_token: "z", _token: "y", status: "sent" })), false);
+  for (const text of ["Card number", "Cartão", "CVV", "Quitar", "Borrar", "Suprimir", "Retirar", "Compartir", "Reenviar", "Aprobar", "Crear cuenta", "Iniciar sesión", "Mandar", "Descartar", "Check out", "Erase", "Discard", "Refund", "Redeem", "Cash out", "Wire"])
+    assert.equal(confirmsAlways(`click ${text}`), true, text);
 });
 
 test("turns that are not the owner's ask as before, ignoring the list", () => {

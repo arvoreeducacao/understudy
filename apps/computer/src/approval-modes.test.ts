@@ -80,7 +80,9 @@ test("a script request asks once per site per conversation, and the list covers 
   assert.equal(always.kind, "ask");
   assert.equal(always.kind === "ask" && always.site, undefined);
   const run: TurnState = { mode: "run", runId: "r1", approvalsRequired: true, askSteps: [{ id: "s1", text: "Like the newest posts" }], conversation: "run:r1" };
-  assert.deepEqual(scriptRequestVerdict(run, [], post("https://www.social.test/a"), "like the newest posts", null, policy(), ["www.social.test"]), { kind: "pass", without: "your owner approved www.social.test earlier in this run" });
+  const stepAsk = scriptRequestVerdict(run, [], post("https://www.social.test/a"), "like the newest posts", null, policy({ hosts: ["www.social.test"] }), ["www.social.test"]);
+  assert.equal(stepAsk.kind === "ask" && stepAsk.stepId, "s1");
+  assert.equal(stepAsk.kind === "ask" && stepAsk.site, undefined);
   assert.equal(scriptRequestVerdict(chat, [], { ...post("https://www.google-analytics.com/g/collect"), pageUrl: "https://shop.test/" }, "", null, policy()).kind, "drop");
   assert.deepEqual(passedWithoutNote([{ request: "POST social.test/a", why: "x" }, { request: "POST social.test/a", why: "x" }, { request: "POST shop.test/b", why: "y" }]), ["sent without asking (x): POST social.test/a ×2", "sent without asking (y): POST shop.test/b"]);
 });
@@ -196,7 +198,7 @@ test("a sign-in, code, password, payment, delete or send request asks every time
   await asks.request(read as Extract<typeof read, { kind: "ask" }>, "POST books.test/api/catalog/search");
   await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
   await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
-  assert.equal(asked.length, 2);
+  assert.equal(asked.length, 3);
 });
 
 test("buying, deleting, changing permissions or creating an account asks even on an always-allowed site, unless the owner never wants to be asked", async () => {
@@ -228,11 +230,33 @@ test("an action asks every time when its page address or a field's label is sens
   assert.equal(mutation.kind === "ask" && mutation.everyTime, true);
 });
 
-test("in a run, a script request outside the steps is dropped before any site shortcut", () => {
+test("an [ASK FIRST] step wins over the list, a button with no readable or too long a name asks every time", () => {
+  const run: TurnState = { mode: "run", runId: "r5", approvalsRequired: true, askSteps: [{ id: "s3", text: "Pay the invoice" }], conversation: "run:r5" };
+  const listed = policy({ hosts: ["www.social.test"] });
+  const stepClick = decide(run, 'submit "Pay the invoice"', element({ name: "Pay the invoice" }), null, listed);
+  assert.equal(stepClick.kind === "ask" && stepClick.stepId, "s3");
+  const chatTurn: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
+  const unnamed = decide(chatTurn, 'submit "form"', element({ name: "" }), null, listed);
+  assert.equal(unnamed.kind === "ask" && unnamed.everyTime, true);
+  const long = decide(chatTurn, 'submit "Save"', element({ name: `${"Save ".repeat(500)}and pay now` }), null, listed);
+  assert.equal(long.kind === "ask" && long.everyTime, true);
+});
+
+test("a yes for an every-time request covers that request only, never another body to the same address", async () => {
+  const chatTurn: TurnState = { mode: "chat", conversation: "chat:owner:2026-01-05" };
+  const asked: string[] = [];
+  const asks = scriptAsks(async (ask) => (asked.push(ask.fields.find((field) => field.label === "Body")?.value ?? ""), { approved: true, text: "approved" }), [], null, memorySites());
+  const pix = (amount: string) => scriptRequestVerdict(chatTurn, [], { method: "POST", url: "https://www.bank.test/api/pix", body: JSON.stringify({ amount }), pageUrl: "https://www.bank.test/" }, "", null, policy(), []) as Extract<ReturnType<typeof scriptRequestVerdict>, { kind: "ask" }>;
+  assert.equal(await asks.request(pix("10"), "POST www.bank.test/api/pix"), true);
+  assert.equal(await asks.request(pix("5000"), "POST www.bank.test/api/pix"), true);
+  assert.equal(asked.length, 2);
+});
+
+test("in a run, a script request outside the steps is dropped, and one inside an ask step skips the list and site shortcuts", () => {
   const run: TurnState = { mode: "run", runId: "r9", approvalsRequired: true, askSteps: [{ id: "s1", text: "Post the update" }], conversation: "run:r9" };
   assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "", null, policy({ hosts: ["social.test"] }), ["social.test"]).kind, "drop");
   assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "", null, policy(), ["social.test"]).kind, "drop");
-  assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "post the update", null, policy(), ["www.social.test"]).kind, "pass");
+  assert.equal(scriptRequestVerdict(run, [], post("https://www.social.test/api/other"), "post the update", null, policy({ hosts: ["www.social.test"] }), ["www.social.test"]).kind, "ask");
 });
 
 test("a bare public suffix or shared hosting domain is never a site to allow", () => {
