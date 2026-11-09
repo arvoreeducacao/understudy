@@ -111,8 +111,10 @@ test("turns that are not the owner's ask as before, ignoring the list", () => {
   assert.equal(effectiveApprovalMode("off", { untrusted: true }), "always");
   assert.equal(effectiveApprovalMode("on-miss", { untrusted: true }), "always");
   assert.equal(effectiveApprovalMode("always", { untrusted: true }), "always");
-  assert.equal(effectiveApprovalMode("auto"), "on-miss");
+  assert.equal(effectiveApprovalMode("auto"), "auto");
+  assert.equal(effectiveApprovalMode("auto", { untrusted: true }), "always");
   assert.equal(listCoversActions("on-miss"), true);
+  assert.equal(listCoversActions("auto"), true);
   assert.equal(listCoversActions("always"), false);
 });
 

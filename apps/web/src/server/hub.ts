@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { parseComputerToServer, type ApprovalRequest, type Attachment, type ComputerToServer, type JobInfo, type ServerToComputer } from "@understudy/protocol";
 import { canChat, canManage, type Access } from "@/lib/access";
 import { getDb, schema } from "@/lib/db";
-import type { ApprovalGrant, ApprovalVia, MessageArtifact, RunTrigger } from "@/lib/db/schema";
+import type { ApprovalGrant, ApprovalReview, ApprovalVia, MessageArtifact, RunTrigger } from "@/lib/db/schema";
 import { newId } from "@/lib/ids";
 import { messages as copy } from "@/lib/messages";
 import { Approvals } from "./hub/approvals";
@@ -452,16 +452,17 @@ export class Hub {
     timeoutSeconds?: number,
     payloadHash?: string,
     grant?: ApprovalGrant,
+    review?: ApprovalReview,
   ) {
-    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant);
+    return this.approvals.create(agentId, request, source, timeoutSeconds, payloadHash, grant, review);
   }
 
   openApprovalAsk(agentId: string, request: Parameters<Approvals["openAsk"]>[1]) {
     return this.approvals.openAsk(agentId, request);
   }
 
-  reusableApproval(agentId: string, runId: string, payloadHash: string) {
-    return this.approvals.reusable(agentId, runId, payloadHash);
+  reusableApproval(agentId: string, runId: string, payloadHash: string, byPerson = false) {
+    return this.approvals.reusable(agentId, runId, payloadHash, byPerson);
   }
 
   consumeApproval(id: string, agentId: string) {
@@ -480,8 +481,8 @@ export class Hub {
     return this.approvals.payloadHash(id, agentId);
   }
 
-  useActionApproval(agentId: string, runId: string, hash: string, maxAgeMs: number) {
-    return this.approvals.useActionApproval(agentId, runId, hash, maxAgeMs);
+  useActionApproval(agentId: string, runId: string, hash: string, maxAgeMs: number, byPerson = false) {
+    return this.approvals.useActionApproval(agentId, runId, hash, maxAgeMs, byPerson);
   }
 
   approvalOutcome(id: string, agentId: string) {

@@ -25,6 +25,7 @@ export const brainText = {
   ownerSlackOff: "Your owner got the message in the panel chat. Slack is not connected to the panel, so nothing went to Slack.",
   ownerSlackFailed: (error: string) => `Your owner got the message in the panel chat, but Slack refused the direct message (${error}).`,
   unanswered: (minutes: number) => `nobody answered in ${minutes} minutes, and your owner chose to count that as a no. Skip this item and report it`,
+  reviewerApproved: (reason: string) => `the reviewer your owner chose checked this against their request (${reason}). Do exactly what you described. Their rules still apply`,
   approvalsOff: "approved: your owner lets you act without asking in their own conversations, so go ahead and do exactly what you described. Their rules still apply",
   stoppedNote: "your owner stopped what you were doing, so this step was not done. Do not try it again unless your owner asks",
   runInput: (trigger: string, input: string) =>

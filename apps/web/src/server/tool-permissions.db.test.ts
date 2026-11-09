@@ -390,6 +390,97 @@ test("the admin ceiling keeps asking even when the owner never wants to be asked
   }
 });
 
+test("in automatic mode a connector call the reviewer allows runs at once, and the admin ceiling still goes to the owner", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  let reviewed = 0;
+  const reviewer = createServer((_req, res) => {
+    reviewed++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: '{"decision":"allow","reason":"the owner asked for this draft"}' } }] }));
+  });
+  process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewer)}/v1`;
+  process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+  (await import("./followups")).noteTurn(ids.agent, {});
+  await setApprovalMode("auto");
+  try {
+    assert.equal(await call("mail__create_draft", { to: "client@example.com", body: "Hello" }), "create_draft done");
+    assert.equal((await lastCall())?.verdict, "approved");
+    const [row] = await getDb().select().from(schema.approvals).where(eq(schema.approvals.agentId, ids.agent));
+    assert.equal(row.answeredVia, "reviewer");
+    assert.equal(reviewed, 1);
+    await getDb().update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+    const pending = call("mail__create_draft", { to: "client@example.com", body: "Second" });
+    const approval = await pendingApproval();
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(reviewed, 1);
+  } finally {
+    await setApprovalMode("on-miss");
+    delete process.env.UNDERSTUDY_REVIEWER_API_KEY;
+    delete process.env.UNDERSTUDY_REVIEWER_URL;
+    reviewer.close();
+  }
+});
+
+test("an action asked under the admin ceiling waits for a person: the reviewer never answers it, and a yes from the reviewer is never used for it", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const { actionHash } = await import("./gatekeeper");
+  const db = getDb();
+  let reviewed = 0;
+  const reviewer = createServer((_req, res) => {
+    reviewed++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: '{"decision":"allow","reason":"the owner asked for this draft"}' } }] }));
+  });
+  process.env.UNDERSTUDY_REVIEWER_URL = `${await listen(reviewer)}/v1`;
+  process.env.UNDERSTUDY_REVIEWER_API_KEY = "test-reviewer-key";
+  const runId = "run_tp_ceiling";
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  noteTurn(ids.agent, { runId });
+  await setApprovalMode("auto");
+  await db.update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  const args = { to: "client@example.com", body: "Weekly report" };
+  const pendingRows = async (count: number) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await db.select().from(schema.approvals).where(and(eq(schema.approvals.agentId, ids.agent), eq(schema.approvals.status, "pending")));
+      if (rows.length >= count) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`fewer than ${count} pending approvals`);
+  };
+  try {
+    const asking = call("request_approval", { summary: "Create the weekly report draft", runId, action: { tool: "mail__create_draft", args } });
+    const [asked] = await pendingRows(1);
+    assert.equal(asked.review, null);
+    assert.equal(reviewed, 0);
+    for (const via of ["reviewer"] as const)
+      await db.insert(schema.approvals).values({ id: `apr_tp_${via}`, agentId: ids.agent, runId, summary: "Create the weekly report draft", fields: [], source: "mcp", payloadHash: actionHash("mail__create_draft", args), status: "approved", answeredVia: via, answeredAt: new Date() });
+    const direct = call("mail__create_draft", args);
+    const both = await pendingRows(2);
+    const straight = both.find((row) => row.id !== asked.id)!;
+    assert.equal(calls.length, 0);
+    await createHub().answerApproval(straight.id, false, undefined, ids.owner);
+    assert.match(await direct, /^not called/);
+    assert.equal(calls.length, 0);
+    const machine = await db.select().from(schema.approvals).where(inArray(schema.approvals.id, ["apr_tp_reviewer"]));
+    assert.ok(machine.every((row) => row.usedAt === null));
+    await createHub().answerApproval(asked.id, true, undefined, ids.owner);
+    assert.match(await asking, /^approved \[requestId: [^\]]+\]$/);
+    assert.equal(await call("mail__create_draft", args), "create_draft done");
+    assert.equal(calls.length, 1);
+    assert.equal(reviewed, 0);
+  } finally {
+    await setApprovalMode("on-miss");
+    noteTurn(ids.agent, {});
+    delete process.env.UNDERSTUDY_REVIEWER_API_KEY;
+    delete process.env.UNDERSTUDY_REVIEWER_URL;
+    reviewer.close();
+  }
+});
+
 test("a call in a webhook run asks even when a newer scheduled run is open and the owner never wants to be asked", { skip }, async () => {
   const { getDb, schema } = await import("@/lib/db");
   const { createHub } = await import("./hub");

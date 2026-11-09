@@ -949,7 +949,9 @@ test("an ask-first step asks the owner for the exact item, and the approval cove
   assert.equal(dialogReason({ accept: true }, { type: "alert", message: "Saved" }), null);
   assert.equal(dialogReason({ accept: true }, null), "confirm a question the page asked");
   assert.equal(dialogReason({ accept: true, promptText: "16" }, { type: "prompt", message: "How many?" }), 'confirm the page\'s question "How many?" with "16"');
-  assert.deepEqual(decide({ mode: "chat" }, "confirm a question the page asked", { ...info, url: "" }), {
+  const { contentHash: confirmHash, ...confirmAsk } = decide({ mode: "chat" }, "confirm a question the page asked", { ...info, url: "" }) as Extract<ReturnType<typeof decide>, { kind: "ask" }>;
+  assert.match(confirmHash ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(confirmAsk, {
     kind: "ask",
     summary: "Confirm a question the page asked",
     stepId: undefined,
@@ -1035,7 +1037,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.match(await call("browser_ask_first", { stepId: "s9", summary: "Remove it" }), /^not asked: "s9" is not an \[ASK FIRST\] step/);
     assert.equal(asked.length, 0);
     assert.match(await call("browser_ask_first", { stepId: "s7", summary: 'Remove "Dom Casmurro" from the collection' }), /^approved: do exactly this now/);
-    assert.deepEqual(asked, [{ summary: 'Remove "Dom Casmurro" from the collection', fields: [{ label: "Step", value: "Remove the book from the collection" }], runId: "r1", stepId: "s7" }]);
+    assert.deepEqual(asked, [{ summary: 'Remove "Dom Casmurro" from the collection', fields: [{ label: "Step", value: "Remove the book from the collection" }], runId: "r1", stepId: "s7", reviewerAware: true }]);
     assert.match(await call("browser_click", { element: "Retirar do acervo", target: "e12" }), /covered by the owner's approval of step s7/);
     assert.match(await call("browser_handle_dialog", { accept: true }), /Dialog accepted/);
     assert.equal(asked.length, 1);
@@ -1050,6 +1052,86 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.match(await call("browser_handle_dialog", { accept: true }), /approved by the owner/);
     assert.equal(asked.length, 3);
     assert.equal(asked[2].summary, "Confirm a question the page asked");
+  } finally {
+    guard.kill();
+    gatekeeper.close();
+  }
+});
+
+test("a yes from the reviewer covers that one action: a confirm right after it asks again", async () => {
+  const { spawn } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const { createInterface } = await import("node:readline");
+  const { writeFileSync } = await import("node:fs");
+  const { writeTurnState } = await import("./turn-state.ts");
+  const home = mkdtempSync(join(tmpdir(), "guard-reviewer-"));
+  const turnFile = join(home, ".understudy", "turn.json");
+  writeTurnState(turnFile, { mode: "chat" });
+  const playwright = join(home, "fake-playwright.mjs");
+  const button = { tag: "button", type: "", role: "", name: "Retirar do acervo", isSubmit: false, inForm: false, editable: false, url: "https://admin.example.com/acervo", fields: [] };
+  writeFileSync(
+    playwright,
+    `#!${process.execPath}
+import { createInterface } from "node:readline";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const text = (id, value) => send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: value }] } });
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "tools/list") return send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "browser_click", inputSchema: { type: "object" } }, { name: "browser_handle_dialog", inputSchema: { type: "object" } }] } });
+  if (message.method !== "tools/call") return;
+  const name = message.params.name;
+  if (name === "browser_evaluate") return text(message.id, "### Result\\n" + ${JSON.stringify(JSON.stringify(button))});
+  if (name === "browser_click") return text(message.id, '### Result\\nClicked\\n### Modal state\\n- ["confirm" dialog with message "Retirar o livro?"]: can be handled by browser_handle_dialog');
+  if (name === "browser_handle_dialog") return text(message.id, "### Result\\nDialog accepted");
+});
+`,
+    { mode: 0o755 },
+  );
+  const asked: Record<string, unknown>[] = [];
+  const gatekeeper = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const message = JSON.parse(body);
+      response.setHeader("content-type", "application/json");
+      response.setHeader("mcp-session-id", "session-1");
+      if (message.id === undefined) {
+        response.statusCode = 202;
+        return response.end();
+      }
+      if (message.method === "initialize") return response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fake", version: "1" } } }));
+      asked.push(message.params.arguments);
+      const answer = asked.length === 1 ? "approved: the reviewer checked this [requestId: apr_rv1] [answeredBy: reviewer]" : "approved [requestId: apr_rv2]";
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: answer }] } }));
+    });
+  });
+  await new Promise<void>((resolve) => gatekeeper.listen(0, "127.0.0.1", resolve));
+  const port = (gatekeeper.address() as { port: number }).port;
+  const guard = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", new URL("./browser-guard.ts", import.meta.url).pathname], {
+    env: { ...process.env, HOME: home, UNDERSTUDY_TURN_FILE: turnFile, UNDERSTUDY_SERVER_URL: `http://127.0.0.1:${port}`, AGENT_TOKEN: "agent-token", PLAYWRIGHT_MCP_BIN: playwright, UNDERSTUDY_GUARD_SOCKET: join(home, "no-guard.sock") },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const waiting = new Map<number, (message: any) => void>();
+  createInterface({ input: guard.stdout! }).on("line", (line) => {
+    const message = JSON.parse(line);
+    waiting.get(message.id)?.(message);
+    waiting.delete(message.id);
+  });
+  let id = 0;
+  const rpc = (method: string, params: Record<string, unknown>) =>
+    new Promise<any>((resolve) => {
+      waiting.set(++id, resolve);
+      guard.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+  const call = async (name: string, args: Record<string, unknown>) => (await rpc("tools/call", { name, arguments: args })).result.content[0].text as string;
+  try {
+    await rpc("tools/list", {});
+    assert.match(await call("browser_click", { element: "Retirar do acervo", target: "e12" }), /approved by the reviewer your owner chose \[requestId: apr_rv1\]/);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].reviewerAware, true);
+    assert.match(await call("browser_handle_dialog", { accept: true }), /approved by the owner \[requestId: apr_rv2\]/);
+    assert.equal(asked.length, 2);
+    assert.equal(asked[1].summary, `Confirm the page's question "Retirar o livro?"`);
   } finally {
     guard.kill();
     gatekeeper.close();

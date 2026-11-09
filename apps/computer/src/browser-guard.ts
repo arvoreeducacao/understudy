@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { allowedHost, AMOUNT_LABEL, argsSubject, asksEveryTime, confirmsAlways, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
 import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn } from "./approval-policy-store.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
-import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
+import { approvedBy, openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
 import { openRequestGate, type GatedRequest, type RequestGate } from "./request-gate.ts";
 import { readTurnState, turnStateFile, type TurnState } from "./turn-state.ts";
 import { readRules, rulesFile } from "./rules-store.ts";
@@ -24,6 +25,7 @@ export type ElementInfo = {
   editable: boolean;
   url: string;
   fields: { label: string; value: string }[];
+  cut?: boolean;
 };
 
 export type StepApproval = { runId: string; stepId: string; summary: string; until: number };
@@ -31,7 +33,11 @@ export type StepApproval = { runId: string; stepId: string; summary: string; unt
 export type Verdict =
   | { kind: "pass"; coveredBy?: StepApproval; without?: string }
   | { kind: "block"; reason: string }
-  | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true };
+  | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true; cut?: true; contentHash?: string };
+
+export function contentHash(...parts: unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
 
 export const MODE_OFF_NOTE = "your owner lets you act without asking";
 
@@ -121,11 +127,15 @@ export const ELEMENT_INFO = `(el) => {
   const label = ((element.labels && element.labels[0] && element.labels[0].innerText) || (element.getAttribute && (element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || element.id)) || "").trim().replace(/\s+/g, " ").slice(0, 120);
   const isSubmit = (tag === "button" && (type === "" || type === "submit") && !!form) || (tag === "input" && (type === "submit" || type === "image"));
   const editable = tag === "textarea" || element.isContentEditable === true;
-  const fields = form ? Array.from(form.elements).filter((f) => (f.name || f.id) && f.type !== "hidden" && f.type !== "submit" && f.tagName !== "BUTTON").slice(0, 12).map((f) => ({
-    label: ((f.labels && f.labels[0] && f.labels[0].innerText) || f.getAttribute("aria-label") || f.getAttribute("placeholder") || f.name || f.id || "").trim().slice(0, 80),
+  const named = form ? Array.from(form.elements).filter((f) => (f.name || f.id) && f.type !== "submit" && f.tagName !== "BUTTON") : [];
+  const visible = named.filter((f) => f.type !== "hidden");
+  const labelOf = (f) => ((f.labels && f.labels[0] && f.labels[0].innerText) || f.getAttribute("aria-label") || f.getAttribute("placeholder") || f.name || f.id || "").trim();
+  const fields = visible.slice(0, 12).map((f) => ({
+    label: labelOf(f).slice(0, 80),
     value: f.type === "password" ? "••••••" : (f.type === "checkbox" || f.type === "radio") ? String(f.checked) : String(f.value == null ? "" : f.value).slice(0, 300),
-  })) : [];
-  return { tag, type, role, name, label, isSubmit, inForm: !!form, editable, url: location.href, fields };
+  }));
+  const cut = visible.length > 12 || visible.some((f) => labelOf(f).length > 80 || (f.type !== "password" && String(f.value == null ? "" : f.value).length > 300)) || named.some((f) => f.type === "hidden" && String(f.value == null ? "" : f.value) !== "");
+  return { tag, type, role, name, label, isSubmit, inForm: !!form, editable, url: location.href, fields, cut };
 }`;
 
 export function parseEvaluateResult(text: string): ElementInfo | null {
@@ -184,6 +194,7 @@ export function matchStep(name: string, steps: { id: string; text: string }[]): 
 }
 
 const NAME_LIMIT = 2000;
+const SHOWN_NAME_LIMIT = 200;
 
 export function decide(state: TurnState, reason: string | null, info: ElementInfo | null, approval: StepApproval | null = null, policy: ComputerApprovalPolicy = DEFAULT_COMPUTER_POLICY): Verdict {
   if (!reason || !info) return { kind: "pass" };
@@ -213,6 +224,8 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
     ].slice(0, 14),
     ...(site ? { site } : {}),
     ...(everyTime ? { everyTime: true as const } : {}),
+    ...(info.cut || info.name.length > SHOWN_NAME_LIMIT || info.url.length > 300 || info.fields.length > 12 ? { cut: true as const } : {}),
+    contentHash: contentHash("action", reason, info.name, info.url, info.fields),
   };
 }
 
@@ -354,12 +367,12 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
         notes.push(answer.pending ? pendingText(verdict.summary, again, answer) : `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
         return false;
       }
-      if (byAddress) approvedAddresses.add(address);
-      if (bySite) {
+      if (byAddress && !answer.answeredBy) approvedAddresses.add(address);
+      if (bySite && !answer.answeredBy) {
         local.add(bySite);
         sites.add(bySite);
       }
-      notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+      notes.push(`${verdict.summary} (approved by ${approvedBy(answer)}${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
       return true;
     });
     queue = turn.catch(() => {});
@@ -371,7 +384,9 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
 
 const BINARY_MARKS = /[\u0000-\u0008\u000e-\u001f\ufffd]/;
 
-export function bodyPreview(body: string, limit = 300): string {
+export const PREVIEW_LIMIT = 300;
+
+export function bodyPreview(body: string, limit = PREVIEW_LIMIT): string {
   if (BINARY_MARKS.test(body.slice(0, limit))) return `(binary data, ${body.length} characters)`;
   const cut = body.slice(0, limit);
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
@@ -415,13 +430,28 @@ export function scriptRequestVerdict(
     stepId: step?.id,
     fields: [
       { label: "Step", value: step ? step.text : "Asked in chat" },
-      { label: "Page", value: (request.pageUrl || "unknown").slice(0, 300) },
-      { label: "Request", value: `${method} ${request.url}`.slice(0, 300) },
+      { label: "Page", value: (request.pageUrl || "unknown").slice(0, PREVIEW_LIMIT) },
+      { label: "Request", value: `${method} ${request.url}`.slice(0, PREVIEW_LIMIT) },
       ...(request.body ? [{ label: "Body", value: bodyPreview(request.body) }] : []),
     ],
     ...(site ? { site } : {}),
     ...(everyTime ? { everyTime: true as const } : {}),
+    ...(`${method} ${request.url}`.length > PREVIEW_LIMIT || (request.pageUrl ?? "").length > PREVIEW_LIMIT || (request.body ?? "").length > PREVIEW_LIMIT ? { cut: true as const } : {}),
+    contentHash: contentHash("request", method, request.url, request.body ?? "", request.pageUrl ?? ""),
   };
+}
+
+export const SCRIPT_FIELD_LIMIT = 2000;
+
+export function scriptSource(args: Record<string, unknown>, secrets: string[]): string {
+  const code = typeof args.function === "string" ? args.function : typeof args.code === "string" ? args.code : "";
+  return redactSecrets(code, secrets);
+}
+
+export function withScript<T extends { fields: { label: string; value: string }[]; cut?: true; contentHash?: string }>(verdict: T, source: string): T {
+  if (!source.trim()) return verdict;
+  const cut = verdict.cut || source.length > SCRIPT_FIELD_LIMIT;
+  return { ...verdict, fields: [...verdict.fields, { label: "Script", value: source.slice(0, SCRIPT_FIELD_LIMIT) }], ...(cut ? { cut: true as const } : {}), contentHash: contentHash(verdict.contentHash ?? "", source) };
 }
 
 export function passedWithoutNote(passed: { request: string; why: string }[]): string[] {
@@ -473,15 +503,31 @@ export function ruleBlockText(violation: RuleViolation): string {
   return `blocked by your owner's rule "${describeRule(violation.rule)}": ${violation.reason}. Do not try another way; stop and tell your owner.`;
 }
 
+function lowerHex(text: string) {
+  return text.replace(/%[0-9A-F]{2}/g, (escape) => escape.toLowerCase());
+}
+
+export function secretForms(secret: string): string[] {
+  const component = encodeURIComponent(secret);
+  const form = new URLSearchParams({ x: secret }).toString().slice(2);
+  return [...new Set([secret, component, lowerHex(component), form, lowerHex(form), encodeURI(secret), JSON.stringify(secret).slice(1, -1)])].sort((a, b) => b.length - a.length);
+}
+
 export function redactSecrets(text: string, secrets: string[]): string {
   let out = text;
   for (const secret of secrets) {
     if (!secret || secret.length < 4) continue;
-    for (const form of new Set([secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)])) {
-      out = out.split(form).join("••••••");
-    }
+    for (const form of secretForms(secret)) out = out.split(form).join("••••••");
   }
   return out;
+}
+
+export function infoWithoutSecrets(info: ElementInfo, secrets: string[]): ElementInfo {
+  return { ...info, name: redactSecrets(info.name, secrets), url: redactSecrets(info.url, secrets), fields: info.fields.map((field) => ({ label: redactSecrets(field.label, secrets), value: redactSecrets(field.value, secrets) })) };
+}
+
+export function withoutSecrets<T extends { summary: string; fields: { label: string; value: string }[] }>(ask: T, secrets: string[]): T {
+  return { ...ask, summary: redactSecrets(ask.summary, secrets), fields: ask.fields.map((field) => ({ label: redactSecrets(field.label, secrets), value: redactSecrets(field.value, secrets) })) };
 }
 
 export function notifyGuardSocket(path: string, event: Record<string, unknown>, timeoutMs = 2000): Promise<void> {
@@ -542,12 +588,13 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string }, state: TurnState): Promise<OwnerAnswer> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true; cut?: true; contentHash?: string }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
-    await notifyMain({ event: "waiting", summary: verdict.summary });
+    const clean = withoutSecrets(verdict, secrets());
+    await notifyMain({ event: "waiting", summary: clean.summary });
     try {
-      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
-      if (answer.approved) lastApprovedAt = Date.now();
+      const answer = await askOwnerFor(session, asked, { summary: clean.summary, fields: clean.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site, ...(verdict.everyTime ? { everyTime: true } : {}), ...(verdict.cut ? { cut: true } : {}), ...(verdict.contentHash ? { contentHash: verdict.contentHash } : {}) });
+      if (answer.approved && !answer.answeredBy) lastApprovedAt = Date.now();
       return answer;
     } finally {
       await notifyMain({ event: "resumed" });
@@ -583,8 +630,10 @@ async function serve() {
     };
     const asks = scriptAsks((verdict) => askOwner(verdict, state), notes, state.mode === "run" ? "run the same script again" : null, conversationSites, state.mode === "run" ? "run" : "conversation");
     const stepHint = String(args.element ?? "");
+    const source = scriptSource(args, secrets());
     const judge = async (request: GatedRequest): Promise<boolean> => {
-      const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
+      const hidden = secrets();
+      const cleaned = { ...request, url: redactSecrets(request.url, hidden), pageUrl: request.pageUrl === undefined ? undefined : redactSecrets(request.pageUrl, hidden), body: request.body === undefined ? undefined : redactSecrets(request.body, hidden) };
       const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint, stepApproval, policy, sitesApprovedIn(sitesFile, state.conversation));
       if (verdict.kind === "pass") {
         if (verdict.coveredBy) notes.push(`${request.method.toUpperCase()} ${cleaned.url.slice(0, 200)}${coveredSuffix(verdict.coveredBy)}`);
@@ -606,7 +655,7 @@ async function serve() {
         drops.push({ request: verdict.request, pageUrl: verdict.pageUrl, usageLog: verdict.usageLog });
         return false;
       }
-      const approved = await asks.request(verdict, `${request.method.toUpperCase()} ${bareUrl(request.url)}`);
+      const approved = await asks.request(withScript(verdict, source), `${request.method.toUpperCase()} ${bareUrl(request.url)}`);
       if (!approved) blocked = true;
       return approved;
     };
@@ -688,7 +737,7 @@ async function serve() {
       lastApprovedAt = 0;
       return passWith(" (part of the action the owner just approved)");
     }
-    const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, stepApproval, readApprovalPolicy(policyFile));
+    const verdict = decide(state, reason, infoWithoutSecrets(info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, secrets()), stepApproval, readApprovalPolicy(policyFile));
     if (verdict.kind === "pass") return passWith(verdict.coveredBy ? coveredSuffix(verdict.coveredBy) : verdict.without ? ` (done without asking: ${verdict.without})` : "");
     if (verdict.kind === "block") return toBrain(textResult(message.id, verdict.reason));
     const answer = await askOwner(verdict, state).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
@@ -696,7 +745,7 @@ async function serve() {
     if (!answer.approved) {
       return toBrain(textResult(message.id, `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}). Do not try another way; stop and report.`));
     }
-    passWith(` (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
+    passWith(` (approved by ${approvedBy(answer)}${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
   };
 
   createInterface({ input: child.stdout }).on("line", (line) => {

@@ -19,7 +19,7 @@ export type ApprovalFallback = z.infer<typeof ApprovalFallbackSchema>;
 export type ApprovalAllow = z.infer<typeof ApprovalAllowSchema>;
 export type ApprovalPolicy = { mode: ApprovalMode; allow: ApprovalAllow[]; fallback: ApprovalFallback };
 export type ComputerApprovalPolicy = z.infer<typeof ComputerApprovalPolicySchema>;
-export type EffectiveApprovalMode = Exclude<ApprovalMode, "auto">;
+export type EffectiveApprovalMode = ApprovalMode;
 
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = { mode: "on-miss", allow: [], fallback: "wait" };
 
@@ -142,12 +142,11 @@ export function computerApprovalPolicy(policy: ApprovalPolicy, ownerId?: string)
 
 export function effectiveApprovalMode(mode: ApprovalMode, context: { untrusted?: boolean } = {}): EffectiveApprovalMode {
   if (mode === "always" || context.untrusted) return "always";
-  if (mode === "auto") return "on-miss";
   return mode;
 }
 
 export function listCoversActions(mode: EffectiveApprovalMode): boolean {
-  return mode === "on-miss";
+  return mode === "on-miss" || mode === "auto";
 }
 
 const SENSITIVE_WORDS = new Set([
