@@ -1,12 +1,12 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import type { ApprovalGrant } from "@/lib/db/schema";
+import type { ConnectorGrant } from "@/lib/db/schema";
 import { ceilingForAgent } from "@/lib/slack-profile";
 import { canAlwaysAllow, cleanToolNames, grantedPolicy } from "@/lib/tool-policy";
 import { serverAllowedFor } from "./approval-payload";
 import { ceilingOf, loadToolLimits } from "./upstream";
 
-export async function grantTool(agentId: string, grant: ApprovalGrant, userId: string) {
+export async function grantTool(agentId: string, grant: ConnectorGrant, userId: string) {
   return getDb().transaction(async (tx) => {
     const [row] = await tx
       .select({ agent: schema.agents, ownerEmail: schema.user.email })

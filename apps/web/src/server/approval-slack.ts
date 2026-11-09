@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { SlackMessageRef } from "@/lib/db/schema";
 import { messages as copy } from "@/lib/messages";
+import { UNANSWERED_AFTER_MS } from "@/lib/run-policy";
 import { escapeSlack, slackCall } from "./slack";
 
 type ApprovalRow = typeof schema.approvals.$inferSelect;
@@ -24,7 +25,8 @@ export async function rememberApprovalMessage(approvalId: string, posted: { ok: 
 export function approvalClosedLine(row: Pick<ApprovalRow, "status" | "answeredVia" | "answeredAt">, who: string) {
   const closed = copy.slackApp.approvalClosed;
   const via = closed.via[row.answeredVia ?? "panel"] ?? closed.via.panel;
-  const base = row.status === "approved" ? closed.approved(who, via) : row.status === "denied" ? closed.denied(who, via) : row.status === "expired" ? closed.expired : closed.cancelled;
+  const unanswered = row.answeredVia === "fallback" && row.status === "denied" ? closed.unansweredDenied(UNANSWERED_AFTER_MS / 60_000) : null;
+  const base = unanswered ?? (row.status === "approved" ? closed.approved(who, via) : row.status === "denied" ? closed.denied(who, via) : row.status === "expired" ? closed.expired : closed.cancelled);
   const at = row.answeredAt ?? new Date();
   const fallback = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
   return { plain: base, timed: `${base} · <!date^${Math.floor(at.getTime() / 1000)}^{time}|${fallback}>` };

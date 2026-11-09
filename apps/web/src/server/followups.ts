@@ -108,12 +108,14 @@ export function localTime(at: Date, timeZone = followupTimezone()) {
   return `${part("weekday")} ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} (${timeZone})`;
 }
 
-type TurnContext = { followup: string | null; runId: string | null; untrusted: boolean };
+type TurnContext = { followup: string | null; runId: string | null; untrusted: boolean; at: number };
+
+const KNOWN_TURN_MS = 12 * 60 * 60 * 1000;
 
 const turns = new Map<string, TurnContext>();
 
 export function noteTurn(agentId: string, turn: { followup?: string; runId?: string; untrusted?: boolean }) {
-  turns.set(agentId, { followup: turn.followup ?? null, runId: turn.runId ?? null, untrusted: turn.untrusted === true });
+  turns.set(agentId, { followup: turn.followup ?? null, runId: turn.runId ?? null, untrusted: turn.untrusted === true, at: Date.now() });
 }
 
 export function forgetTurnWake(agentId: string) {
@@ -122,6 +124,15 @@ export function forgetTurnWake(agentId: string) {
 
 export function turnUntrusted(agentId: string) {
   return turns.get(agentId)?.untrusted === true;
+}
+
+export function turnKnown(agentId: string, now = Date.now()) {
+  const turn = turns.get(agentId);
+  return Boolean(turn && now - turn.at < KNOWN_TURN_MS);
+}
+
+export function turnWakesFollowup(agentId: string) {
+  return Boolean(turns.get(agentId)?.followup);
 }
 
 export async function turnRunId(agentId: string, fallback: (agentId: string) => Promise<string | null>) {

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { isOffRecipe } from "@/lib/approval-fields";
+import { alwaysAllowCopy } from "@/lib/always-allow";
 import { getDb, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import { messages as copy } from "@/lib/messages";
@@ -27,7 +28,7 @@ export async function slackApprovalMessage(ownerName: string, approval: Pick<App
           ? [
               { type: "button", action_id: "approve", text: { type: "plain_text", text: copy.approvals.approve }, value: approval.id, style: "primary" },
               ...(approval.alwaysAllow
-                ? [{ type: "button", action_id: "approve_always", text: { type: "plain_text", text: copy.toolAccess.approveAlways }, value: approval.id }]
+                ? [{ type: "button", action_id: "approve_always", text: { type: "plain_text", text: alwaysAllowCopy(approval.alwaysAllow, copy.toolAccess).label.slice(0, 75) }, value: approval.id }]
                 : []),
               { type: "button", action_id: "deny", text: { type: "plain_text", text: copy.approvals.deny }, value: approval.id, style: "danger" },
             ]

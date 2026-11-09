@@ -316,6 +316,13 @@
       "when": 1793886289931,
       "tag": "0044_user_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794255620848,
+      "tag": "0045_agent_approval_policy",
+      "breakpoints": true
     }
   ]
 }

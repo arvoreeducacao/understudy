@@ -99,6 +99,7 @@ export class Hub {
       .then(() => this.runs.failStalled())
       .catch((error) => log("run_stall_error", { error: String(error) }));
     this.approvals.remind().catch((error) => log("approval_remind_error", { error: String(error) }));
+    this.approvals.settleUnanswered().catch((error) => log("approval_unanswered_error", { error: String(error) }));
     this.inbound.expire().catch((error) => log("inbound_expire_error", { error: String(error) }));
     this.rooms.expireStale().catch((error) => log("room_expire_error", { error: String(error) }));
     flushStale(this).catch((error) => log("channel_flush_error", { error: String(error) }));

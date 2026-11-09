@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
-import { AMOUNT_LABEL, argsSubject, describeRule, findViolation, looksIrreversible, type OwnerRule, type RuleViolation } from "@understudy/protocol";
+import { allowedHost, AMOUNT_LABEL, argsSubject, asksEveryTime, confirmsAlways, describeRule, effectiveApprovalMode, findViolation, listCoversActions, listedSite, looksIrreversible, type ComputerApprovalPolicy, type EffectiveApprovalMode, type OwnerRule, type RuleViolation } from "@understudy/protocol";
+import { approvalPolicyFile, approvedSitesFile, DEFAULT_COMPUTER_POLICY, readApprovalPolicy, rememberApprovedSite, sitesApprovedIn } from "./approval-policy-store.ts";
 import { CDP_ENDPOINT } from "./browser.ts";
 import { askOwnerFor, askStoreFile, openAskStore, pendingText } from "./approval-asks.ts";
 import { openGatekeeper, type McpSession } from "./gatekeeper-client.ts";
@@ -27,7 +28,32 @@ export type ElementInfo = {
 
 export type StepApproval = { runId: string; stepId: string; summary: string; until: number };
 
-export type Verdict = { kind: "pass"; coveredBy?: StepApproval } | { kind: "block"; reason: string } | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[] };
+export type Verdict =
+  | { kind: "pass"; coveredBy?: StepApproval; without?: string }
+  | { kind: "block"; reason: string }
+  | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true };
+
+export const MODE_OFF_NOTE = "your owner lets you act without asking";
+
+export function listedNote(site: string) {
+  return `your owner always allows ${site}`;
+}
+
+export function guardMode(state: TurnState, policy: ComputerApprovalPolicy): EffectiveApprovalMode {
+  const mode = effectiveApprovalMode(policy.mode, { untrusted: state.untrusted === true });
+  if (mode === "off" && state.mode === "run" && state.approvalsRequired !== false) return "on-miss";
+  return mode;
+}
+
+export { asksEveryTime, confirmsAlways };
+
+function siteOf(url: string): string | null {
+  try {
+    return allowedHost(new URL(url).hostname);
+  } catch {
+    return null;
+  }
+}
 
 export const ASK_FIRST_TOOL = "browser_ask_first";
 
@@ -91,7 +117,7 @@ export const ELEMENT_INFO = `(el) => {
   const tag = (element.tagName || "").toLowerCase();
   const type = (element.getAttribute && element.getAttribute("type") || "").toLowerCase();
   const role = (element.getAttribute && element.getAttribute("role") || "").toLowerCase();
-  const name = ((element.getAttribute && element.getAttribute("aria-label")) || element.innerText || element.value || element.title || "").trim().replace(/\\s+/g, " ").slice(0, 200);
+  const name = ((element.getAttribute && element.getAttribute("aria-label")) || element.innerText || element.value || element.title || "").trim().replace(/\\s+/g, " ").slice(0, 2000);
   const label = ((element.labels && element.labels[0] && element.labels[0].innerText) || (element.getAttribute && (element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || element.id)) || "").trim().replace(/\s+/g, " ").slice(0, 120);
   const isSubmit = (tag === "button" && (type === "" || type === "submit") && !!form) || (tag === "input" && (type === "submit" || type === "image"));
   const editable = tag === "textarea" || element.isContentEditable === true;
@@ -157,17 +183,25 @@ export function matchStep(name: string, steps: { id: string; text: string }[]): 
   return best;
 }
 
-export function decide(state: TurnState, reason: string | null, info: ElementInfo | null, approval: StepApproval | null = null): Verdict {
+const NAME_LIMIT = 2000;
+
+export function decide(state: TurnState, reason: string | null, info: ElementInfo | null, approval: StepApproval | null = null, policy: ComputerApprovalPolicy = DEFAULT_COMPUTER_POLICY): Verdict {
   if (!reason || !info) return { kind: "pass" };
   if (state.mode === "recipe") return { kind: "block", reason: "blocked: while learning a task nothing is submitted or sent" };
   if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
   const cover = coveringApproval(approval, state);
   if (cover) return { kind: "pass", coveredBy: cover };
+  const mode = guardMode(state, policy);
+  if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
+  const everyTime = !/\p{L}/u.test(info.name) || info.name.length >= NAME_LIMIT || confirmsAlways(`${reason} ${info.name}`) || Boolean(info.url && asksEveryTime(info.url)) || info.fields.some((field) => confirmsAlways(field.label));
+  const step = matchStep(info.name, state.askSteps ?? []);
+  const site = listCoversActions(mode) && !everyTime && !step ? siteOf(info.url) : null;
+  const listed = site ? listedSite(site, policy.hosts) : null;
+  if (listed) return { kind: "pass", without: listedNote(listed) };
   let host = info.url;
   try {
     host = new URL(info.url).host;
   } catch {}
-  const step = matchStep(info.name, state.askSteps ?? []);
   return {
     kind: "ask",
     summary: `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${host ? ` on ${host}` : ""}`.slice(0, 480),
@@ -177,6 +211,8 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
       { label: "Page", value: info.url.slice(0, 300) },
       ...info.fields.filter((field) => field.label),
     ].slice(0, 14),
+    ...(site ? { site } : {}),
+    ...(everyTime ? { everyTime: true as const } : {}),
   };
 }
 
@@ -290,15 +326,25 @@ export function droppedNotes(drops: { request: string; pageUrl: string; usageLog
 
 export type OwnerAnswer = { approved: boolean; pending?: boolean; text: string; requestId?: string };
 
-export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => Promise<OwnerAnswer>, notes: string[], again: string | null = "run the same script again") {
+export type ApprovedSites = { has: (site: string) => boolean; add: (site: string) => void };
+
+export function memorySites(): ApprovedSites {
+  const sites = new Set<string>();
+  return { has: (site) => sites.has(site), add: (site) => void sites.add(site) };
+}
+
+export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => Promise<OwnerAnswer>, notes: string[], again: string | null = "run the same script again", sites: ApprovedSites = memorySites(), scope = "script") {
   const approvedAddresses = new Set<string>();
+  const local = memorySites();
   const repeats: string[] = [];
   let denied = false;
   let queue: Promise<unknown> = Promise.resolve();
   const request = (verdict: Extract<Verdict, { kind: "ask" }>, address: string): Promise<boolean> => {
     const turn = queue.then(async () => {
       if (denied) return false;
-      if (approvedAddresses.has(address)) {
+      const bySite = verdict.site && !verdict.everyTime ? verdict.site : null;
+      const byAddress = !verdict.everyTime;
+      if ((byAddress && approvedAddresses.has(address)) || (bySite && (local.has(bySite) || sites.has(bySite)))) {
         repeats.push(address);
         return true;
       }
@@ -308,14 +354,18 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
         notes.push(answer.pending ? pendingText(verdict.summary, again, answer) : `blocked: needs approval. The owner did not approve "${verdict.summary}" (${answer.text}), so the request failed. Do not try another way; stop and report.`);
         return false;
       }
-      approvedAddresses.add(address);
+      if (byAddress) approvedAddresses.add(address);
+      if (bySite) {
+        local.add(bySite);
+        sites.add(bySite);
+      }
       notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
       return true;
     });
     queue = turn.catch(() => {});
     return turn;
   };
-  const repeatNote = () => (repeats.length ? `sent without asking again: ${countedList(repeats)}. The owner approved the same address earlier in this script.` : null);
+  const repeatNote = () => (repeats.length ? `sent without asking again: ${countedList(repeats)}. The owner approved the same site earlier in this ${scope}.` : null);
   return { request, repeatNote };
 }
 
@@ -327,7 +377,15 @@ export function bodyPreview(body: string, limit = 300): string {
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
 
-export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], request: ScriptRequest, stepHint = "", approval: StepApproval | null = null): ScriptVerdict {
+export function scriptRequestVerdict(
+  state: TurnState,
+  rules: OwnerRule[],
+  request: ScriptRequest,
+  stepHint = "",
+  approval: StepApproval | null = null,
+  policy: ComputerApprovalPolicy = DEFAULT_COMPUTER_POLICY,
+  approvedSites: readonly string[] = [],
+): ScriptVerdict {
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return { kind: "pass" };
   const violation = rules.length ? findViolation(rules, scriptRequestSubject(request)) : null;
@@ -336,6 +394,8 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
   if (state.mode === "run" && state.approvalsRequired === false) return { kind: "pass" };
   const cover = coveringApproval(approval, state);
   if (cover) return { kind: "pass", coveredBy: cover };
+  const mode = guardMode(state, policy);
+  if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
   let host = request.url;
   try {
     host = new URL(request.url).host;
@@ -344,6 +404,11 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
+  const everyTime = method === "DELETE" || asksEveryTime(request.url, request.body);
+  const site = listCoversActions(mode) && !everyTime && !step ? siteOf(request.url) : null;
+  const listed = site ? listedSite(site, policy.hosts) : null;
+  if (listed) return { kind: "pass", without: listedNote(listed) };
+  if (site && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
   return {
     kind: "ask",
     summary: `Script sent a ${method} to ${host}`.slice(0, 480),
@@ -354,7 +419,15 @@ export function scriptRequestVerdict(state: TurnState, rules: OwnerRule[], reque
       { label: "Request", value: `${method} ${request.url}`.slice(0, 300) },
       ...(request.body ? [{ label: "Body", value: bodyPreview(request.body) }] : []),
     ],
+    ...(site ? { site } : {}),
+    ...(everyTime ? { everyTime: true as const } : {}),
   };
+}
+
+export function passedWithoutNote(passed: { request: string; why: string }[]): string[] {
+  const byWhy = new Map<string, string[]>();
+  for (const entry of passed) byWhy.set(entry.why, [...(byWhy.get(entry.why) ?? []), entry.request]);
+  return [...byWhy].map(([why, requests]) => `sent without asking (${why}): ${countedList(requests)}`);
 }
 
 export const RECIPIENT_LABEL = /\b(to|cc|bcc|recipients?|send to|forward to|share with|invite|para|destinat\w*|copia)\b/i;
@@ -429,6 +502,8 @@ type Rpc = { jsonrpc: "2.0"; id?: string | number; method?: string; params?: any
 async function serve() {
   const home = process.env.HOME || "/home/agent";
   const stateFile = process.env.UNDERSTUDY_TURN_FILE || turnStateFile(home);
+  const policyFile = approvalPolicyFile(home);
+  const sitesFile = approvedSitesFile(home);
   const serverUrl = process.env.UNDERSTUDY_SERVER_URL || "";
   const token = process.env.AGENT_TOKEN || "";
   const vault = openVault(home);
@@ -467,11 +542,11 @@ async function serve() {
 
   const textResult = (id: Rpc["id"], text: string, isError = true): Rpc => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 
-  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[] }, state: TurnState): Promise<OwnerAnswer> => {
+  const askOwner = async (verdict: { summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string }, state: TurnState): Promise<OwnerAnswer> => {
     if (!serverUrl || !token) return { approved: false, text: "no gatekeeper configured" };
     await notifyMain({ event: "waiting", summary: verdict.summary });
     try {
-      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId });
+      const answer = await askOwnerFor(session, asked, { summary: verdict.summary, fields: verdict.fields, runId: state.mode === "run" ? state.runId : undefined, stepId: verdict.stepId, site: verdict.site });
       if (answer.approved) lastApprovedAt = Date.now();
       return answer;
     } finally {
@@ -495,18 +570,25 @@ async function serve() {
 
   const gatedScript = async (message: Rpc, args: Record<string, unknown>, rules: OwnerRule[]) => {
     const state = readTurnState(stateFile);
+    const policy = readApprovalPolicy(policyFile);
     const notes: string[] = [];
     const drops: { request: string; pageUrl: string; usageLog?: boolean }[] = [];
+    const passed: { request: string; why: string }[] = [];
     const pending = new Set<Promise<boolean>>();
     let blocked = false;
     let seen = 0;
-    const asks = scriptAsks((verdict) => askOwner(verdict, state), notes, state.mode === "run" ? "run the same script again" : null);
+    const conversationSites: ApprovedSites = {
+      has: (site) => sitesApprovedIn(sitesFile, state.conversation).includes(site),
+      add: (site) => rememberApprovedSite(sitesFile, state.conversation, site),
+    };
+    const asks = scriptAsks((verdict) => askOwner(verdict, state), notes, state.mode === "run" ? "run the same script again" : null, conversationSites, state.mode === "run" ? "run" : "conversation");
     const stepHint = String(args.element ?? "");
     const judge = async (request: GatedRequest): Promise<boolean> => {
       const cleaned = { ...request, body: request.body === undefined ? undefined : redactSecrets(request.body, secrets()) };
-      const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint, stepApproval);
+      const verdict = scriptRequestVerdict(state, rules, cleaned, stepHint, stepApproval, policy, sitesApprovedIn(sitesFile, state.conversation));
       if (verdict.kind === "pass") {
         if (verdict.coveredBy) notes.push(`${request.method.toUpperCase()} ${cleaned.url.slice(0, 200)}${coveredSuffix(verdict.coveredBy)}`);
+        if (verdict.without) passed.push({ request: `${request.method.toUpperCase()} ${bareUrl(cleaned.url)}`, why: verdict.without });
         return true;
       }
       if (verdict.kind === "rule") {
@@ -550,6 +632,7 @@ async function serve() {
         if (seen === before) break;
       }
       await gate.close();
+      notes.push(...passedWithoutNote(passed));
       if (drops.length) {
         await notifyMain({ event: "request_blocked", ...droppedSummary(drops) });
         notes.push(...droppedNotes(drops));
@@ -605,8 +688,8 @@ async function serve() {
       lastApprovedAt = 0;
       return passWith(" (part of the action the owner just approved)");
     }
-    const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, stepApproval);
-    if (verdict.kind === "pass") return passWith(verdict.coveredBy ? coveredSuffix(verdict.coveredBy) : "");
+    const verdict = decide(state, reason, info ?? { ...UNKNOWN_ELEMENT, name: String(args.element ?? "") }, stepApproval, readApprovalPolicy(policyFile));
+    if (verdict.kind === "pass") return passWith(verdict.coveredBy ? coveredSuffix(verdict.coveredBy) : verdict.without ? ` (done without asking: ${verdict.without})` : "");
     if (verdict.kind === "block") return toBrain(textResult(message.id, verdict.reason));
     const answer = await askOwner(verdict, state).catch((error: Error): OwnerAnswer => ({ approved: false, text: error.message }));
     if (answer.pending) return toBrain(textResult(message.id, pendingText(verdict.summary, state.mode === "run" ? "do the same action again" : null, answer)));

@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { normalizeRecipe, RUN_RECORD_MAX_SCREENSHOTS, type RunStep, type Usage } from "@understudy/protocol";
+import { cleanApprovalPolicy, normalizeRecipe, RUN_RECORD_MAX_SCREENSHOTS, type RunStep, type Usage } from "@understudy/protocol";
 import { effectiveModel } from "@/lib/models";
 import { approvalsRequiredFor, quotedInputTrigger } from "@/lib/run-policy";
 import { brainText } from "@/lib/brain-text";
@@ -122,7 +122,7 @@ export class Runs {
     const { scheduledFor, input, group } = options;
     const db = getDb();
     const [found] = await db
-      .select({ recipe: schema.recipes, ownerStatus: schema.user.status, model: schema.agents.model })
+      .select({ recipe: schema.recipes, ownerStatus: schema.user.status, model: schema.agents.model, approvalPolicy: schema.agents.approvalPolicy })
       .from(schema.recipes)
       .innerJoin(schema.agents, eq(schema.agents.id, schema.recipes.agentId))
       .innerJoin(schema.user, eq(schema.user.id, schema.agents.ownerId))
@@ -154,7 +154,7 @@ export class Runs {
       .returning();
     if (inserted.length === 0) return { ok: false as const, reason: "duplicate" };
     const steps = normalizeRecipe(recipe.recipe);
-    const approvalsRequired = approvalsRequiredFor({ recipe: steps, askAlways: recipe.askAlways, runsDone: recipe.runsDone, trigger });
+    const approvalsRequired = approvalsRequiredFor({ recipe: steps, askAlways: recipe.askAlways, runsDone: recipe.runsDone, trigger, mode: cleanApprovalPolicy(found.approvalPolicy).mode });
     if (this.hub.isOnline(recipe.agentId)) {
       await this.hub.addMessage(recipe.agentId, "system", copy.runs.started(recipe.recipe.title, trigger), runId);
     }

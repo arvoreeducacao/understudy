@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { alwaysAllowOf } from "./always-allow";
 import { getDb, schema } from "./db";
 import type { ApprovalView, ChatEntry, ProposalView } from "@/server/hub-types";
 
@@ -43,7 +44,7 @@ export function toApprovalView(a: typeof schema.approvals.$inferSelect): Approva
     fields: a.fields,
     status: a.status,
     createdAt: a.createdAt.toISOString(),
-    ...(a.grant ? { alwaysAllow: { tool: a.grant.tool } } : {}),
+    ...(a.grant ? { alwaysAllow: alwaysAllowOf(a.grant) } : {}),
     ...(a.askedBy ? { forYou: true as const } : {}),
   };
 }

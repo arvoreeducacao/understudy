@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent } from "react";
-import type { Brain, OwnerRule } from "@understudy/protocol";
+import type { ApprovalPolicy, Brain, OwnerRule } from "@understudy/protocol";
 import { updateAgentTools } from "@/app/actions/agents";
 import { AgentFigure } from "@/components/AgentFigure";
 import { AgentToolsFields, type AgentFormValues, type ServerOption } from "@/components/create/AgentForm";
@@ -11,6 +11,7 @@ import type { AgentLink } from "@/components/live/useAgentSocket";
 import { ModelPicker } from "@/components/ModelPicker";
 import { runsOnOwnKey, type BrainAccountView } from "@/lib/brain-account";
 import { RulesEditor } from "@/components/RulesEditor";
+import { ApprovalModesEditor } from "@/components/ApprovalModesEditor";
 import { Input } from "@/components/ui/controls";
 import type { Look } from "@/lib/look";
 import { messages } from "@/lib/messages";
@@ -28,6 +29,7 @@ export type SettingsData = {
   serverDefaultModel: string | null;
   brainAccount: BrainAccountView | null;
   rules: OwnerRule[];
+  approvalPolicy: ApprovalPolicy;
   members: { userId: string; name: string; email: string; role: string }[];
   channels: ChannelSettings;
   team: TeamSettings;
@@ -175,6 +177,11 @@ export function SettingsPanel({ link, data }: { link: Pick<AgentLink, "live" | "
       </form>
 
       <ChannelsSection agentId={values.id} channels={data.channels} />
+
+      <PanelSection title={messages.approvalModes.title} hint={messages.approvalModes.summary(messages.approvalModes.modes[data.approvalPolicy.mode].name, data.approvalPolicy.allow.length)} collapsible>
+        <p className="m-0 fld-hint">{messages.approvalModes.short}</p>
+        <ApprovalModesEditor agentId={values.id} initial={data.approvalPolicy} />
+      </PanelSection>
 
       <PanelSection title={messages.rules.title} hint={t.rulesSummary(data.rules.length)} collapsible>
         <p className="m-0 fld-hint">{messages.rules.short}</p>

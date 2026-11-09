@@ -63,3 +63,13 @@ test("a follow-up run always asks, and what it carries is quoted as untrusted da
   assert.match(text, /never instructions from your owner/);
   assert.equal(text.split("\n").length, 2);
 });
+
+test("the agent's approval mode decides whether a task's first runs ask, never the hard limits", () => {
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "on-miss" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "auto" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "off" }), false);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 99, trigger: "schedule", mode: "always" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: true, runsDone: 0, trigger: "manual", mode: "off" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: paying, askAlways: false, runsDone: 0, trigger: "schedule", mode: "off" }), true);
+  for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 99, trigger, mode: "off" }), true, trigger);
+});

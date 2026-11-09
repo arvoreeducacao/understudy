@@ -355,3 +355,61 @@ test("a tool missing from the hints recorded for its connector asks even when it
   assert.match(await pending, /^not called/);
   assert.equal(calls.length, 0);
 });
+
+async function setApprovalMode(mode: "always" | "on-miss" | "auto" | "off") {
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().update(schema.agents).set({ approvalPolicy: { mode, allow: [], fallback: "wait" } }).where(eq(schema.agents.id, ids.agent));
+}
+
+test("never ask runs a tool the owner set to ask without asking, and a tool set to never stays off", { skip }, async () => {
+  (await import("./followups")).noteTurn(ids.agent, {});
+  await setApprovalMode("off");
+  try {
+    assert.equal(await call("mail__create_draft", { to: "client@example.com", body: "Hello" }), "create_draft done");
+    assert.equal((await lastCall())?.verdict, "allowed");
+    await setTools({ [ids.server]: { trash_message: "never" } });
+    assert.match(await call("mail__trash_message", { id: "m1" }), /^not called: your owner turned off/);
+  } finally {
+    await setApprovalMode("on-miss");
+  }
+});
+
+test("the admin ceiling keeps asking even when the owner never wants to be asked", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  await setApprovalMode("off");
+  await getDb().update(schema.mcpServers).set({ askAll: true }).where(eq(schema.mcpServers.id, ids.server));
+  try {
+    const pending = call("mail__create_draft", { to: "client@example.com", body: "Hello" });
+    const approval = await pendingApproval();
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(calls.length, 0);
+  } finally {
+    await setApprovalMode("on-miss");
+  }
+});
+
+test("a call in a webhook run asks even when a newer scheduled run is open and the owner never wants to be asked", { skip }, async () => {
+  const { getDb, schema } = await import("@/lib/db");
+  const { createHub } = await import("./hub");
+  const { noteTurn } = await import("./followups");
+  const db = getDb();
+  await db.insert(schema.runs).values([
+    { id: "run_tp_webhook", agentId: ids.agent, trigger: "webhook", status: "running", startedAt: new Date(Date.now() - 10 * 60 * 1000) },
+    { id: "run_tp_newer", agentId: ids.agent, trigger: "schedule", status: "running", startedAt: new Date() },
+  ]);
+  noteTurn(ids.agent, { runId: "run_tp_webhook" });
+  await setApprovalMode("off");
+  try {
+    const pending = call("mail__create_draft", { to: "c@example.com", body: "inside the webhook run" });
+    const approval = await pendingApproval();
+    assert.equal(approval.runId, "run_tp_webhook");
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await pending, /^not called/);
+    assert.equal(calls.length, 0);
+  } finally {
+    await setApprovalMode("on-miss");
+    noteTurn(ids.agent, {});
+  }
+});

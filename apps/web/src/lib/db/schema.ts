@@ -2,7 +2,8 @@ import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey
 import type { Look } from "../look";
 import type { RoomRelay } from "../rooms";
 import type { SeenHints, ToolPolicy, ToolVerdict } from "../tool-policy";
-import type { ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
+import { DEFAULT_APPROVAL_POLICY } from "@understudy/protocol";
+import type { ApprovalPolicy, ApprovalRequest, ArtifactKind, Attachment, Brain, AgentState, FileEntry, OwnerRule, Recipe, RecordedEvent, RunStep, Usage } from "@understudy/protocol";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -158,6 +159,7 @@ export const agents = pgTable(
     model: text("model"),
     brainAccount: jsonb("brain_account").$type<BrainAccount>(),
     rules: jsonb("rules").$type<OwnerRule[]>().notNull().default([]),
+    approvalPolicy: jsonb("approval_policy").$type<ApprovalPolicy>().notNull().default(DEFAULT_APPROVAL_POLICY),
     teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
     teamOwned: boolean("team_owned").notNull().default(false),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
@@ -346,11 +348,12 @@ export const runs = pgTable(
   ],
 );
 
-export type ApprovalGrant = { serverId: string; tool: string };
+export type ConnectorGrant = { serverId: string; tool: string };
+export type ApprovalGrant = ConnectorGrant | { host: string } | { gatekeeperTool: string };
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 
-export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram";
+export type ApprovalVia = "panel" | "slack" | "whatsapp" | "telegram" | "fallback";
 
 export type SlackMessageRef = { channel: string; ts: string };
 

@@ -11,6 +11,7 @@ process.env.BETTER_AUTH_SECRET ??= "test-secret";
 process.env.SLACK_BOT_TOKEN = "xoxb-fake-token-for-tests";
 
 const ids = { owner: "usr_sk_owner", agent: "agt_sk" };
+const modes = { agent: "agt_sk_modes", token: "ust_slack_tools_modes_token" };
 const token = "ust_slack_tools_test_token";
 const slackCalls: { method: string; params: Record<string, string> }[] = [];
 let slack: Server;
@@ -98,6 +99,14 @@ before(async () => {
     look: { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" },
     tokenHash: hashToken(token),
     tools: { notifyOwner: true, slack: false, slackChannels: [], servers: [], askTools: [] },
+  } as never);
+  await db.insert(schema.agents).values({
+    id: modes.agent,
+    ownerId: ids.owner,
+    name: "Mona",
+    look: { body: "pill", color: "#7FB2FF", eyes: "dot", acc: "none", accColor: "#2F3A56" },
+    tokenHash: hashToken(modes.token),
+    tools: { notifyOwner: true, slack: false, slackChannels: [], slackMode: "ask", servers: [], askTools: [] },
   } as never);
   const { createHub } = await import("./hub");
   const { handleGatekeeper } = await import("./gatekeeper");
@@ -259,4 +268,97 @@ test("an approval request that is cut off, pending or expired is not a yes, even
   await db.update(schema.approvals).set({ status: "denied" }).where(eq(schema.approvals.id, request.id));
   assert.match(await call("slack_post_message", { channel: "#general", text: "a chat post after the run" }), /"posted":true/);
   await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+});
+
+async function modesCall(name: string, args: Record<string, unknown>) {
+  const res = await fetch(`${panelUrl}/api/mcp`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${modes.token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+  });
+  const text = await res.text();
+  return text
+    .split("\n")
+    .filter((l) => l.startsWith("data: "))
+    .map((l) => JSON.parse(l.slice(6)))
+    .find((m) => m.id === 1)?.result?.content?.[0]?.text as string;
+}
+
+async function modesPending() {
+  const { getDb, schema } = await import("@/lib/db");
+  for (let i = 0; i < 100; i++) {
+    const rows = await getDb().select().from(schema.approvals).where(eq(schema.approvals.agentId, modes.agent));
+    const pending = rows.find((a) => a.status === "pending");
+    if (pending) return pending;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error("no pending approval");
+}
+
+async function setPolicy(approvalPolicy: Record<string, unknown>) {
+  const { getDb, schema } = await import("@/lib/db");
+  await getDb().update(schema.agents).set({ approvalPolicy: approvalPolicy as never }).where(eq(schema.agents.id, modes.agent));
+}
+
+async function savedPolicy() {
+  const { getDb, schema } = await import("@/lib/db");
+  const [agent] = await getDb().select({ approvalPolicy: schema.agents.approvalPolicy }).from(schema.agents).where(eq(schema.agents.id, modes.agent));
+  return agent?.approvalPolicy;
+}
+
+const modesPosted = () => slackCalls.filter((c) => c.method === "chat.postMessage" && c.params.username === "Mona");
+
+test("always allow on a Slack approval stops asking for that tool only, and only the owner can grant it", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
+  const { createHub } = await import("./hub");
+  await setPolicy({ mode: "on-miss", allow: [], fallback: "wait" });
+  const first = modesCall("slack_post_message", { channel: "#general", text: "hello team" });
+  const approval = await modesPending();
+  assert.deepEqual(approval.grant, { gatekeeperTool: "slack_post_message" });
+  await createHub().answerApproval(approval.id, true, undefined, ids.owner, true);
+  assert.match(await first, /"posted":true/);
+  assert.deepEqual((await savedPolicy())?.allow, [{ kind: "tool", value: "slack_post_message" }]);
+  const before = modesPosted().length;
+  assert.match(await modesCall("slack_post_message", { channel: "#general", text: "no need to ask" }), /"posted":true/);
+  assert.equal(modesPosted().length, before + 1);
+  const dm = modesCall("slack_send_dm", { person: "client@outside.net", text: "still asks" });
+  const other = await modesPending();
+  assert.notEqual(other.id, approval.id);
+  await createHub().answerApproval(other.id, false, undefined, ids.owner);
+  assert.match(await dm, /^not done/);
+});
+
+test("never ask posts on Slack without asking in the owner's own turn, but a handed-over task still asks", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const db = getDb();
+  await setPolicy({ mode: "off", allow: [], fallback: "wait" });
+  const runId = "run_sk_off_handoff";
+  try {
+    const before = modesPosted().length;
+    assert.match(await modesCall("slack_post_message", { channel: "#general", text: "straight out" }), /"posted":true/);
+    assert.equal(modesPosted().length, before + 1);
+    assert.equal((await db.select().from(schema.approvals).where(eq(schema.approvals.agentId, modes.agent))).filter((a) => a.status === "pending").length, 0);
+    await db.insert(schema.runs).values({ id: runId, agentId: modes.agent, trigger: "handoff", status: "running" });
+    (await import("./followups")).noteTurn(modes.agent, { runId, untrusted: true });
+    const handed = modesCall("slack_post_message", { channel: "#general", text: "from a teammate" });
+    const approval = await modesPending();
+    assert.equal(approval.grant, null);
+    await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+    assert.match(await handed, /^not done/);
+  } finally {
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  }
+});
+
+test("always ask ignores an always-allowed tool and offers no always allow", { skip }, async () => {
+  (await import("./followups")).noteTurn(modes.agent, {});
+  const { createHub } = await import("./hub");
+  await setPolicy({ mode: "always", allow: [{ kind: "tool", value: "slack_post_message" }], fallback: "wait" });
+  const pending = modesCall("slack_post_message", { channel: "#general", text: "asks anyway" });
+  const approval = await modesPending();
+  assert.equal(approval.grant, null);
+  await createHub().answerApproval(approval.id, false, undefined, ids.owner);
+  assert.match(await pending, /^not done/);
 });

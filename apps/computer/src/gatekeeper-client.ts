@@ -57,7 +57,7 @@ export async function openGatekeeper(serverUrl: string, token: string, signal?: 
 }
 
 
-export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string };
+export type ApprovalRequest = { summary: string; fields: { label: string; value: string }[]; runId?: string; stepId?: string; site?: string };
 
 export type OwnerAnswer = { approved: boolean; pending: boolean; text: string; requestId?: string };
 
@@ -71,7 +71,7 @@ export async function askOwnerOnce(session: McpSession, request: ApprovalRequest
     const text = await session.call("wait_for_approval", { requestId: knownRequestId });
     if (!/unknown request/i.test(text)) return readOwnerAnswer(text, knownRequestId);
   }
-  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}) });
+  const text = await session.call("request_approval", { summary: request.summary, fields: request.fields, ...(request.runId ? { runId: request.runId } : {}), ...(request.stepId ? { stepId: request.stepId } : {}), ...(request.site ? { site: request.site } : {}) });
   return readOwnerAnswer(text);
 }
 

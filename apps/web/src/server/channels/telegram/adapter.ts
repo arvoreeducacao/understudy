@@ -1,3 +1,4 @@
+import { alwaysAllowCopy } from "@/lib/always-allow";
 import { env } from "@/lib/env";
 import { messages as copy } from "@/lib/messages";
 import { open } from "@/lib/secret-box";
@@ -57,7 +58,7 @@ export function telegramAdapter(): ChannelAdapter {
           { text: copy.channels.answerApprove, callback_data: `apr:${id}:y` },
           { text: copy.channels.answerDeny, callback_data: `apr:${id}:n` },
         ],
-        ...(notice.approval.alwaysAllow ? [[{ text: copy.toolAccess.approveAlways, callback_data: `apr:${id}:a` }]] : []),
+        ...(notice.approval.alwaysAllow ? [[{ text: alwaysAllowCopy(notice.approval.alwaysAllow, copy.toolAccess).label.slice(0, 64), callback_data: `apr:${id}:a` }]] : []),
         ...(panel.startsWith("https://") ? [[{ text: copy.channels.answerOpenPanel, url: panel }]] : []),
       ];
       const text = approvalText({ agentName: notice.agentName, approval: notice.approval }).slice(0, 4000);
