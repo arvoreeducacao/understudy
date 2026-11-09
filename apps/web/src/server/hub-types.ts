@@ -1,3 +1,4 @@
+import type { AlwaysAllow } from "@/lib/always-allow";
 import type { RoomRelay } from "@/lib/rooms";
 import type {
   ApprovalRequest,
@@ -51,7 +52,7 @@ export type ApprovalView = {
   fields: ApprovalRequest["fields"];
   status: string;
   createdAt: string;
-  alwaysAllow?: { tool: string };
+  alwaysAllow?: AlwaysAllow;
   forYou?: true;
 };
 

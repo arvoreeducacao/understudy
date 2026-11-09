@@ -8,6 +8,8 @@ export type TurnState = {
   runId?: string;
   approvalsRequired?: boolean;
   askSteps?: { id: string; text: string }[];
+  untrusted?: boolean;
+  conversation?: string;
 };
 
 export function turnStateFile(home: string): string {

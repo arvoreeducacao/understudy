@@ -16,6 +16,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, typ
 import { answerApproval } from "@/app/actions/approvals";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalFields } from "@/components/approvals/ApprovalFields";
+import { alwaysAllowCopy } from "@/lib/always-allow";
 import { CHAT_WIDTH, CHAT_WIDTH_COOKIE, clampChatWidth, parseStoredWidth } from "@/lib/chat-layout";
 import type { Look } from "@/lib/look";
 import { currentLocale, messages } from "@/lib/messages";
@@ -252,9 +253,9 @@ export function ApprovalCard({ approval, onDone, canAnswer = true, canGrant = fa
             {messages.live.approve}
           </button>
           {canGrant && approval.alwaysAllow && (
-            <button className="btn sm sec" disabled={busy !== null} onClick={() => answer(true, true)} title={messages.toolAccess.approveAlwaysHint(approval.alwaysAllow.tool)}>
+            <button className="btn sm sec" disabled={busy !== null} onClick={() => answer(true, true)} title={alwaysAllowCopy(approval.alwaysAllow, messages.toolAccess).hint}>
               {busy === "always" ? <LoaderCircle size={14} className="cx-spin" aria-hidden /> : <CheckCheck size={14} aria-hidden />}
-              {messages.toolAccess.approveAlways}
+              <span className="truncate max-w-[260px]">{alwaysAllowCopy(approval.alwaysAllow, messages.toolAccess).label}</span>
             </button>
           )}
         </div>

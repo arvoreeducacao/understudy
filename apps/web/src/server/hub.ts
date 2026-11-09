@@ -95,6 +95,7 @@ export class Hub {
     for (const set of this.viewers.values()) for (const v of set) if (v.ws.readyState === v.ws.OPEN) v.ws.ping();
     this.approvals.expire().catch((error) => log("approval_expire_error", { error: String(error) }));
     this.approvals.remind().catch((error) => log("approval_remind_error", { error: String(error) }));
+    this.approvals.settleUnanswered().catch((error) => log("approval_unanswered_error", { error: String(error) }));
     this.runs.failStalled().catch((error) => log("run_stall_error", { error: String(error) }));
     this.inbound.expire().catch((error) => log("inbound_expire_error", { error: String(error) }));
     this.rooms.expireStale().catch((error) => log("room_expire_error", { error: String(error) }));

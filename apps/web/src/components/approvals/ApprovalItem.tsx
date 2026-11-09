@@ -10,6 +10,7 @@ import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalFields } from "@/components/approvals/ApprovalFields";
 import { messages } from "@/lib/messages";
 import { answeredOutcome } from "@/lib/approval-outcome";
+import { alwaysAllowCopy, type AlwaysAllow } from "@/lib/always-allow";
 import { Input } from "@/components/ui/controls";
 
 const t = messages.approvals;
@@ -19,7 +20,7 @@ export function ApprovalItem({
   agent,
   when,
 }: {
-  approval: { id: string; summary: string; fields: { label: string; value: string }[]; alwaysAllow?: { tool: string } };
+  approval: { id: string; summary: string; fields: { label: string; value: string }[]; alwaysAllow?: AlwaysAllow };
   agent: { id: string; name: string; look: Look };
   when: string;
 }) {
@@ -64,9 +65,9 @@ export function ApprovalItem({
             {t.approve}
           </button>
           {approval.alwaysAllow && (
-            <button className="btn sec inline-flex items-center gap-1.5" disabled={pending} onClick={() => answer(true, true)} title={messages.toolAccess.approveAlwaysHint(approval.alwaysAllow.tool)}>
+            <button className="btn sec inline-flex items-center gap-1.5 min-w-0" disabled={pending} onClick={() => answer(true, true)} title={alwaysAllowCopy(approval.alwaysAllow, messages.toolAccess).hint}>
               <CheckCheck size={15} aria-hidden />
-              {messages.toolAccess.approveAlways}
+              <span className="truncate max-w-[260px]">{alwaysAllowCopy(approval.alwaysAllow, messages.toolAccess).label}</span>
             </button>
           )}
           <button className="btn sec inline-flex items-center gap-1.5" disabled={pending} onClick={() => answer(false)}>

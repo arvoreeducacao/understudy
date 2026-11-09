@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { argsSubject, describeRule, findViolation, formatBytes } from "@understudy/protocol";
+import { allowedHost, argsSubject, cleanApprovalPolicy, describeRule, effectiveApprovalMode, findViolation, formatBytes, listCoversActions, toolListed } from "@understudy/protocol";
 import { getDb, schema } from "@/lib/db";
 import { storableJson } from "@/lib/db/storable";
 import type { AgentTools, ApprovalGrant } from "@/lib/db/schema";
@@ -19,7 +19,8 @@ import { publishArtifact } from "./artifacts/service";
 import { teamTools } from "./team";
 import { taskTools } from "./task-tools";
 import { followupTools } from "./followup-tools";
-import { turnRunId, turnUntrusted } from "./followups";
+import { turnRunId, turnUntrusted, turnWakesFollowup } from "./followups";
+import { untrustedTurnFor } from "./approval-modes";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
 import { SLACK_LIMITS, slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
@@ -121,6 +122,17 @@ export async function recordFirstHints(agent: Pick<AgentRow, "id" | "tools">, se
     .set({ tools: sql`jsonb_set(${schema.agents.tools}, '{toolHints}', coalesce(${schema.agents.tools}->'toolHints', '{}'::jsonb) || ${JSON.stringify({ [serverId]: hints })}::jsonb)` })
     .where(and(eq(schema.agents.id, agent.id), sql`not (coalesce(${schema.agents.tools}->'toolHints', '{}'::jsonb) ? ${serverId}::text)`));
   agent.tools = { ...agent.tools, toolHints: { ...(agent.tools.toolHints ?? {}), [serverId]: hints } };
+}
+
+async function untrustedTurn(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId">) {
+  const flagged = outsiderTurn(agent.id) || guestTurn(agent.id) || turnUntrusted(agent.id) || turnWakesFollowup(agent.id);
+  const run = flagged ? null : await runningRun(agent.id);
+  return untrustedTurnFor({ ownerId: agent.ownerId, audience: hub.turnAudience(agent.id), flagged, runTrigger: run?.trigger ?? null });
+}
+
+async function approvalMode(hub: Hub, agent: Pick<AgentRow, "id" | "ownerId" | "approvalPolicy">) {
+  const policy = cleanApprovalPolicy(agent.approvalPolicy);
+  return { policy, mode: effectiveApprovalMode(policy.mode, { untrusted: await untrustedTurn(hub, agent) }) };
 }
 
 export function actionToolName(tool: string) {
@@ -254,13 +266,20 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         runId: z.string().optional(),
         stepId: z.string().optional(),
         action: z.object({ tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()) }).optional(),
+        site: z.string().max(253).optional(),
       }),
       run: (async (
-        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> } },
+        args: { summary: string; fields?: { label: string; value: string }[]; runId?: string; stepId?: string; action?: { tool: string; args: Record<string, unknown> }; site?: string },
         extra: Extra,
       ) => {
         const label = outsider() ? await outsiderLabel(agent.id) : null;
         if (label && !outsiderLimiter.allow(`outsider:${agent.id}`, 1 / 60, 3)) return text(brainText.outsiderBusy, true);
+        const { mode } = await approvalMode(hub, agent);
+        if (!label && mode === "off" && !args.runId && !(await runningRun(agent.id))) {
+          console.log(JSON.stringify({ at: new Date().toISOString(), event: "approval_skipped", agentId: agent.id, mode }));
+          return text(brainText.approvalsOff);
+        }
+        const site = !label && args.site ? allowedHost(args.site) : null;
         let fields = args.fields ?? [];
         let hash: string | undefined;
         if (args.action) {
@@ -274,7 +293,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         }
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
         const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash));
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, site ? { host: site } : undefined));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
@@ -354,7 +373,13 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
   const guard = async (input: GuardInput) => {
     const run = input.toOwner ? null : await runningRun(agent.id);
     const handedOff = run?.trigger === "handoff";
-    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, input.extra as Extra, { runId: handedOff ? run?.id : undefined });
+    const extra = input.extra as Extra;
+    const tool = extra.call ? actionToolName(extra.call.name) : null;
+    return guardOutward(hub, agent, input.target, input.summary, input.fields, input.args, input.ask || handedOff, waitOutcome, extra, {
+      runId: handedOff ? run?.id : undefined,
+      forced: handedOff,
+      ...(tool ? { grant: { gatekeeperTool: tool } } : {}),
+    });
   };
 
   if (await slackEnabled()) {
@@ -461,23 +486,27 @@ async function guardOutward(
   ask: boolean,
   waitOutcome: (id: string, extra: Extra) => Promise<Outcome>,
   extra: Extra,
-  approval: { runId?: string | null; grant?: ApprovalGrant } = {},
-): Promise<GuardResult & { asked?: boolean }> {
+  approval: { runId?: string | null; grant?: ApprovalGrant; forced?: boolean } = {},
+): Promise<GuardResult & { asked?: boolean; skipped?: "mode" | "listed" }> {
   const violation = findViolation(agent.rules ?? [], argsSubject(args));
   if (violation) {
     const rule = describeRule(violation.rule);
     await reportRuleBlock(hub, agent.id, rule, violation.reason).catch(() => {});
     return { ok: false, text: `not done: blocked by your owner's rule "${rule}": ${violation.reason}. Do not try another way; stop and tell your owner.` };
   }
-  if (!ask) {
-    const asked = extra.call ? await unapprovedAsk(agent.id, actionToolName(extra.call.name)) : null;
+  const tool = extra.call ? actionToolName(extra.call.name) : null;
+  const { policy, mode } = ask && !approval.forced ? await approvalMode(hub, agent) : { policy: null, mode: "always" as const };
+  const skipped = !ask || !policy ? undefined : mode === "off" ? ("mode" as const) : listCoversActions(mode) && tool && toolListed(tool, policy.allow) ? ("listed" as const) : undefined;
+  if (!ask || skipped) {
+    const asked = tool ? await unapprovedAsk(agent.id, tool) : null;
     if (asked) return { ok: false, text: brainText.askedNotApproved(asked.status, asked.id) };
-    return { ok: true };
+    return skipped ? { ok: true, skipped } : { ok: true };
   }
   if (extra.call && (await hub.useActionApproval(agent.id, actionHash(extra.call.name, args), ACTION_APPROVAL_MAX_AGE_MS))) return { ok: true, asked: true };
   const hash = payloadHash(target, args);
+  const grant = approval.grant && "gatekeeperTool" in approval.grant && (approval.forced || !listCoversActions(mode)) ? undefined : approval.grant;
   const joined = approval.runId ? await hub.openApprovalAsk(agent.id, { runId: approval.runId, summary, fields, payloadHash: hash }) : null;
-  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, approval.grant));
+  const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: approval.runId ?? undefined }, "mcp", APPROVAL_LIFETIME_SECONDS, hash, grant));
   let outcome = await waitOutcome(id, extra);
   while (outcome.kind === "pending" && !extra.signal?.aborted) outcome = await waitOutcome(id, extra);
   if (outcome.kind !== "decided" || !outcome.approved) return { ok: false, asked: true, text: `not done: the owner ${outcomeText(id, outcome).content[0].text}` };
@@ -518,7 +547,8 @@ async function proxyCall(
   if (permission === "never") {
     return { ...text(`not called: your owner turned off ${upstream.name}'s ${toolName} for you. Do not try another way; tell your owner if you need it.`, true), verdict: "blocked" };
   }
-  const needsApproval = permission === "ask" || (run?.trigger === "handoff" && !isReadOnly(tool.annotations));
+  const handedOffWrite = run?.trigger === "handoff" && !isReadOnly(tool.annotations);
+  const needsApproval = permission === "ask" || handedOffWrite;
   if (!needsApproval && isSlackProfile(upstream.url) && !isReadOnly(tool.annotations) && !slackProfileLimiter.allow(`slack-profile:${agent.ownerId}:write`, SLACK_LIMITS.writesPerHour / 3600, SLACK_LIMITS.writeBurst)) {
     return { ...text(`not called: you already did ${SLACK_LIMITS.writeBurst} Slack actions as your owner in a short time; wait a few minutes, or tell your owner if the work needs more.`, true), verdict: "blocked" };
   }
@@ -526,14 +556,15 @@ async function proxyCall(
   if ("error" in shown) {
     return { ...text(`not called: calls that need approval need ${shown.error}, so the owner sees exactly what will run`, true), verdict: "denied" };
   }
-  const grant = canAlwaysAllow(ceiling, toolName, tool.annotations) ? { serverId: upstream.id, tool: toolName } : undefined;
+  const adminAllows = canAlwaysAllow(ceiling, toolName, tool.annotations);
+  const grant = adminAllows ? { serverId: upstream.id, tool: toolName } : undefined;
   const summary = messages.toolAccess.approvalSummary(upstream.name, toolName);
-  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant });
+  const allowed = await guardOutward(hub, agent, `${upstream.id}:${toolName}`, summary, [...shown.fields], args, needsApproval, waitOutcome, extra, { runId: run?.id ?? null, grant, forced: !adminAllows || handedOffWrite });
   if (!allowed.ok) return { ...text(allowed.text.replace(/^not done:/, "not called:"), true), verdict: allowed.asked ? "denied" : "blocked" };
   const result = await callUpstreamTool(upstream, toolName, args, agent.ownerId);
   const content = Array.isArray(result.content) ? result.content : [];
   const parts = content.map((part: { type: string; text?: string }) => (part.type === "text" ? part.text ?? "" : JSON.stringify(part)));
-  return { ...text(parts.join("\n") || JSON.stringify(result), Boolean(result.isError)), verdict: needsApproval ? "approved" : "allowed" };
+  return { ...text(parts.join("\n") || JSON.stringify(result), Boolean(result.isError)), verdict: allowed.asked ? "approved" : "allowed" };
 }
 
 async function readBody(req: IncomingMessage) {
@@ -624,7 +655,7 @@ export async function gateGitPush(hub: Hub, agent: ComputerAgent, push: GitPush,
   const name = `${github.upstream.slug}${PROXY_SEPARATOR}git_push`;
   if (ask) onAsk();
   const extra: Extra = { signal, sendNotification: async () => undefined };
-  const allowed = await guardOutward(hub, agent, `${github.upstream.id}:git_push`, t.approvalSummary(github.upstream.name, "git push"), fields, args, ask, outcomeWaiter(hub, agent.id), extra, { runId });
+  const allowed = await guardOutward(hub, agent, `${github.upstream.id}:git_push`, t.approvalSummary(github.upstream.name, "git push"), fields, args, ask, outcomeWaiter(hub, agent.id), extra, { runId, forced: true });
   if (!allowed.ok) {
     await logCall(agent.id, name, args, allowed.text, false, allowed.asked ? "denied" : "blocked", runId);
     return { ok: false, reason: allowed.text.replace(/^not done: /, "") };

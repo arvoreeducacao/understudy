@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ComputerApprovalPolicySchema } from "./approval-mode.ts";
 import { ArtifactEditContextSchema } from "./artifacts.ts";
 import { AttachmentSchema, MAX_ATTACHMENTS } from "./files.ts";
 
@@ -148,6 +149,7 @@ export const ServerToComputerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("terminal_close"), terminalId: id }),
   z.object({ type: z.literal("job_stop"), jobId: id }),
   z.object({ type: z.literal("set_rules"), rules: z.array(OwnerRuleSchema).max(30) }),
+  z.object({ type: z.literal("set_approval_policy"), policy: ComputerApprovalPolicySchema }),
   z.object({ type: z.literal("watch_check"), watchId: id, url: z.string().min(1).max(2000), part: z.string().max(300).optional() }),
   z.object({ type: z.literal("viewers"), count: z.number().int().min(0) }),
   z.object({ type: z.literal("memory_write"), path: text, text }),

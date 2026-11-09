@@ -30,6 +30,7 @@ export * from "./schemas.ts";
 export * from "./patterns.ts";
 export * from "./recipe.ts";
 export * from "./rules.ts";
+export * from "./approval-mode.ts";
 export * from "./capture.ts";
 export * from "./files.ts";
 export * from "./artifacts.ts";

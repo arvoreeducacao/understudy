@@ -9,6 +9,7 @@ import { isRefreshRace, isSignedOut } from "./brain-lock.ts";
 import { dayOf, type Memory } from "./memory.ts";
 import { DEFAULT_ASK_FIRST_RUNS, extractJson, normalizeRecipe, ownerAnsweredPrompt, parseRunResult, recipePrompt, recipePromptFromText, runPrompt, withAnomalies, withoutResultLine } from "./recipe.ts";
 import { readRules } from "./rules-store.ts";
+import { readApprovalPolicy } from "./approval-policy-store.ts";
 import { createRunRecord, type Screenshot } from "./run-record.ts";
 import { writeTurnState, type TurnState } from "./turn-state.ts";
 
@@ -316,6 +317,7 @@ export function createAgent(options: {
   rulesFile?: string;
   runApprovals?: RunApprovalsLookup;
   ownerWaitRetryMs?: number;
+  approvalPolicyFile?: string;
 }): Agent {
   const run = options.runTurn ?? startTurn;
   const today = options.today ?? (() => dayOf());
@@ -411,7 +413,7 @@ export function createAgent(options: {
   };
 
   const outsider = async (job: Extract<Job, { kind: "chat" }> & { external: { channel: string; sender: string } }) => {
-    markTurn({ mode: "chat" });
+    markTurn({ mode: "chat", untrusted: true, conversation: `outsider:${job.external.channel}:${job.external.sender}:${today()}`.slice(0, 400) });
     if (persisted.brain !== "claude") {
       options.send({ type: "chat", role: "understudy", text: OUTSIDER_UNSUPPORTED });
       setState("calm");
@@ -456,7 +458,9 @@ export function createAgent(options: {
       save();
     }
     if (cancelled()) return;
-    markTurn({ mode: "chat" });
+    const ownerId = options.approvalPolicyFile ? readApprovalPolicy(options.approvalPolicyFile).ownerId : undefined;
+    const untrusted = Boolean(job.fromAgent || job.external || job.followup || (job.askedBy && job.askedBy !== ownerId));
+    markTurn({ mode: "chat", untrusted, conversation: `chat:${job.fromAgent ? `agent:${job.fromAgent.id}` : job.askedBy ?? "owner"}:${day}`.slice(0, 400) });
     const said = ownerMessage(job.text, job.attachments ?? [], options.config.home, job.artifactEdit);
     const message = job.fromAgent
       ? teammateMessage(job.fromAgent.name, job.text, job.fromAgent.owner)
@@ -496,7 +500,7 @@ export function createAgent(options: {
   };
 
   const room = async (job: Extract<Job, { kind: "room" }>) => {
-    markTurn({ mode: "chat" });
+    markTurn({ mode: "chat", untrusted: true, conversation: `room:${job.roomId}:${today()}` });
     const result = await turn({ job, prompt: memory.briefing({ input: job.prompt }), resume: null, roomId: job.roomId });
     options.send({ type: "room_turn_done", roomId: job.roomId, ok: result.ok && !cancelled(), ...(result.ok ? {} : { error: String(result.error ?? "").slice(0, 300) }) });
     if (cancelled()) return;
@@ -551,6 +555,8 @@ export function createAgent(options: {
       runId: job.runId,
       approvalsRequired: job.approvalsRequired,
       askSteps: job.recipe.steps.filter((step) => step.mode === "ask").map((step) => ({ id: step.id, text: step.text })),
+      untrusted: job.webhook === true,
+      conversation: `run:${job.runId}`,
     });
     options.send({ type: "activity", runId: job.runId, text: "Starting the task" });
     const prompt = `${memory.briefing({ recipe: job.recipe, input: job.webhook ? undefined : job.context })}\n\n${runPrompt(job)}`;

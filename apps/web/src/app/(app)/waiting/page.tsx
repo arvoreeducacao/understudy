@@ -5,6 +5,7 @@ import { accessibleAgentIds, approvalScope } from "@/lib/access";
 import { AgentFigure } from "@/components/AgentFigure";
 import { ApprovalItem } from "@/components/approvals/ApprovalItem";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { alwaysAllowOf } from "@/lib/always-allow";
 import { getDb, schema } from "@/lib/db";
 import { formatDate, formatTime, formatWhen } from "@/lib/format";
 import { messages } from "@/lib/messages";
@@ -103,7 +104,7 @@ export default async function WaitingPage() {
             {pending.map(({ approval, agent }) => (
               <ApprovalItem
                 key={approval.id}
-                approval={{ id: approval.id, summary: approval.summary, fields: approval.fields, ...(approval.grant && agent.ownerId === user.id ? { alwaysAllow: { tool: approval.grant.tool } } : {}) }}
+                approval={{ id: approval.id, summary: approval.summary, fields: approval.fields, ...(approval.grant && agent.ownerId === user.id ? { alwaysAllow: alwaysAllowOf(approval.grant) } : {}) }}
                 agent={{ id: agent.id, name: agent.name, look: agent.look }}
                 when={formatWhen(approval.createdAt)}
               />

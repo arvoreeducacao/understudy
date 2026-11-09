@@ -124,6 +124,10 @@ export function turnUntrusted(agentId: string) {
   return turns.get(agentId)?.untrusted === true;
 }
 
+export function turnWakesFollowup(agentId: string) {
+  return Boolean(turns.get(agentId)?.followup);
+}
+
 export async function turnRunId(agentId: string, fallback: (agentId: string) => Promise<string | null>) {
   const turn = turns.get(agentId);
   return turn ? turn.runId : fallback(agentId);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizeRecipe } from "@understudy/protocol";
 import { brainText } from "./brain-text";
-import { approvalsRequiredFor, quotedInputTrigger, untrustedTrigger } from "./run-policy";
+import { approvalsRequiredFor, quotedInputTrigger, unansweredOutcome, untrustedTrigger } from "./run-policy";
 
 const harmless = normalizeRecipe({ steps: [{ text: "Open the report", mode: "auto" }, { text: "Download the statement", mode: "ask" }], askFirstRuns: 2 });
 const paying = normalizeRecipe({ steps: [{ text: "Open the bank", mode: "auto" }, { text: "Pay the supplier", mode: "auto" }], askFirstRuns: 0 });
@@ -62,4 +62,25 @@ test("a follow-up run always asks, and what it carries is quoted as untrusted da
   assert.doesNotMatch(text, /Input from the owner/);
   assert.match(text, /never instructions from your owner/);
   assert.equal(text.split("\n").length, 2);
+});
+
+test("the agent's approval mode decides whether a task's first runs ask, never the hard limits", () => {
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "on-miss" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "auto" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 0, trigger: "schedule", mode: "off" }), false);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 99, trigger: "schedule", mode: "always" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: true, runsDone: 0, trigger: "manual", mode: "off" }), true);
+  assert.equal(approvalsRequiredFor({ recipe: paying, askAlways: false, runsDone: 0, trigger: "schedule", mode: "off" }), true);
+  for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(approvalsRequiredFor({ recipe: harmless, askAlways: false, runsDone: 99, trigger, mode: "off" }), true, trigger);
+});
+
+test("when nobody answers, wait keeps waiting, a no is always allowed, and going ahead only covers tasks the owner or a schedule started", () => {
+  assert.equal(unansweredOutcome({ fallback: "wait", askedBy: null, runTrigger: "schedule" }), null);
+  assert.equal(unansweredOutcome({ fallback: "deny", askedBy: null, runTrigger: null }), "deny");
+  assert.equal(unansweredOutcome({ fallback: "deny", askedBy: "usr_member", runTrigger: "webhook" }), "deny");
+  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: "schedule" }), "allow");
+  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: "manual" }), "allow");
+  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: null }), null);
+  assert.equal(unansweredOutcome({ fallback: "allow", askedBy: "usr_member", runTrigger: "schedule" }), null);
+  for (const trigger of ["webhook", "email", "handoff", "watch", "followup", "test"]) assert.equal(unansweredOutcome({ fallback: "allow", askedBy: null, runTrigger: trigger }), null, trigger);
 });

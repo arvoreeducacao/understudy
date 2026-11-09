@@ -18,6 +18,7 @@ import { answerFileMessage, createFileStore, startFileExchange } from "./files.t
 import { connectBench } from "./bench-client.ts";
 import { startLocalWorkbench } from "./workbench.ts";
 import { readRules, rulesFile, writeRules } from "./rules-store.ts";
+import { approvalPolicyFile, writeApprovalPolicy } from "./approval-policy-store.ts";
 import { checkPage } from "./watch.ts";
 import { turnStateFile } from "./turn-state.ts";
 import { apiKeyOptions, openVault, validCredentialName } from "./vault.ts";
@@ -143,6 +144,7 @@ async function main() {
     memory: createMemory(home),
     settingsFile: join(stateDir, "settings.json"),
     rulesFile: rulesFile(home),
+    approvalPolicyFile: approvalPolicyFile(home),
     send: outbox,
     runApprovals: async (runId, wait, signal) => listRunApprovals(await openGatekeeper(serverUrl, token, signal), runId, wait),
   });
@@ -253,6 +255,10 @@ async function main() {
       case "set_rules":
         writeRules(rulesFile(home), message.rules);
         log("main", `owner rules updated: ${message.rules.length}`);
+        return;
+      case "set_approval_policy":
+        writeApprovalPolicy(approvalPolicyFile(home), message.policy);
+        log("main", `approval mode ${message.policy.mode}, ${message.policy.hosts.length} sites always allowed`);
         return;
       case "job_stop":
         bench.send({ op: "job_stop", jobId: message.jobId });

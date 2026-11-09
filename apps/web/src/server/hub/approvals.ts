@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
-import type { ApprovalRequest } from "@understudy/protocol";
 import { brainText } from "@/lib/brain-text";
+import { cleanApprovalPolicy, type ApprovalRequest } from "@understudy/protocol";
+import { UNANSWERED_AFTER_MS, unansweredOutcome } from "@/lib/run-policy";
 import { env } from "@/lib/env";
 import { getDb, schema } from "@/lib/db";
 import { storableJson, storableText } from "@/lib/db/storable";
@@ -15,6 +16,8 @@ import type { ApprovalView } from "../hub-types";
 import { agentIdentity, escapeSlack, sendDirectMessage } from "../slack";
 import { log, type Answer } from "./shared";
 import { grantTool } from "../tool-access";
+import { grantAllowEntry } from "../approval-modes";
+import { allowEntryOf, alwaysAllowOf } from "@/lib/always-allow";
 import type { ApprovalGrant, ApprovalVia } from "@/lib/db/schema";
 import { closeApprovalOnSlack, rememberApprovalMessage } from "../approval-slack";
 import { guestTurn } from "../slack-askers";
@@ -74,7 +77,7 @@ export class Approvals {
       fields: row.fields,
       status: "pending",
       createdAt: new Date().toISOString(),
-      ...(grant ? { alwaysAllow: { tool: grant.tool } } : {}),
+      ...(grant ? { alwaysAllow: alwaysAllowOf(grant) } : {}),
       ...(askedBy ? { forYou: true as const } : {}),
     };
     this.hub.broadcast(agentId, { type: "approval", approval: view }, askedBy);
@@ -283,9 +286,53 @@ export class Approvals {
     if (!row) return false;
     log("approval_answered", { approvalId: id, agentId: row.agentId, status });
     if (approved && always && row.grant) {
-      const granted = await grantTool(row.agentId, row.grant, userId).catch((error) => (log("approval_grant_error", { approvalId: id, error: String(error) }), false));
+      const grant = row.grant;
+      const entry = "serverId" in grant ? null : allowEntryOf(grant);
+      const granted = await ("serverId" in grant ? grantTool(row.agentId, grant, userId) : entry ? grantAllowEntry(this.hub, row.agentId, entry, userId) : Promise.resolve(false)).catch((error) => (log("approval_grant_error", { approvalId: id, error: String(error) }), false));
       log("approval_grant", { approvalId: id, agentId: row.agentId, granted });
     }
+    await this.closed(row, approved, note);
+    return true;
+  }
+
+  async settleUnanswered(now = Date.now()) {
+    const db = getDb();
+    const due = await db
+      .select({ approval: schema.approvals, policy: schema.agents.approvalPolicy, trigger: schema.runs.trigger })
+      .from(schema.approvals)
+      .innerJoin(schema.agents, eq(schema.agents.id, schema.approvals.agentId))
+      .leftJoin(schema.runs, eq(schema.runs.id, schema.approvals.runId))
+      .where(
+        and(
+          eq(schema.approvals.status, "pending"),
+          lte(schema.approvals.createdAt, new Date(now - UNANSWERED_AFTER_MS)),
+          or(isNull(schema.approvals.expiresAt), gt(schema.approvals.expiresAt, new Date(now))),
+          sql`${schema.agents.approvalPolicy}->>'fallback' in ('deny', 'allow')`,
+        ),
+      )
+      .limit(100);
+    const minutes = UNANSWERED_AFTER_MS / 60_000;
+    for (const { approval, policy, trigger } of due) {
+      const outcome = unansweredOutcome({ fallback: cleanApprovalPolicy(policy).fallback, askedBy: approval.askedBy, runTrigger: trigger });
+      if (!outcome) continue;
+      const approved = outcome === "allow";
+      const note = brainText.unanswered(approved, minutes);
+      const [row] = await db
+        .update(schema.approvals)
+        .set({ status: approved ? "approved" : "denied", note, answeredAt: new Date(now), answeredVia: "fallback" })
+        .where(and(eq(schema.approvals.id, approval.id), eq(schema.approvals.status, "pending")))
+        .returning();
+      if (!row) continue;
+      log("approval_unanswered", { approvalId: row.id, agentId: row.agentId, outcome });
+      await this.hub.addMessage(row.agentId, "system", copy.approvalModes.unanswered(row.summary, approved, minutes), row.runId).catch((error) => log("approval_unanswered_note_error", { approvalId: row.id, error: String(error) }));
+      await this.closed(row, approved, note);
+    }
+  }
+
+  private async closed(row: typeof schema.approvals.$inferSelect, approved: boolean, note: string | undefined) {
+    const db = getDb();
+    const id = row.id;
+    const status = approved ? "approved" : "denied";
     this.settle(id, { approved, note, status });
     await this.leaveChannelLists(row.agentId, id);
     if (row.source === "computer") {
@@ -305,7 +352,6 @@ export class Approvals {
     this.hub.broadcast(row.agentId, { type: "approval_closed", id, status });
     if (row.askedBy) await this.hub.rooms.approvalClosed(id, status);
     await this.closeOnSlack(row);
-    return true;
   }
 
   async pendingFor(agentIds: string[]) {
@@ -357,7 +403,7 @@ export class Approvals {
       url: `/agents/${agentId}`,
       tag: `approval-${approval.id}`,
     }).catch((error) => log("push_error", { error: String(error) }));
-    const { text, blocks } = await slackApprovalMessage(person.name, approval);
+    const { text, blocks } = await slackApprovalMessage(person.name, { ...approval, alwaysAllow: undefined });
     await rememberApprovalMessage(approval.id, await sendDirectMessage(person, text, blocks, agentIdentity({ id: agentId, name: person.name })));
   }
 

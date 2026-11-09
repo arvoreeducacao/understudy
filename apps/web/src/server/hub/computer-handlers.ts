@@ -12,6 +12,7 @@ import { currentTurn, startTurn } from "../channels/turns";
 import { askerTurn, replyToAsker, startAskerTurn } from "../slack-askers";
 import { brainAccountMessage, sameBrainAccount } from "../model-proxy";
 import { noteTurn } from "../followups";
+import { approvalPolicyMessage } from "../approval-modes";
 import { log } from "./shared";
 import { syncFiles, syncMemory } from "./snapshots";
 import { reportRuleBlock } from "../rules";
@@ -34,6 +35,7 @@ export const computerHandlers: Handlers = {
     const model = effectiveModel(agent?.model);
     if (agent && (model ?? "") !== (message.model ?? "")) hub.sendToComputer(agentId, { type: "set_model", model: model ?? "" });
     if (agent) hub.sendToComputer(agentId, { type: "set_rules", rules: agent.rules ?? [] });
+    if (agent) hub.sendToComputer(agentId, approvalPolicyMessage(agent));
     const account = agent ? brainAccountMessage(agent) : null;
     if (account && !sameBrainAccount(account, message.brainAccount)) hub.sendToComputer(agentId, account);
     const profile = agent ? await computerProfile(agentId) : null;

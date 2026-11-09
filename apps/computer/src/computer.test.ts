@@ -872,7 +872,7 @@ test("inside one script the owner is asked once per address, and a no stops ever
   assert.equal(await asks.request(verdict("chat.google.com"), "POST chat.google.com/u/1/api/list_topics"), true);
   assert.deepEqual(asked, ["Script sent a POST to chat.google.com", "Script sent a POST to chat.google.com"]);
   assert.deepEqual(notes, ["Script sent a POST to chat.google.com (approved by the owner [requestId: req1])", "Script sent a POST to chat.google.com (approved by the owner [requestId: req2])"]);
-  assert.equal(asks.repeatNote(), "sent without asking again: POST chat.google.com/u/1/api/list_topics ×2. The owner approved the same address earlier in this script.");
+  assert.equal(asks.repeatNote(), "sent without asking again: POST chat.google.com/u/1/api/list_topics ×2. The owner approved the same site earlier in this script.");
 
   const denyNotes: string[] = [];
   let calls = 0;
@@ -1080,7 +1080,7 @@ test("webhook runs always need approvals and their input is quoted as untrusted 
   });
   agent.enqueue({ kind: "run", runId: "w1", recipe, approvalsRequired: false, webhook: true, context: "body" });
   await settle();
-  assert.deepEqual(JSON.parse(states[0]), { mode: "run", runId: "w1", approvalsRequired: true, askSteps: [{ id: "s1", text: "Send" }] });
+  assert.deepEqual(JSON.parse(states[0]), { mode: "run", runId: "w1", approvalsRequired: true, askSteps: [{ id: "s1", text: "Send" }], untrusted: true, conversation: "run:w1" });
   assert.equal(readTurnState(turnFile).mode, "idle");
 });
 

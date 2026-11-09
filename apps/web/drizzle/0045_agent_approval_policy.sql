@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ADD COLUMN "approval_policy" jsonb DEFAULT '{"mode":"on-miss","allow":[],"fallback":"wait"}'::jsonb NOT NULL;

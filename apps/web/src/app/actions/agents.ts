@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import type { Brain } from "@understudy/protocol";
+import { APPROVAL_FALLBACKS, APPROVAL_MODES, cleanAllowEntry, withoutAllowed, type ApprovalPolicy, type Brain } from "@understudy/protocol";
 import { accessibleAgentIds } from "@/lib/access";
 import { AGENT_ORDER_LIMIT, mergeAgentOrder } from "@/lib/agent-order";
 import { getDb, schema } from "@/lib/db";
@@ -13,6 +13,7 @@ import { requireUser } from "@/lib/session";
 import { removeAgentArtifactBlobs } from "@/server/artifacts/service";
 import { getHub } from "@/server/hub-access";
 import { cleanRules } from "@/server/rules";
+import { updateApprovalPolicy } from "@/server/approval-modes";
 import { computerProfile } from "@/server/computer-profile";
 import { cleanLook, type Look } from "@/lib/look";
 import { agentTabPath } from "@/lib/workspace-tabs";
@@ -153,6 +154,24 @@ export async function setAgentRules(agentId: string, input: unknown) {
   getHub()?.sendToComputer(agent.id, { type: "set_rules", rules });
   revalidatePath(`/agents/${agent.id}`, "layout");
   return { ok: true as const, rules };
+}
+
+export async function setAgentApprovalPolicy(agentId: string, input: { mode?: unknown; fallback?: unknown; remove?: unknown }) {
+  const { agent } = await ownAgent(agentId);
+  const mode = APPROVAL_MODES.find((candidate) => candidate === input.mode);
+  const fallback = APPROVAL_FALLBACKS.find((candidate) => candidate === input.fallback);
+  const remove = input.remove === undefined ? null : cleanAllowEntry(input.remove);
+  if (input.mode !== undefined && !mode) return { ok: false as const };
+  if (input.fallback !== undefined && !fallback) return { ok: false as const };
+  if (input.remove !== undefined && !remove) return { ok: false as const };
+  const change = (policy: ApprovalPolicy): ApprovalPolicy => {
+    const next = { ...policy, ...(mode ? { mode } : {}), ...(fallback ? { fallback } : {}) };
+    return remove ? withoutAllowed(next, remove) : next;
+  };
+  const policy = await updateApprovalPolicy(getHub(), agent.id, change);
+  if (!policy) return { ok: false as const };
+  revalidatePath(`/agents/${agent.id}`, "layout");
+  return { ok: true as const, policy };
 }
 
 export async function saveAgentOrder(ids: string[]) {
