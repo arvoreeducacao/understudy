@@ -31,7 +31,7 @@ export type StepApproval = { runId: string; stepId: string; summary: string; unt
 export type Verdict =
   | { kind: "pass"; coveredBy?: StepApproval; without?: string }
   | { kind: "block"; reason: string }
-  | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string };
+  | { kind: "ask"; summary: string; stepId?: string; fields: { label: string; value: string }[]; site?: string; everyTime?: true };
 
 export const MODE_OFF_NOTE = "your owner lets you act without asking";
 
@@ -43,6 +43,16 @@ export function guardMode(state: TurnState, policy: ComputerApprovalPolicy): Eff
   const mode = effectiveApprovalMode(policy.mode, { untrusted: state.untrusted === true });
   if (mode === "off" && state.mode === "run" && state.approvalsRequired !== false) return "on-miss";
   return mode;
+}
+
+const ASKS_EVERY_TIME = /(log_?in|sign_?in|auth|token|otp|2fa|mfa|verif|password|passwd|senha|checkout|payment|\/pay|purchase|order|delete|remove|transfer|invite|share|publish|comment|send)/;
+
+export function asksEveryTime(url: string): boolean {
+  try {
+    return ASKS_EVERY_TIME.test(new URL(url).pathname.toLowerCase());
+  } catch {
+    return true;
+  }
 }
 
 function siteOf(url: string): string | null {
@@ -364,7 +374,8 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
   const request = (verdict: Extract<Verdict, { kind: "ask" }>, address: string): Promise<boolean> => {
     const turn = queue.then(async () => {
       if (denied) return false;
-      if (approvedAddresses.has(address) || (verdict.site && (local.has(verdict.site) || sites.has(verdict.site)))) {
+      const bySite = verdict.site && !verdict.everyTime ? verdict.site : null;
+      if (approvedAddresses.has(address) || (bySite && (local.has(bySite) || sites.has(bySite)))) {
         repeats.push(address);
         return true;
       }
@@ -375,9 +386,9 @@ export function scriptAsks(ask: (verdict: Extract<Verdict, { kind: "ask" }>) => 
         return false;
       }
       approvedAddresses.add(address);
-      if (verdict.site) {
-        local.add(verdict.site);
-        sites.add(verdict.site);
+      if (bySite) {
+        local.add(bySite);
+        sites.add(bySite);
       }
       notes.push(`${verdict.summary} (approved by the owner${answer.requestId ? ` [requestId: ${answer.requestId}]` : ""})`);
       return true;
@@ -424,7 +435,8 @@ export function scriptRequestVerdict(
   const site = siteOf(request.url);
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
-  if (site && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
+  const everyTime = asksEveryTime(request.url);
+  if (site && !everyTime && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
   return {
@@ -438,6 +450,7 @@ export function scriptRequestVerdict(
       ...(request.body ? [{ label: "Body", value: bodyPreview(request.body) }] : []),
     ],
     ...(site ? { site } : {}),
+    ...(everyTime ? { everyTime: true as const } : {}),
   };
 }
 

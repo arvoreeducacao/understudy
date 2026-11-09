@@ -163,3 +163,22 @@ test("the turn records whose it is and which conversation it belongs to", async 
     { untrusted: false, conversation: "run:r1" },
   ]);
 });
+
+test("a sign-in, code, password, payment, delete or send request asks every time, even on a site approved earlier in the conversation", async () => {
+  const { asksEveryTime } = await import("./browser-guard.ts");
+  for (const url of ["https://books.test/api/totp/verify-code", "https://books.test/api/auth/google", "https://shop.test/checkout/confirm", "https://mail.test/api/send", "https://files.test/v1/delete", "https://site.test/signin/_/batchexecute", "not a url"]) assert.equal(asksEveryTime(url), true, url);
+  for (const url of ["https://www.social.test/voyager/api/feed", "https://chat.test/u/1/api/list_members", "https://mail.test/sync/u/1/i/bv"]) assert.equal(asksEveryTime(url), false, url);
+  const verify = scriptRequestVerdict(chat, [], { ...post("https://books.test/api/totp/verify-code"), body: '{"code":"000000"}' }, "", null, policy(), ["books.test"]);
+  assert.equal(verify.kind, "ask");
+  assert.equal(verify.kind === "ask" && verify.everyTime, true);
+  assert.equal(verify.kind === "ask" && verify.site, "books.test");
+  assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ hosts: ["books.test"] })), { kind: "pass", without: "your owner always allows books.test" });
+  const asked: string[] = [];
+  const asks = scriptAsks(async (ask) => (asked.push(ask.summary), { approved: true, text: "approved" }), [], memorySites());
+  const read = scriptRequestVerdict(chat, [], post("https://books.test/api/catalog/search"), "", null, policy());
+  assert.equal(read.kind, "ask");
+  await asks.request(read as Extract<typeof read, { kind: "ask" }>, "POST books.test/api/catalog/search");
+  await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
+  await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
+  assert.equal(asked.length, 2);
+});
