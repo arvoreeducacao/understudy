@@ -182,8 +182,11 @@ test("a sign-in, code, password, payment, delete or send request asks every time
   const verify = scriptRequestVerdict(chat, [], { ...post("https://books.test/api/totp/verify-code"), body: '{"code":"000000"}' }, "", null, policy(), ["books.test"]);
   assert.equal(verify.kind, "ask");
   assert.equal(verify.kind === "ask" && verify.everyTime, true);
-  assert.equal(verify.kind === "ask" && verify.site, "books.test");
-  assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ hosts: ["books.test"] })), { kind: "pass", without: "your owner always allows books.test" });
+  assert.equal(verify.kind === "ask" && verify.site, undefined);
+  assert.equal(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ hosts: ["books.test"] })).kind, "ask");
+  assert.equal(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ mode: "always", hosts: ["books.test"] })).kind, "ask");
+  assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/totp/verify-code"), "", null, policy({ mode: "off", hosts: ["books.test"] })), { kind: "pass", without: "your owner lets you act without asking" });
+  assert.deepEqual(scriptRequestVerdict(chat, [], post("https://books.test/api/catalog/search"), "", null, policy({ hosts: ["books.test"] })), { kind: "pass", without: "your owner always allows books.test" });
   const asked: string[] = [];
   const asks = scriptAsks(async (ask) => (asked.push(ask.summary), { approved: true, text: "approved" }), [], memorySites());
   const read = scriptRequestVerdict(chat, [], post("https://books.test/api/catalog/search"), "", null, policy());
@@ -192,4 +195,18 @@ test("a sign-in, code, password, payment, delete or send request asks every time
   await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
   await asks.request(verify as Extract<typeof verify, { kind: "ask" }>, "POST books.test/api/totp/verify-code");
   assert.equal(asked.length, 2);
+});
+
+test("buying, deleting, changing permissions or creating an account asks even on an always-allowed site, unless the owner never wants to be asked", async () => {
+  const { confirmsAlways } = await import("./browser-guard.ts");
+  const listed = policy({ hosts: ["social.test"] });
+  for (const [reason, name] of [['submit "Place order"', "Place order"], ['click "Delete account"', "Delete account"], ['click "Remove member"', "Remove member"], ['submit "Change permissions"', "Change permissions"], ['submit "Create account"', "Create account"], ['click "Excluir"', "Excluir"]]) {
+    assert.equal(confirmsAlways(`${reason} ${name}`), true, name);
+    const verdict = decide(chat, reason, element({ name }), null, listed);
+    assert.equal(verdict.kind, "ask", name);
+    assert.equal(verdict.kind === "ask" && verdict.site, undefined, name);
+    assert.equal(decide(chat, reason, element({ name }), null, policy({ mode: "off", hosts: ["social.test"] })).kind, "pass", name);
+  }
+  assert.deepEqual(decide(chat, 'submit "Post"', element(), null, listed), { kind: "pass", without: "your owner always allows social.test" });
+  assert.equal(confirmsAlways('submit "Post" Post'), false);
 });

@@ -257,7 +257,7 @@ export const en = {
     modeLabel: "When to ask",
     modes: {
       always: { name: "Always ask", hint: "Asks before every action that sends, submits or deletes, even on sites you always allow. Tasks keep asking after their first runs." },
-      "on-miss": { name: "Ask unless allowed", hint: "Asks before those actions, except on the sites and tools you always allow. A page's own background requests ask once per site in each conversation or task run." },
+      "on-miss": { name: "Ask unless allowed", hint: "Asks before those actions, except on the sites and tools you always allow. Buying, deleting, changing permissions and creating accounts always ask. A page's own background requests ask once per site in each conversation or task run." },
       auto: { name: "Automatic", hint: "A small AI model checks each action against what you asked and lets the safe ones through; payments, accounts, cards and passwords always come to you. After it asks you 3 times in a row, you answer everything until that conversation or task run ends." },
       off: { name: "Never ask", hint: "Acts without asking in your own conversations and tasks. Messages from other people, webhooks, emails and follow-ups still ask." },
     },
@@ -1786,7 +1786,7 @@ export const en = {
     approveAlwaysTool: (tool: string) => `Always allow ${tool}`,
     approveAlwaysHint: (tool: string) => `Approves this call and lets ${tool} run without asking from now on. You can change it in the understudy's settings.`,
     approveAlwaysOn: (host: string) => `Always allow on ${host}`,
-    approveAlwaysOnHint: (host: string) => `Approves this and lets the understudy act on ${host} without asking from now on. You can remove it in the understudy's settings, under Approvals.`,
+    approveAlwaysOnHint: (host: string) => `Approves this and lets the understudy act on ${host} without asking from now on, except to buy, delete, change permissions or create an account. You can remove it in the understudy's settings, under Approvals.`,
     showActions: (n: number) => (n === 1 ? "Show 1 action" : `Show ${n} actions`),
     hideActions: "Hide actions",
     counts: (allow: number, ask: number, never: number) => `${allow} allowed · ${ask} ask first · ${never} off`,

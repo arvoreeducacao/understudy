@@ -47,6 +47,12 @@ export function guardMode(state: TurnState, policy: ComputerApprovalPolicy): Eff
 
 const ASKS_EVERY_TIME = /(log_?in|sign_?in|auth|token|otp|2fa|mfa|verif|password|passwd|senha|checkout|payment|\/pay|purchase|order|delete|remove|transfer|invite|share|publish|comment|send)/;
 
+const CONFIRMS_ALWAYS = /\b(buy|purchase|checkout|check out|place order|pay|payment|delete|remove|permissions?|roles?|grant access|make admin|sign up|create (an |a new )?account|register|comprar|compra|pagar|pagamento|finalizar|excluir|apagar|remover|permiss\w*|criar conta|cadastr\w*)\b/i;
+
+export function confirmsAlways(text: string): boolean {
+  return CONFIRMS_ALWAYS.test(text);
+}
+
 export function asksEveryTime(url: string): boolean {
   try {
     return ASKS_EVERY_TIME.test(new URL(url).pathname.toLowerCase());
@@ -199,7 +205,7 @@ export function decide(state: TurnState, reason: string | null, info: ElementInf
   if (cover) return { kind: "pass", coveredBy: cover };
   const mode = guardMode(state, policy);
   if (mode === "off") return { kind: "pass", without: MODE_OFF_NOTE };
-  const site = listCoversActions(mode) ? siteOf(info.url) : null;
+  const site = listCoversActions(mode) && !confirmsAlways(`${reason} ${info.name}`) ? siteOf(info.url) : null;
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
   let host = info.url;
@@ -432,11 +438,11 @@ export function scriptRequestVerdict(
   } catch {}
   const dropped = { kind: "drop" as const, request: `${method} ${bareUrl(request.url)}`, pageUrl: request.pageUrl ? bareUrl(request.pageUrl) : "unknown" };
   if (isUsageLog(request)) return { ...dropped, usageLog: true };
-  const site = siteOf(request.url);
+  const everyTime = asksEveryTime(request.url);
+  const site = everyTime ? null : siteOf(request.url);
   const listed = site ? listedSite(site, policy.hosts) : null;
   if (listed) return { kind: "pass", without: listedNote(listed) };
-  const everyTime = asksEveryTime(request.url);
-  if (site && !everyTime && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
+  if (site && approvedSites.includes(site)) return { kind: "pass", without: `your owner approved ${site} earlier in this ${state.mode === "run" ? "run" : "conversation"}` };
   const step = stepHint ? matchStep(stepHint, state.askSteps ?? []) : undefined;
   if (state.mode === "run" && !step) return dropped;
   return {
