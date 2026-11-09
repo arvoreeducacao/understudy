@@ -16,6 +16,7 @@ const agents = {
   queued: "agt_stall_queued",
   old: "agt_stall_old",
   undelivered: "agt_stall_undelivered",
+  slow: "agt_stall_slow",
 };
 const minutes = (count: number) => new Date(Date.now() - count * 60_000);
 
@@ -56,22 +57,24 @@ before(async () => {
     Object.values(agents).map((id) => ({ id, ownerId: owner, name: `Agent ${id}`, look, tokenHash: `hash_${id}`, tools: { notifyOwner: true, slack: false, slackChannels: [] } })) as never,
   );
   await db.insert(schema.runs).values([
-    { id: "run_stall_quiet", agentId: agents.quiet, trigger: "schedule", status: "running", startedAt: minutes(40) },
+    { id: "run_stall_quiet", agentId: agents.quiet, trigger: "schedule", status: "running", startedAt: minutes(60) },
     { id: "run_stall_waiting", agentId: agents.waiting, trigger: "schedule", status: "running", startedAt: minutes(120) },
     { id: "run_stall_busy", agentId: agents.busy, trigger: "schedule", status: "running", startedAt: minutes(120) },
     { id: "run_stall_tools", agentId: agents.tools, trigger: "schedule", status: "running", startedAt: minutes(60) },
-    { id: "run_stall_working", agentId: agents.queued, trigger: "schedule", status: "running", startedAt: minutes(45) },
-    { id: "run_stall_behind", agentId: agents.queued, trigger: "schedule", status: "running", startedAt: minutes(30) },
+    { id: "run_stall_working", agentId: agents.queued, trigger: "schedule", status: "running", startedAt: minutes(60) },
+    { id: "run_stall_behind", agentId: agents.queued, trigger: "schedule", status: "running", startedAt: minutes(50) },
     { id: "run_stall_old", agentId: agents.old, trigger: "manual", status: "running", startedAt: minutes(3 * 24 * 60) },
-    { id: "run_stall_undelivered", agentId: agents.undelivered, trigger: "schedule", status: "running", startedAt: minutes(25) },
+    { id: "run_stall_undelivered", agentId: agents.undelivered, trigger: "schedule", status: "running", startedAt: minutes(50) },
+    { id: "run_stall_slow", agentId: agents.slow, trigger: "schedule", status: "running", startedAt: minutes(60) },
   ]);
   await db.insert(schema.messages).values([
-    { id: "msg_stall_1", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Reading the page", createdAt: minutes(30) },
-    { id: "msg_stall_2", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Switching   tabs", createdAt: minutes(26) },
+    { id: "msg_stall_1", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Reading the page", createdAt: minutes(50) },
+    { id: "msg_stall_2", agentId: agents.quiet, runId: "run_stall_quiet", role: "activity", text: "Switching   tabs", createdAt: minutes(40) },
     { id: "msg_stall_3", agentId: agents.quiet, runId: null, role: "user", text: "are you there?", createdAt: minutes(2) },
     { id: "msg_stall_4", agentId: agents.waiting, runId: "run_stall_waiting", role: "activity", text: "Asking for approval: Send the board update", createdAt: minutes(100) },
     { id: "msg_stall_5", agentId: agents.busy, runId: "run_stall_busy", role: "activity", text: "Reading the page", createdAt: minutes(5) },
     { id: "msg_stall_6", agentId: agents.queued, runId: "run_stall_working", role: "agent", text: "Still reading posts", createdAt: minutes(2) },
+    { id: "msg_stall_8", agentId: agents.slow, runId: "run_stall_slow", role: "activity", text: "evaluate", createdAt: minutes(30) },
     { id: "msg_stall_7", agentId: agents.old, runId: "run_stall_old", role: "activity", text: "Opening the report", createdAt: minutes(3 * 24 * 60 - 1) },
   ]);
   await db.insert(schema.approvals).values({ id: "apr_stall_wait", agentId: agents.waiting, runId: "run_stall_waiting", stepId: "s2", summary: "Send the board update", source: "mcp", status: "pending", createdAt: minutes(100), expiresAt: new Date(Date.now() + 22 * 60 * 60_000) });
@@ -98,12 +101,12 @@ async function sweepOnce() {
   return swept;
 }
 
-test("a run with no sign of life for 20 minutes and nothing waiting for the owner ends as failed, says why, and its turn is stopped", { skip }, async () => {
+test("a run with no sign of life for 35 minutes and nothing waiting for the owner ends as failed, says why, and its turn is stopped", { skip }, async () => {
   const { said, toComputer } = await sweepOnce();
   const quiet = await runRow("run_stall_quiet");
   assert.equal(quiet.status, "failed");
   assert.ok(quiet.finishedAt);
-  assert.match(quiet.summary ?? "", /stopped showing any activity at .+ \(last thing it did: Switching tabs\) and was not waiting for your approval, so the panel closed it after 20 minutes without activity/);
+  assert.match(quiet.summary ?? "", /stopped showing any activity at .+ \(last thing it did: Switching tabs\) and was not waiting for your approval, so the panel closed it after 35 minutes without activity/);
   assert.deepEqual(
     said.filter((line) => line.runId === "run_stall_quiet").map((line) => line.text),
     [`Did not finish: ${quiet.summary}`],
@@ -111,9 +114,9 @@ test("a run with no sign of life for 20 minutes and nothing waiting for the owne
   assert.deepEqual(toComputer.find((sent) => sent.message.runId === "run_stall_quiet"), { agentId: agents.quiet, message: { type: "run_stop", runId: "run_stall_quiet", reason: quiet.summary } });
 });
 
-test("a run that waits for the owner, works, calls tools, waits its turn behind other work or was not delivered yet keeps running", { skip }, async () => {
+test("a run that waits for the owner, works, calls tools, waits its turn behind other work, was not delivered yet or has been silent for under 35 minutes keeps running", { skip }, async () => {
   const { toComputer } = await sweepOnce();
-  for (const id of ["run_stall_waiting", "run_stall_busy", "run_stall_tools", "run_stall_working", "run_stall_behind", "run_stall_undelivered"]) {
+  for (const id of ["run_stall_waiting", "run_stall_busy", "run_stall_tools", "run_stall_working", "run_stall_behind", "run_stall_undelivered", "run_stall_slow"]) {
     assert.equal((await runRow(id)).status, "running", `${id} keeps running`);
     assert.equal(toComputer.some((sent) => sent.message.runId === id), false, `${id} is not stopped`);
   }
@@ -146,7 +149,7 @@ test("the computer's late word on a run the panel already closed changes nothing
 test("once the owner answers, a run that then goes silent is closed too", { skip }, async () => {
   const { Runs } = await import("./hub/runs");
   const { getDb, schema } = await import("@/lib/db");
-  await getDb().update(schema.approvals).set({ status: "approved", answeredAt: minutes(21) }).where(eq(schema.approvals.id, "apr_stall_wait"));
+  await getDb().update(schema.approvals).set({ status: "approved", answeredAt: minutes(36) }).where(eq(schema.approvals.id, "apr_stall_wait"));
   const { hub } = fakeHub();
   await new Runs(hub as never).failStalled();
   assert.equal((await runRow("run_stall_waiting")).status, "failed");

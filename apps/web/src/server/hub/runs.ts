@@ -13,7 +13,7 @@ import { notifyRunFailure, type RunOutcome } from "../run-alerts";
 import { relayRunFinished, relayRunStarted } from "../channels/relay";
 import { log } from "./shared";
 
-export const STALL_MS = 20 * 60 * 1000;
+export const STALL_MS = 35 * 60 * 1000;
 const STALL_NOTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const STALL_SCAN_LIMIT = 500;
 

@@ -147,9 +147,9 @@ test("the panel stops a stalled run: the turn is cancelled and the run ends with
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(sent.some((message) => message.type === "run_finished"), false);
   agent.stopRun("run_next", "queued run closed by the panel");
-  agent.stopRun("run_stuck", "No activity for 20 minutes");
+  agent.stopRun("run_stuck", "No activity for 35 minutes");
   await until(() => sent.some((message) => message.type === "run_finished"), "the run to finish");
-  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_stuck", ok: false, summary: "No activity for 20 minutes", outcome: "stopped" });
+  assert.deepEqual(sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_stuck", ok: false, summary: "No activity for 35 minutes", outcome: "stopped" });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(sent.filter((message) => message.type === "run_finished").length, 1);
   assert.equal(agent.state(), "stuck");
