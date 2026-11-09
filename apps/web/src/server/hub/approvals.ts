@@ -249,10 +249,11 @@ export class Approvals {
     return row?.status === "approved" ? row.hash : null;
   }
 
-  async useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
+  async useActionApproval(agentId: string, runId: string, hash: string, maxAgeMs: number, byPerson = false) {
     const db = getDb();
     const fresh = and(
       eq(schema.approvals.agentId, agentId),
+      eq(schema.approvals.runId, runId),
       eq(schema.approvals.payloadHash, hash),
       eq(schema.approvals.status, "approved"),
       isNull(schema.approvals.usedAt),

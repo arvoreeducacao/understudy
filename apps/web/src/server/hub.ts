@@ -481,8 +481,8 @@ export class Hub {
     return this.approvals.payloadHash(id, agentId);
   }
 
-  useActionApproval(agentId: string, hash: string, maxAgeMs: number, byPerson = false) {
-    return this.approvals.useActionApproval(agentId, hash, maxAgeMs, byPerson);
+  useActionApproval(agentId: string, runId: string, hash: string, maxAgeMs: number, byPerson = false) {
+    return this.approvals.useActionApproval(agentId, runId, hash, maxAgeMs, byPerson);
   }
 
   approvalOutcome(id: string, agentId: string) {
