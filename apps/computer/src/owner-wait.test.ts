@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -362,4 +362,84 @@ test("a no that arrives while the run waits is not handed to the main model to a
     if (before === undefined) delete process.env.UNDERSTUDY_RUN_MODEL;
     else process.env.UNDERSTUDY_RUN_MODEL = before;
   }
+});
+
+test("an owner who answers while the computer is down has that answer used once the computer is back", async () => {
+  let status = "pending";
+  let answeredAt: string | null = null;
+  const lookup: RunApprovalsLookup = async () => ({
+    pending: status === "pending" ? [{ requestId: "apr_board", summary: "Send the board update", stepId: "s2" }] : [],
+    answered: status === "pending" ? [] : [{ requestId: "apr_board", summary: "Send the board update", stepId: "s2", status, answeredAt, used: false }],
+    open: true,
+  });
+  const before = harness((request) => {
+    request.onEvent({ kind: "session", sessionId: "session-before" });
+    return new Promise<Planned>(() => {});
+  }, lookup);
+  before.agent.enqueue({ kind: "run", runId: "run_board", recipe, approvalsRequired: true });
+  await until(() => before.requests.length === 1, "the first turn");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  status = "approved";
+  answeredAt = new Date().toISOString();
+  const after = harness(() => ({ events: [], result: { ok: true, text: 'RESULT {"ok": true, "summary": "Sent the board update"}', sessionId: "session-before" } }), lookup, before.home);
+  after.agent.resumeOpenRuns();
+  await until(() => after.sent.some((message) => message.type === "run_finished"), "the run to finish");
+  assert.equal(after.requests.length, 1);
+  assert.equal(after.requests[0].resume, "session-before");
+  assert.match(after.requests[0].prompt, /"Send the board update" \(step s2\) \[requestId: apr_board\]: approved/);
+  assert.deepEqual(after.sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_board", ok: true, summary: "Sent the board update" });
+  assert.deepEqual(after.sent.filter((message) => message.type === "turn"), [{ type: "turn", runId: "run_board" }, { type: "turn", runId: "run_board" }]);
+});
+
+test("after a restart, answers the run already saw or already used are not handed back", async () => {
+  const lookup: RunApprovalsLookup = async () => ({
+    pending: [],
+    answered: [
+      { requestId: "apr_seen", summary: "Remove the book", stepId: "s2", status: "approved", answeredAt: new Date().toISOString(), used: false },
+      { requestId: "apr_used", summary: "Send the email", stepId: "s3", status: "approved", answeredAt: new Date().toISOString(), used: true },
+    ],
+    open: true,
+  });
+  const before = harness((request) => {
+    request.onEvent({ kind: "session", sessionId: "session-before" });
+    request.onEvent({ kind: "tool_result", name: "mcp__browser__browser_ask_first", isError: false, text: 'approved: do exactly this now: "Remove the book". [requestId: apr_seen]' });
+    return new Promise<Planned>(() => {});
+  }, lookup);
+  before.agent.enqueue({ kind: "run", runId: "run_books", recipe, approvalsRequired: true });
+  await until(() => before.requests.length === 1, "the first turn");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const after = harness(() => assert.fail("no turn"), lookup, before.home);
+  after.agent.resumeOpenRuns();
+  await until(() => after.sent.some((message) => message.type === "run_finished"), "the run to close");
+  assert.deepEqual(after.sent.find((message) => message.type === "run_finished"), { type: "run_finished", runId: "run_books", ok: false, summary: RESTARTED_SUMMARY });
+});
+
+test("a run still queued when the computer stops starts fresh when it comes back, unless the panel closed it", async () => {
+  const lookup: RunApprovalsLookup = async (runId, wait, signal) => {
+    if (runId === "run_first" && wait) await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    if (runId === "run_closed") return { pending: [], answered: [], open: false };
+    return runId === "run_first" ? { pending: [{ requestId: "apr_first", summary: "Send A", stepId: "s2" }], answered: [], open: true } : { pending: [], answered: [], open: true };
+  };
+  const before = harness((request) => {
+    request.onEvent({ kind: "session", sessionId: "session-first" });
+    return { events: [], result: { ok: true, text: 'RESULT {"ok": false, "summary": "waiting"}', sessionId: "session-first" } };
+  }, lookup);
+  before.agent.enqueue({ kind: "run", runId: "run_first", recipe, approvalsRequired: true });
+  before.agent.enqueue({ kind: "run", runId: "run_queued", recipe, approvalsRequired: true });
+  before.agent.enqueue({ kind: "run", runId: "run_closed", recipe, approvalsRequired: true });
+  await until(() => before.agent.state() === "waiting_you", "the first run to wait");
+  const stored = JSON.parse(readFileSync(join(before.home, ".understudy", "open-runs.json"), "utf8"));
+  assert.deepEqual(Object.keys(stored).sort(), ["run_closed", "run_first", "run_queued"]);
+  assert.equal(stored.run_queued.started, false);
+
+  const after = harness(() => ({ events: [], result: { ok: true, text: 'RESULT {"ok": true, "summary": "Done"}', sessionId: "session-new" } }), async (runId, wait, signal) => (runId === "run_first" ? lookup(runId, wait, signal) : runId === "run_closed" ? { pending: [], answered: [], open: false } : { pending: [], answered: [], open: true }), before.home);
+  after.agent.resumeOpenRuns();
+  await until(() => after.agent.state() === "waiting_you", "the first run to wait again");
+  after.agent.stopRun("run_first", "test over");
+  await until(() => after.sent.filter((message) => message.type === "run_finished").length === 3, "all three runs to end");
+  const finished = Object.fromEntries(after.sent.filter((message) => message.type === "run_finished").map((message) => [(message as { runId: string }).runId, message]));
+  assert.deepEqual(finished.run_queued, { type: "run_finished", runId: "run_queued", ok: true, summary: "Done" });
+  assert.equal(after.requests.filter((request) => request.resume === null).length, 1);
+  assert.deepEqual(finished.run_closed, { type: "run_finished", runId: "run_closed", ok: false, summary: PANEL_CLOSED_SUMMARY, outcome: "stopped" });
+  before.agent.stop();
 });

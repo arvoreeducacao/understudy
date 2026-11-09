@@ -82,7 +82,7 @@ export async function askOwnerOnce(session: McpSession, request: ApprovalRequest
   return readOwnerAnswer(text);
 }
 
-export type RunApproval = { requestId: string; stepId?: string | null; summary: string; status?: string; note?: string; expiresAt?: string | null };
+export type RunApproval = { requestId: string; stepId?: string | null; summary: string; status?: string; note?: string; expiresAt?: string | null; answeredAt?: string | null; used?: boolean };
 
 export type RunApprovalList = { pending: RunApproval[]; answered: RunApproval[]; open?: boolean };
 

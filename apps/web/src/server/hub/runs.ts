@@ -71,6 +71,7 @@ export function stallVerdict(row: StallRow, now: number, quietMs: number): Stall
 
 export class Runs {
   private stopsSent = new Map<string, { agentId: string; reason: string; at: number }>();
+  private skipNoted = new Set<string>();
 
   constructor(private hub: Hub) {}
 
@@ -137,7 +138,10 @@ export class Runs {
         .orderBy(asc(schema.runs.startedAt))
         .limit(1);
       if (open) {
-        await this.hub.addMessage(recipe.agentId, "system", copy.runs.skipped(recipe.recipe.title, formatWhen(open.startedAt)), open.id);
+        if (!this.skipNoted.has(open.id)) {
+          this.skipNoted.add(open.id);
+          await this.hub.addMessage(recipe.agentId, "system", copy.runs.skipped(recipe.recipe.title, formatWhen(open.startedAt)), open.id);
+        }
         log("run_skipped", { recipeId, openRunId: open.id });
         return { ok: false as const, reason: "already_running" };
       }
@@ -190,6 +194,7 @@ export class Runs {
       log("run_finish_ignored", { runId, agentId });
       return null;
     }
+    this.skipNoted.delete(runId);
     await db
       .update(schema.approvals)
       .set({ status: "expired", answeredAt: new Date() })
@@ -231,7 +236,7 @@ export class Runs {
         agentId: schema.runs.agentId,
         startedAt: schema.runs.startedAt,
         activityAt: sql<Date | string | null>`(select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.run_id = "runs"."id" and m.role in ('activity', 'agent'))`,
-        askedAt: sql<Date | string | null>`(select max(coalesce(a.answered_at, a.created_at)) from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id")`,
+        askedAt: sql<Date | string | null>`(select max(coalesce(a.answered_at, case when a.expires_at <= now() then a.expires_at else a.created_at end)) from approvals a where a.agent_id = "runs"."agent_id" and a.run_id = "runs"."id")`,
         agentSeen: sql<Date | string>`greatest(
           "runs"."started_at",
           (select max(m.created_at) from messages m where m.agent_id = "runs"."agent_id" and m.created_at >= "runs"."started_at" and m.role in ('activity', 'agent')),
@@ -252,7 +257,7 @@ export class Runs {
 
   stallSummary(run: StalledRun) {
     const minutes = Math.round(STALL_MS / 60_000);
-    if (!run.started || !run.activityAt) return copy.runs.neverStarted(minutes, formatWhen(run.startedAt));
+    if (!run.started || !run.activityAt) return copy.runs.neverStarted(minutes, formatWhen(run.lastSeen));
     const late = run.lateAnswer && run.lateAnswer.at > run.activityAt ? { summary: run.lateAnswer.summary.replace(/\s+/g, " ").slice(0, 200), at: formatWhen(run.lateAnswer.at) } : null;
     return copy.runs.stalled(minutes, formatWhen(run.activityAt), run.lastActivity?.replace(/\s+/g, " ").slice(0, 200) ?? null, late);
   }
