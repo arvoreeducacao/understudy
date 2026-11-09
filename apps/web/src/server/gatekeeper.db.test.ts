@@ -382,7 +382,8 @@ test("asking again for a step of a run that is still waiting joins the open requ
   await hub.answerApproval(approval.id, true, undefined, ids.owner);
   assert.match(await first, /^approved/);
   assert.match(await second, /^approved/);
-  assert.deepEqual(await waiting, { runId, pending: [], answered: [{ requestId: approval.id, stepId: "s2", summary: "Send the board update", status: "approved" }], open: true });
+  const [answeredRow] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, approval.id));
+  assert.deepEqual(await waiting, { runId, pending: [], answered: [{ requestId: approval.id, stepId: "s2", summary: "Send the board update", status: "approved", answeredAt: answeredRow.answeredAt!.toISOString(), used: false }], open: true });
   assert.match(await rpc("wait_for_approval", { requestId: approval.id }), /^approved/);
 
   const otherStep = rpc("request_approval", { ...ask, stepId: "s3" });
@@ -515,6 +516,39 @@ test("a call the client cancels from another request stops waiting, never runs l
     assert.match(JSON.parse(await inRun).note, /keep waiting\. A task run stays open and paused until your owner answers/);
     await hub.answerApproval(step.id, false, undefined, ids.owner);
   } finally {
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  }
+});
+
+test("a runId that is not the running turn's run does not tie an approval to it, and an outside sender's turn never does", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { getDb, schema } = await import("@/lib/db");
+  const { noteTurn, forgetTurnWake } = await import("./followups");
+  const db = getDb();
+  const hub = createHub();
+  const runId = "run_gk_other";
+  await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+  await db.insert(schema.runs).values({ id: runId, agentId: ids.agent, trigger: "schedule", status: "running" });
+  try {
+    const ask = async (path: string, args: Record<string, unknown>) => {
+      const pending = fetch(`${panelUrl}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "request_approval", arguments: args } }),
+      }).then((res) => res.text());
+      const approval = await pendingApproval();
+      await hub.answerApproval(approval.id, false, undefined, ids.owner);
+      await pending;
+      return approval;
+    };
+    noteTurn(ids.agent, {});
+    assert.equal((await ask("/api/mcp", { summary: "Post in the channel", runId })).runId, null);
+    noteTurn(ids.agent, { runId });
+    assert.equal((await ask("/api/mcp", { summary: "Post in the channel", runId: "run_made_up" })).runId, null);
+    assert.equal((await ask("/api/mcp", { summary: "Post in the channel", runId })).runId, runId);
+    assert.equal((await ask("/api/mcp/restricted", { summary: "Book a call for the visitor", runId })).runId, null);
+  } finally {
+    forgetTurnWake(ids.agent);
     await db.delete(schema.runs).where(eq(schema.runs.id, runId));
   }
 });

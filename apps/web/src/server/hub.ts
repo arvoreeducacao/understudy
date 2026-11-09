@@ -93,9 +93,12 @@ export class Hub {
     for (const ws of this.computers.values()) send(ws, { type: "ping", at } satisfies ServerToComputer);
     this.hosts.ping();
     for (const set of this.viewers.values()) for (const v of set) if (v.ws.readyState === v.ws.OPEN) v.ws.ping();
-    this.approvals.expire().catch((error) => log("approval_expire_error", { error: String(error) }));
+    this.approvals
+      .expire()
+      .catch((error) => log("approval_expire_error", { error: String(error) }))
+      .then(() => this.runs.failStalled())
+      .catch((error) => log("run_stall_error", { error: String(error) }));
     this.approvals.remind().catch((error) => log("approval_remind_error", { error: String(error) }));
-    this.runs.failStalled().catch((error) => log("run_stall_error", { error: String(error) }));
     this.inbound.expire().catch((error) => log("inbound_expire_error", { error: String(error) }));
     this.rooms.expireStale().catch((error) => log("room_expire_error", { error: String(error) }));
     flushStale(this).catch((error) => log("channel_flush_error", { error: String(error) }));

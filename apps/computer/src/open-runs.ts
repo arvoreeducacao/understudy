@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export type OpenRun<Job> = { job: Job; sessionId: string | null; model?: string; at: number };
+export type OpenRun<Job> = { job: Job; sessionId: string | null; model?: string; started?: boolean; turnAt?: number; seen?: string[]; waitingFor?: string[]; at: number };
 
 export function openRunsFile(home: string): string {
   return join(home, ".understudy", "open-runs.json");
@@ -27,6 +27,9 @@ export function openRunStore<Job>(file: string, now: () => number = Date.now) {
       return Object.entries(read())
         .filter(([, run]) => run && typeof run === "object" && run.job)
         .map(([runId, run]) => ({ ...run, runId }));
+    },
+    get(runId: string): OpenRun<Job> | undefined {
+      return read()[runId];
     },
     save(runId: string, run: Omit<OpenRun<Job>, "at">) {
       write({ ...read(), [runId]: { ...run, at: now() } });

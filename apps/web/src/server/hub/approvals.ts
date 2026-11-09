@@ -152,6 +152,8 @@ export class Approvals {
         status: schema.approvals.status,
         note: schema.approvals.note,
         expiresAt: schema.approvals.expiresAt,
+        answeredAt: schema.approvals.answeredAt,
+        usedAt: schema.approvals.usedAt,
       })
       .from(schema.approvals)
       .where(and(eq(schema.approvals.agentId, agentId), eq(schema.approvals.runId, runId)))

@@ -233,7 +233,7 @@ export function runApprovalsView(runId: string, rows: RunApprovalRow[]) {
   return {
     runId,
     pending: pending.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, expiresAt: row.expiresAt?.toISOString() ?? null })),
-    answered: answered.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, status: row.status, ...(row.note ? { note: row.note } : {}) })),
+    answered: answered.map((row) => ({ requestId: row.id, stepId: row.stepId, summary: row.summary, status: row.status, ...(row.note ? { note: row.note } : {}), answeredAt: row.answeredAt?.toISOString() ?? null, used: Boolean(row.usedAt) })),
   };
 }
 
@@ -307,11 +307,14 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
           if (fields.length > MAX_APPROVAL_FIELDS) return text(`not asked: at most ${MAX_APPROVAL_FIELDS} fields and action arguments together`, true);
           hash = actionHash(tool, args.action.args);
         }
-        const closed = await closedRunText(hub, agent.id, args.runId);
+        const asked = args.runId && !outsider() ? args.runId : undefined;
+        const closed = await closedRunText(hub, agent.id, asked);
         if (closed) return text(closed, true);
+        const expected = asked ? await turnRunId(agent.id, async () => asked) : null;
+        const runId = asked && expected === asked && (await hub.runs.runState(agent.id, asked)) === "running" ? asked : undefined;
         const summary = label ? `${label}${args.summary}`.slice(0, 500) : args.summary;
-        const joined = args.runId ? await hub.openApprovalAsk(agent.id, { runId: args.runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
-        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId: args.runId || undefined, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash));
+        const joined = runId ? await hub.openApprovalAsk(agent.id, { runId, stepId: args.stepId, summary, fields, payloadHash: hash }) : null;
+        const id = joined ?? (await hub.createApproval(agent.id, { summary, fields, runId, stepId: args.stepId }, "mcp", APPROVAL_LIFETIME_SECONDS, hash));
         return waitWithHeartbeat(id, extra);
       }) as Builtin["run"],
     },
