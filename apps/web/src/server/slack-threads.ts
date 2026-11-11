@@ -1,4 +1,4 @@
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, lt } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { messages as copy } from "@/lib/messages";
 import { agentIdentity, escapeSlack, postMessage, slackCall, type SlackIdentity } from "./slack";
@@ -9,6 +9,7 @@ import { plainFallback, richSlackMessage } from "./slack-blocks";
 export { plainFallback };
 
 export const THREAD_WINDOW_MS = 30 * 60 * 1000;
+export const POSTED_THREAD_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MARKDOWN_LIMIT = 11_900;
 
 export type SlackThread = typeof schema.slackThreads.$inferSelect;
@@ -60,6 +61,24 @@ export async function agentForThread(channel: string, threadTs: string | undefin
     .select({ agentId: schema.slackThreads.agentId })
     .from(schema.slackThreads)
     .where(and(eq(schema.slackThreads.channel, channel), eq(schema.slackThreads.threadTs, threadTs), gt(schema.slackThreads.expiresAt, new Date())));
+  return row?.agentId ?? null;
+}
+
+export async function rememberPostedThread(agentId: string, channel: string, threadTs: string, now = new Date()) {
+  const db = getDb();
+  await db.delete(schema.slackPostedThreads).where(lt(schema.slackPostedThreads.expiresAt, now));
+  await db
+    .insert(schema.slackPostedThreads)
+    .values({ channel, threadTs, agentId, expiresAt: new Date(now.getTime() + POSTED_THREAD_WINDOW_MS) })
+    .onConflictDoNothing();
+}
+
+export async function agentForPostedThread(channel: string, threadTs: string | undefined, now = new Date()) {
+  if (!threadTs) return null;
+  const [row] = await getDb()
+    .select({ agentId: schema.slackPostedThreads.agentId })
+    .from(schema.slackPostedThreads)
+    .where(and(eq(schema.slackPostedThreads.channel, channel), eq(schema.slackPostedThreads.threadTs, threadTs), gt(schema.slackPostedThreads.expiresAt, now)));
   return row?.agentId ?? null;
 }
 

@@ -148,6 +148,8 @@ export const ptBR: Messages = {
     noAgents: (url: string) => `Você ainda não tem agentes. Crie um em ${url}.`,
     whichAgent: (names: string[]) => `Qual agente? Comece a mensagem pelo nome dele: ${names.join(", ")}.`,
     sayWhat: "Sim? Diga o que precisa na mesma mensagem.",
+    waitingOnYou: "Recebi a sua mensagem, mas estou parado numa pergunta que te fiz antes. Responda e eu leio isto em seguida:",
+    waitingOnOwner: "Recebi a sua mensagem, mas estou parado numa pergunta para o meu dono. Leio isto assim que tiver a resposta.",
     cannotAnswer: "Você não pode responder esta aprovação, ou ela não existe mais.",
     answered: (summary: string, approved: boolean, who: string) => `${approved ? ":white_check_mark: Aprovado" : ":no_entry: Negado"} por ${who}: ${summary}`,
     alreadyAnswered: (summary: string) => `Já respondido: ${summary}`,

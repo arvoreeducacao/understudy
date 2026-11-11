@@ -11,9 +11,9 @@ function log(event: string, data: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...data }));
 }
 
-export async function rememberApprovalMessage(approvalId: string, posted: { ok: boolean; channel?: unknown; ts?: unknown }) {
+export async function rememberApprovalMessage(approvalId: string, posted: { ok: boolean; channel?: unknown; ts?: unknown }, threadTs?: string) {
   if (!posted.ok || typeof posted.channel !== "string" || typeof posted.ts !== "string") return;
-  const ref: SlackMessageRef = { channel: posted.channel, ts: posted.ts };
+  const ref: SlackMessageRef = { channel: posted.channel, ts: posted.ts, ...(threadTs ? { threadTs } : {}) };
   const [row] = await getDb()
     .update(schema.approvals)
     .set({ slackMessages: sql`coalesce(${schema.approvals.slackMessages}, '[]'::jsonb) || ${JSON.stringify([ref])}::jsonb` })

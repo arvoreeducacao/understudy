@@ -628,3 +628,59 @@ test("without a name, a message goes to the person's own understudy first and ne
   assert.ok((await loadChat("agt_slack_mia", 50, team.mate)).some((m) => m.text === "book my dentist"));
   assert.ok(!computer.received.some((m) => m.type === "chat" && m.text === "book my dentist"));
 });
+
+test("a reply in a thread an understudy started on its own goes back to it without saying its name", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const { rememberPostedThread } = await import("./slack-threads");
+  const hub = createHub();
+  await hub.cancelApprovals(ids.ana, null);
+  await hub.cancelApprovals(ids.bruno, null);
+  await rememberPostedThread(ids.bruno, "C8", "800.1");
+  const say = (eventId: string, ts: string, text: string) =>
+    signed("/api/slack/events", JSON.stringify({ type: "event_callback", event_id: eventId, event: { type: "app_mention", user: "UOWNER", text, channel: "C8", ts, thread_ts: "800.1" } }), "application/json");
+  await say("EvPosted1", "800.2", "<@UBOT> what is the 1335 about?");
+  await settle();
+  assert.equal(deliveredText("what is the 1335 about?")[0]?.agentId, ids.bruno);
+  assert.ok(!slackCalls.some((c) => c.method === "chat.postMessage" && c.body.channel === "C8" && /Which understudy/.test(String(c.body.text))));
+  await say("EvPosted2", "800.3", "<@UBOT> Ana, and what do you think?");
+  await settle();
+  assert.equal(deliveredText("and what do you think?")[0]?.agentId, ids.ana);
+});
+
+test("a message for an understudy stopped on an approval brings that approval into the thread once", { skip }, async () => {
+  const { createHub } = await import("./hub");
+  const hub = createHub();
+  await hub.cancelApprovals(ids.bruno, null);
+  const approvalId = await hub.createApproval(ids.bruno, { summary: "Delete 10 old files", runId: "", fields: [{ label: "Files", value: "a.mjs" }] }, "mcp", 3600);
+  const ask = (eventId: string, ts: string) =>
+    signed(
+      "/api/slack/events",
+      JSON.stringify({ type: "event_callback", event_id: eventId, event: { type: "app_mention", user: "UOWNER", text: "<@UBOT> Bruno, what is this about?", channel: "C9", ts, thread_ts: "900.1" } }),
+      "application/json",
+    );
+  const cards = () => slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "C9" && JSON.stringify(c.body.blocks ?? "").includes(approvalId));
+  await ask("EvWait1", "900.2");
+  await settle();
+  const [card] = cards();
+  assert.ok(card, "the approval card in the thread");
+  assert.equal(card.body.thread_ts, "900.1");
+  assert.equal(card.body.username, "Bruno");
+  assert.match(JSON.stringify(card.body.blocks), /stopped on a question I asked you earlier/);
+  assert.match(JSON.stringify(card.body.blocks), /"action_id":"approve"/);
+  await ask("EvWait2", "900.3");
+  await settle();
+  assert.equal(cards().length, 1);
+  assert.equal(deliveredText("what is this about?").filter((d) => d.agentId === ids.bruno).length, 2);
+
+  const { showPendingApproval } = await import("./slack-waiting");
+  await showPendingApproval({ agent: { id: ids.bruno, name: "Bruno" }, userId: ids.stranger, channel: "C9", threadTs: "900.9" });
+  const notice = slackCalls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "C9" && c.body.thread_ts === "900.9").at(-1);
+  assert.match(String(notice?.body.text), /question for my owner/);
+  assert.ok(!JSON.stringify(notice?.body.blocks ?? "").includes(approvalId));
+
+  await hub.cancelApprovals(ids.bruno, null);
+  await waitFor(() => slackCalls.find((c) => c.method === "chat.update" && c.body.channel === "C9"), "the thread card to close");
+  await ask("EvWait3", "900.4");
+  await settle();
+  assert.equal(cards().length, 1);
+});
