@@ -330,6 +330,13 @@
       "when": 1794256300483,
       "tag": "0046_approval_review",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794399686761,
+      "tag": "0047_slack_posted_threads",
+      "breakpoints": true
     }
   ]
 }

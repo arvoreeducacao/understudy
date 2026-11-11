@@ -148,6 +148,8 @@ export const en = {
     noAgents: (url: string) => `You have no understudies yet. Create one at ${url}.`,
     whichAgent: (names: string[]) => `Which understudy? Start the message with its name: ${names.join(", ")}.`,
     sayWhat: "Yes? Tell me what you need in the same message.",
+    waitingOnYou: "I got your message, but I am stopped on a question I asked you earlier. Answer it and I read this next:",
+    waitingOnOwner: "I got your message, but I am stopped on a question for my owner. I read this as soon as I have the answer.",
     cannotAnswer: "You can't answer this approval, or it no longer exists.",
     answered: (summary: string, approved: boolean, who: string) => `${approved ? ":white_check_mark: Approved" : ":no_entry: Denied"} by ${who}: ${summary}`,
     alreadyAnswered: (summary: string) => `Already answered: ${summary}`,

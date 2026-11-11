@@ -25,6 +25,7 @@ import { autoReview } from "./auto-review";
 import { withoutForeignReviewer } from "./reviewer";
 import { reportRuleBlock } from "./rules";
 import { agentIdentity, slackEnabled, slackUserIdFor } from "./slack";
+import { rememberPostedThread } from "./slack-threads";
 import { SLACK_LIMITS, slackApi, slackMode, slackTools, type GuardInput, type GuardResult } from "./slack-tools";
 import { callUpstreamTool, ceilingOf, listUpstreamTools, loadServers, loadToolLimits, type UpstreamServer, type UpstreamTool } from "./upstream";
 import { queueReplyFile } from "./channels/relay";
@@ -474,6 +475,7 @@ async function buildServer(hub: Hub, agent: AgentRow, ownerEmail: string, restri
         api: slackApi(),
         guard,
         fetchFile: (path) => hub.requestFile(agent.id, path),
+        rememberThread: (channel, threadTs) => rememberPostedThread(agent.id, channel, threadTs),
       }) as Builtin[]),
     );
   }

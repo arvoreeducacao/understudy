@@ -26,6 +26,7 @@ export type SlackToolDeps = {
   api: SlackApi;
   guard: (input: GuardInput) => Promise<GuardResult>;
   fetchFile: (path: string) => Promise<FileAnswer>;
+  rememberThread?: (channel: string, threadTs: string) => Promise<void>;
   limiter?: RateLimiter;
 };
 
@@ -224,6 +225,11 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
     return data.ok || !BLOCK_ERRORS.has(String(data.error)) ? data : plain();
   };
 
+  const rememberThread = async (channel: unknown, threadTs: unknown) => {
+    if (typeof channel !== "string" || typeof threadTs !== "string" || !channel || !threadTs) return;
+    await deps.rememberThread?.(channel, threadTs).catch(() => undefined);
+  };
+
   const permalink = async (channel: string, ts: string) => {
     const data = await api.call("chat.getPermalink", { channel, message_ts: ts });
     return data.ok ? String(data.permalink ?? "") : "";
@@ -283,6 +289,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
         const data = await post(where.id, args.text, args.thread_ts);
         if (!data.ok) return failed("posting", data.error);
         const ts = String(data.ts ?? "");
+        await rememberThread(where.id, args.thread_ts ?? ts);
         const link = ts ? await permalink(where.id, ts) : "";
         return reply(JSON.stringify({ posted: true, channel: where.label, ts, link }));
       }) as SlackTool["run"],
@@ -304,6 +311,7 @@ export function slackTools(deps: SlackToolDeps): SlackTool[] {
         if (!allowed.ok) return reply(allowed.text, true);
         const data = await post(who.id, args.text);
         if (!data.ok) return failed("sending", data.error);
+        await rememberThread(data.channel, data.ts);
         return reply(JSON.stringify({ sent: true, to: who.label, channel: data.channel, ts: data.ts }));
       }) as SlackTool["run"],
     },

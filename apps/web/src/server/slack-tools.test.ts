@@ -121,6 +121,31 @@ test("post without asking still passes through the guard so owner rules apply", 
   assert.equal(posts(calls)[0].params.thread_ts, "1.1");
 });
 
+test("a thread the agent starts or posts in, and a DM it sends, are remembered as its own", async () => {
+  const remembered: [string, string][] = [];
+  const { run } = setup({
+    owner: async () => "U0OWNER001",
+    rememberThread: async (channel, threadTs) => {
+      remembered.push([channel, threadTs]);
+    },
+  });
+  await run("slack_post_message", { channel: "#general", text: "Sync is out" });
+  await run("slack_post_message", { channel: "C0SALES001", text: "and a reply", thread_ts: "1.1" });
+  await run("slack_send_dm", { person: "owner", text: "done" });
+  assert.deepEqual(remembered, [
+    ["C0GENERAL1", "1700000000.000100"],
+    ["C0SALES001", "1.1"],
+    ["U0OWNER001", "1700000000.000100"],
+  ]);
+});
+
+test("a post still succeeds when remembering its thread fails", async () => {
+  const { run } = setup({ rememberThread: async () => Promise.reject(new Error("db down")) });
+  const result = await run("slack_post_message", { channel: "#general", text: "hi" });
+  assert.equal(result.error, false);
+  assert.match(result.text, /"posted":true/);
+});
+
 test("broadcast mentions are neutralized", async () => {
   assert.equal(quietBroadcasts("<!channel> look"), "@\u200bchannel look");
   assert.equal(quietBroadcasts("hey @here now"), "hey @​here now");

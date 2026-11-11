@@ -10,7 +10,8 @@ import { pickAgent, stripMentions, verifySlackSignature } from "./slack-app";
 import { agentIdentity, escapeSlack, slackConfig, slackUserEmail } from "./slack";
 import { linkedPanelUser, slackLinkUrl } from "./slack-link";
 import { agentForAskerThread, rememberAskerThread, slackAgentsFor, unnamedAgents, type SlackAgent } from "./slack-askers";
-import { agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
+import { agentForPostedThread, agentForThread, postAgentText, setThread, setThreadStatus, setThreadTitle, startAssistantThread } from "./slack-threads";
+import { showPendingApproval } from "./slack-waiting";
 import { ownerAudience } from "./teams-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -123,6 +124,11 @@ async function askAgent(hub: Hub, asking: Asking) {
     { source: "slack", slack: { channel: asking.channel, threadTs: asking.threadTs } },
   );
   if (result.status === "queued" && result.starting) await asking.answer(copy.slackApp.starting, agent);
+  await pointAtPendingApproval({ agent, userId: user.id, channel: asking.channel, threadTs: asking.threadTs });
+}
+
+function pointAtPendingApproval(waiting: Parameters<typeof showPendingApproval>[0]) {
+  return showPendingApproval(waiting).catch((error) => (log("slack_waiting_error", { error: String(error) }), false));
 }
 
 async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
@@ -145,7 +151,7 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
   }
   const agents = await slackAgentsFor(user.id);
   const clean = stripMentions(event.text ?? "");
-  const threadAgentId = (await agentForThread(event.channel, threadTs)) ?? (await agentForAskerThread(event.channel, threadTs));
+  const threadAgentId = (await agentForThread(event.channel, threadTs)) ?? (await agentForAskerThread(event.channel, threadTs)) ?? (await agentForPostedThread(event.channel, threadTs));
   const threadAgent = agents.find((a) => a.id === threadAgentId) ?? null;
   const picked = pickAgent(clean, agents, unnamedAgents(agents));
   const namedOther = picked.agent && picked.agent.id !== threadAgent?.id && picked.text !== clean;
@@ -177,7 +183,8 @@ async function onMessage(hub: Hub, event: SlackEvent, teamId?: string) {
     { source: "slack", slack: { channel: event.channel, threadTs } },
   );
   if (result.status === "queued" && result.starting) await answer(copy.slackApp.starting, agent);
-  else await setThreadStatus(agent.id, copy.slackApp.statusThinking).catch((error) => log("slack_status_error", { error: String(error) }));
+  const waiting = await pointAtPendingApproval({ agent, userId: user.id, channel: event.channel, threadTs });
+  if (!(result.status === "queued" && result.starting)) await setThreadStatus(agent.id, waiting ? copy.slackApp.statusWaiting : copy.slackApp.statusThinking).catch((error) => log("slack_status_error", { error: String(error) }));
 }
 
 async function onAssistantThreadStarted(event: SlackEvent) {

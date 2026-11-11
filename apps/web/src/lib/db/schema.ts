@@ -359,7 +359,7 @@ export const MACHINE_ANSWERS = ["reviewer"] as const satisfies readonly Approval
 
 export type ApprovalReview = { decision: "allow" | "escalate"; reason: string };
 
-export type SlackMessageRef = { channel: string; ts: string };
+export type SlackMessageRef = { channel: string; ts: string; threadTs?: string };
 
 export const approvals = pgTable(
   "approvals",
@@ -636,6 +636,20 @@ export const slackAskerThreads = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("slack_asker_threads_thread_idx").on(t.channel, t.threadTs), index("slack_asker_threads_expires_idx").on(t.expiresAt)],
+);
+
+export const slackPostedThreads = pgTable(
+  "slack_posted_threads",
+  {
+    channel: text("channel").notNull(),
+    threadTs: text("thread_ts").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.channel, t.threadTs] }), index("slack_posted_threads_expires_idx").on(t.expiresAt)],
 );
 
 export type ChannelKind = "slack" | "telegram" | "teams" | "whatsapp" | "sms";
