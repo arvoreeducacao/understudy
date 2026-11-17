@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { secretPassword, secretRegion } from "./password";
+import { rdsIamPassword, secretPassword, secretRegion } from "./password";
 
 const credentials = async () => ({ accessKeyId: "AKIDEXAMPLE", secretAccessKey: "example-secret", sessionToken: "example-token" });
 const arn = "arn:aws:secretsmanager:sa-east-1:123456789012:secret:rds!db-example";
@@ -65,4 +65,35 @@ test("a failed lookup is not cached", async () => {
 test("the region comes from the secret ARN when there is one", () => {
   assert.equal(secretRegion(arn, "us-east-1"), "sa-east-1");
   assert.equal(secretRegion("my-db-secret", "us-east-1"), "us-east-1");
+});
+
+test("builds an RDS IAM auth token presigned for rds-db connect, valid for 15 minutes", async () => {
+  const password = rdsIamPassword({ host: "db.example.us-east-1.rds.amazonaws.com", port: 5432, user: "app_user", region: "us-east-1", credentials });
+  const token = await password();
+  assert.ok(token.startsWith("db.example.us-east-1.rds.amazonaws.com:5432/?"));
+  const params = new URL(`https://${token}`).searchParams;
+  assert.equal(params.get("Action"), "connect");
+  assert.equal(params.get("DBUser"), "app_user");
+  assert.equal(params.get("X-Amz-Expires"), "900");
+  assert.equal(params.get("X-Amz-Algorithm"), "AWS4-HMAC-SHA256");
+  assert.match(params.get("X-Amz-Credential") ?? "", /^AKIDEXAMPLE\/\d{8}\/us-east-1\/rds-db\/aws4_request$/);
+  assert.equal(params.get("X-Amz-Security-Token"), "example-token");
+  assert.ok(params.get("X-Amz-Signature"));
+});
+
+test("reuses the RDS token for ten minutes, then signs a new one", async () => {
+  let clock = 0;
+  let calls = 0;
+  const counted = async () => {
+    calls += 1;
+    return credentials();
+  };
+  const password = rdsIamPassword({ host: "db.example", port: 5432, user: "app_user", region: "us-east-1", credentials: counted, now: () => clock });
+  await password();
+  clock = 9 * 60 * 1000;
+  await password();
+  assert.equal(calls, 1);
+  clock = 11 * 60 * 1000;
+  await password();
+  assert.equal(calls, 2);
 });
