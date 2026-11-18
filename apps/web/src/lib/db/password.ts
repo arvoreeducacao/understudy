@@ -2,6 +2,7 @@ import { AwsClient } from "aws4fetch";
 import { type AwsCredentials, awsCredentials } from "@/server/inbound-email/aws";
 
 const FRESH_MS = 60 * 1000;
+const RDS_TOKEN_FRESH_MS = 10 * 60 * 1000;
 
 type Fetcher = typeof fetch;
 
@@ -41,6 +42,41 @@ export function secretPassword({ secretId, region, credentials = awsCredentials,
 
   return async () => {
     if (cached && now() - cached.at < FRESH_MS) return cached.value;
+    pending ??= load().finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
+}
+
+export type RdsIamPasswordOptions = {
+  host: string;
+  port: number;
+  user: string;
+  region: string;
+  credentials?: () => Promise<AwsCredentials>;
+  now?: () => number;
+};
+
+export function rdsIamPassword({ host, port, user, region, credentials = awsCredentials, now = () => Date.now() }: RdsIamPasswordOptions) {
+  let cached: { value: string; at: number } | null = null;
+  let pending: Promise<string> | null = null;
+
+  const load = async () => {
+    const creds = await credentials();
+    const client = new AwsClient({ accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey, sessionToken: creds.sessionToken, region, service: "rds-db" });
+    const url = new URL(`https://${host}:${port}/`);
+    url.searchParams.set("Action", "connect");
+    url.searchParams.set("DBUser", user);
+    url.searchParams.set("X-Amz-Expires", "900");
+    const signed = await client.sign(url.toString(), { method: "GET", aws: { signQuery: true } });
+    const value = signed.url.replace(/^https:\/\//, "");
+    cached = { value, at: now() };
+    return value;
+  };
+
+  return async () => {
+    if (cached && now() - cached.at < RDS_TOKEN_FRESH_MS) return cached.value;
     pending ??= load().finally(() => {
       pending = null;
     });
